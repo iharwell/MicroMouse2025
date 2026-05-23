@@ -34,10 +34,6 @@
 #include <utility>
 #include <vector>
 
-namespace
-{
-    using CommandVector = MazeMap::App::Internal::CommandVector;
-
     constexpr double kTickSecondsExact = 0.001;
     constexpr float kTickSeconds = static_cast<float>(kTickSecondsExact);
     constexpr float kFanDuty = 0.80f;
@@ -80,7 +76,7 @@ namespace
     constexpr float kSmoothManeuverVelocityVariationLimit = 0.05f;
     constexpr float kSmoothManeuverYawAccelerationVariationLimit = 0.20f;
     constexpr float kSmoothManeuverYawRateVariationLimit = 0.08f;
-    constexpr float kManeuverOmegaMagnitudeEpsilonRadps = 1.0e-4f;
+    constexpr float kManeuverYawRateMagnitudeEpsilonRadps = 1.0e-4f;
     constexpr float kManeuverTurnPlateauFraction = 0.95f;
     constexpr std::size_t kManeuverRampDeltaTrimSamples = 5U;
 
@@ -102,8 +98,9 @@ namespace
         Count
     };
 
-    struct GainSet
+    class GainSet
     {
+    public:
         float velocityKp = 0.0f;
         float velocityKd = 0.0f;
         float headingKp = 0.0f;
@@ -112,8 +109,9 @@ namespace
         float yawRateKd = 0.0f;
     };
 
-    struct ScenarioSpec
+    class ScenarioSpec
     {
+    public:
         const char* name = "";
         const char* description = "";
         SignalKind signal = SignalKind::ForwardVelocity;
@@ -129,14 +127,16 @@ namespace
         float targetYawRad = std::numeric_limits<float>::quiet_NaN();
     };
 
-    struct WheelObservationState
+    class WheelObservationState
     {
+    public:
         float leftDistanceM = 0.0f;
         float rightDistanceM = 0.0f;
     };
 
-    struct ScopedFanDuty final
+    class ScopedFanDuty final
     {
+    public:
         ScopedFanDuty(MazeMap::Vehicle& vehicle, float duty) noexcept
             : target(vehicle)
             , previous(vehicle.GetFanDuty())
@@ -153,8 +153,9 @@ namespace
         float previous = 0.0f;
     };
 
-    struct ScenarioMetrics
+    class ScenarioMetrics
     {
+    public:
         std::string name;
         std::string description;
         std::string signal;
@@ -225,8 +226,9 @@ namespace
         double score = 0.0;
     };
 
-    struct AcceptanceMetrics
+    class AcceptanceMetrics
     {
+    public:
         std::string name;
         std::string description;
         std::string path;
@@ -272,15 +274,17 @@ namespace
         double scorePenalty = 0.0;
     };
 
-    struct AcceptanceCommandSample
+    class AcceptanceCommandSample
     {
+    public:
         float timeSeconds = 0.0f;
         float linearCommandMps = 0.0f;
         float angularCommandRadps = 0.0f;
     };
 
-    struct ManeuverAcceptanceTrace
+    class ManeuverAcceptanceTrace
     {
+    public:
         bool started = false;
         bool completed = false;
         bool allControlsFinite = true;
@@ -297,8 +301,9 @@ namespace
         std::vector<AcceptanceCommandSample> samples;
     };
 
-    struct EvaluationResult
+    class EvaluationResult
     {
+    public:
         GainSet gains{};
         std::vector<ScenarioMetrics> scenarios;
         std::vector<AcceptanceMetrics> acceptanceScenarios;
@@ -308,8 +313,9 @@ namespace
         bool acceptanceBlocked = false;
     };
 
-    struct Options
+    class Options
     {
+    public:
         GainSet candidate{};
         bool hasExplicitCandidate = false;
         bool runSearch = false;
@@ -318,13 +324,14 @@ namespace
         std::size_t topCandidateCount = kDefaultTopCandidateCount;
     };
 
-    struct SearchRange
+    class SearchRange
     {
+    public:
         float minimum = 0.0f;
         float maximum = 0.0f;
     };
 
-    const char* GainName(GainIndex index) noexcept
+    static const char* GainName(GainIndex index) noexcept
     {
         switch (index)
         {
@@ -346,7 +353,7 @@ namespace
         }
     }
 
-    const char* SignalName(SignalKind signal) noexcept
+    static const char* SignalName(SignalKind signal) noexcept
     {
         switch (signal)
         {
@@ -361,12 +368,12 @@ namespace
         }
     }
 
-    float QuietNaN() noexcept
+    static float QuietNaN() noexcept
     {
         return std::numeric_limits<float>::quiet_NaN();
     }
 
-    bool ParseFloatText(const std::string& text, float& value) noexcept
+    static bool ParseFloatText(const std::string& text, float& value) noexcept
     {
         char* end = nullptr;
         errno = 0;
@@ -380,7 +387,7 @@ namespace
         return std::isfinite(value);
     }
 
-    bool ParseSizeText(const std::string& text, std::size_t& value) noexcept
+    static bool ParseSizeText(const std::string& text, std::size_t& value) noexcept
     {
         char* end = nullptr;
         errno = 0;
@@ -394,7 +401,7 @@ namespace
         return true;
     }
 
-    bool ReadOptionValue(int argc, char* argv[], int& index, const std::string& option, std::string& value, std::string& error)
+    static bool ReadOptionValue(int argc, char* argv[], int& index, const std::string& option, std::string& value, std::string& error)
     {
         const std::string arg = argv[index];
         const std::string prefix = option + "=";
@@ -419,7 +426,7 @@ namespace
         return false;
     }
 
-    bool ApplyGainOption(const std::string& name, float value, GainSet& gains) noexcept
+    static bool ApplyGainOption(const std::string& name, float value, GainSet& gains) noexcept
     {
         if ((name == "--velocity-kp") || (name == "--vel-kp"))
         {
@@ -454,7 +461,7 @@ namespace
         return false;
     }
 
-    void PrintUsage()
+    static void PrintUsage()
     {
         std::cout
             << "PdTuning evaluates DriveBase PDCluster candidates against the current C++ PlantModel.\n\n"
@@ -468,7 +475,7 @@ namespace
             << "Stdout is JSON. Errors and this help text are not part of optimizer output.\n";
     }
 
-    GainSet ExtractTunedGains(const MazeMap::PDCluster& cluster) noexcept
+    static GainSet ExtractTunedGains(const MazeMap::PDCluster& cluster) noexcept
     {
         GainSet gains{};
         gains.velocityKp = cluster.VelocityStatePD.GetProportionalGain();
@@ -480,7 +487,7 @@ namespace
         return gains;
     }
 
-    MazeMap::PDCluster BuildCandidateCluster(const GainSet& gains) noexcept
+    static MazeMap::PDCluster BuildCandidateCluster(const GainSet& gains) noexcept
     {
         MazeMap::PDCluster cluster = MazeMap::Config::kDriveBasePDCluster;
         cluster.VelocityStatePD = MazeMap::ProportionalDerivative(gains.velocityKp, gains.velocityKd);
@@ -489,7 +496,7 @@ namespace
         return cluster;
     }
 
-    void RebuildRuntimeDriveBaseForCandidate(
+    static void RebuildRuntimeDriveBaseForCandidate(
         MazeMap::App::Internal::SharedRobotRuntime& runtime,
         const MazeMap::PDCluster& cluster) noexcept
     {
@@ -501,7 +508,7 @@ namespace
         runtime.DriveBase().ClearCommandEvidence();
     }
 
-    MotionLimits MakePrimitiveLimits() noexcept
+    static MotionLimits MakePrimitiveLimits() noexcept
     {
         MotionLimits limits{};
         limits.SetMaxSpeedMps(0.35f);
@@ -513,7 +520,7 @@ namespace
         return limits;
     }
 
-    float GetGain(const GainSet& gains, GainIndex index) noexcept
+    static float GetGain(const GainSet& gains, GainIndex index) noexcept
     {
         switch (index)
         {
@@ -535,7 +542,7 @@ namespace
         }
     }
 
-    void SetGain(GainSet& gains, GainIndex index, float value) noexcept
+    static void SetGain(GainSet& gains, GainIndex index, float value) noexcept
     {
         value = std::isfinite(value) ? (std::max)(0.0f, value) : 0.0f;
         switch (index)
@@ -596,7 +603,7 @@ namespace
         return spec;
     }
 
-    std::array<ScenarioSpec, 7> BuildScenarioSpecs() noexcept
+    static std::array<ScenarioSpec, 7> BuildScenarioSpecs() noexcept
     {
         return {{
             MakeScenarioSpec(
@@ -700,7 +707,7 @@ namespace
         }};
     }
 
-    float ScenarioTarget(const ScenarioSpec& spec) noexcept
+    static float ScenarioTarget(const ScenarioSpec& spec) noexcept
     {
         switch (spec.signal)
         {
@@ -715,7 +722,7 @@ namespace
         }
     }
 
-    float ScenarioInitial(const ScenarioSpec& spec) noexcept
+    static float ScenarioInitial(const ScenarioSpec& spec) noexcept
     {
         switch (spec.signal)
         {
@@ -730,7 +737,7 @@ namespace
         }
     }
 
-    float ScenarioScale(const ScenarioSpec& spec) noexcept
+    static float ScenarioScale(const ScenarioSpec& spec) noexcept
     {
         const float target = ScenarioTarget(spec);
         const float initial = ScenarioInitial(spec);
@@ -740,7 +747,7 @@ namespace
         return (std::max)(excursion, 1.0e-6f);
     }
 
-    float TargetKinematicLateralAccelMps2(const ScenarioSpec& spec) noexcept
+    static float TargetKinematicLateralAccelMps2(const ScenarioSpec& spec) noexcept
     {
         return
             (std::isfinite(spec.targetForwardMps) && std::isfinite(spec.targetYawRateRadps)) ?
@@ -748,7 +755,7 @@ namespace
             QuietNaN();
     }
 
-    bool HasLinearStepTransition(float initial, float target) noexcept
+    static bool HasLinearStepTransition(float initial, float target) noexcept
     {
         return
             std::isfinite(initial) &&
@@ -756,33 +763,31 @@ namespace
             (std::fabs(target - initial) > kStepTransitionEpsilon);
     }
 
-    bool HasHeadingStepTransition(float initialYawRad, float targetYawRad) noexcept
+    static bool HasHeadingStepTransition(float initialYawRad, float targetYawRad) noexcept
     {
         return
             std::isfinite(initialYawRad) &&
             std::isfinite(targetYawRad) &&
-            (std::fabs(MazeMap::VehicleState::NormalizeAngle(targetYawRad - initialYawRad)) > kStepTransitionEpsilon);
+            (std::fabs(NormalizeAngle(targetYawRad - initialYawRad)) > kStepTransitionEpsilon);
     }
 
-    bool HasActiveForwardAccelerationObjective(const DriveTelemetry& telemetry) noexcept
+    static bool HasActiveForwardAccelerationObjective(const DriveTelemetry& telemetry) noexcept
     {
         const bool hasVelocityFeedback =
             (telemetry.feedbackBranchFlags & DriveTelemetry::kFeedbackForwardVelocityInactive) == 0U;
-        const bool hasRequestedAccel =
-            (telemetry.scalarIntentFlags & DriveTelemetry::kScalarForwardAccelFinite) != 0U;
+        const bool hasRequestedAccel = std::isfinite(telemetry.requestedForwardAccelMps2);
         return
             std::isfinite(telemetry.composedForwardAccelMps2) &&
             (hasVelocityFeedback || hasRequestedAccel);
     }
 
-    bool HasActiveYawAccelerationObjective(const DriveTelemetry& telemetry) noexcept
+    static bool HasActiveYawAccelerationObjective(const DriveTelemetry& telemetry) noexcept
     {
         const bool hasYawRateFeedback =
             (telemetry.feedbackBranchFlags & DriveTelemetry::kFeedbackYawRateInactive) == 0U;
         const bool hasHeadingFeedback =
             (telemetry.feedbackBranchFlags & DriveTelemetry::kFeedbackHeadingInactive) == 0U;
-        const bool hasRequestedAccel =
-            (telemetry.scalarIntentFlags & DriveTelemetry::kScalarYawAccelFinite) != 0U;
+        const bool hasRequestedAccel = std::isfinite(telemetry.requestedYawAccelRadps2);
         return
             std::isfinite(telemetry.composedYawAccelRadps2) &&
             (hasYawRateFeedback || hasHeadingFeedback || hasRequestedAccel);
@@ -808,7 +813,7 @@ namespace
         return "inactive_or_nonfinite_objective_fallback";
     }
 
-    double AxisStepScale(float initial, float target, float tolerance) noexcept
+    static double AxisStepScale(float initial, float target, float tolerance) noexcept
     {
         const double excursion =
             (std::isfinite(initial) && std::isfinite(target)) ?
@@ -821,7 +826,7 @@ namespace
         return (std::max)((std::max)(excursion, targetMagnitude), (std::max)(toleranceScale, 1.0e-6));
     }
 
-    double RmsOrZero(double rms, double scale) noexcept
+    static double RmsOrZero(double rms, double scale) noexcept
     {
         if (!std::isfinite(rms) || !std::isfinite(scale) || (scale <= 0.0))
         {
@@ -830,13 +835,13 @@ namespace
         return rms / scale;
     }
 
-    double AccelerationRmsScale(double objectiveRms, double fallbackScale) noexcept
+    static double AccelerationRmsScale(double objectiveRms, double fallbackScale) noexcept
     {
         const double objectiveScale = std::isfinite(objectiveRms) ? objectiveRms : 0.0;
         return (std::max)((std::max)(objectiveScale, fallbackScale), 1.0e-6);
     }
 
-    int ErrorSign(float error, float deadband) noexcept
+    static int ErrorSign(float error, float deadband) noexcept
     {
         if (!std::isfinite(error))
         {
@@ -853,65 +858,65 @@ namespace
         return 0;
     }
 
-    bool VehicleStateIsFinite(const MazeMap::VehicleState& state) noexcept
+    static bool VehicleStateIsFinite(const MazeMap::VehicleState& state) noexcept
     {
         return
             std::isfinite(state.GetPositionX()) &&
             std::isfinite(state.GetPositionY()) &&
-            std::isfinite(state.GetOrientation()) &&
-            std::isfinite(state.GetVelocity()) &&
-            std::isfinite(state.GetLateralVelocity()) &&
-            std::isfinite(state.GetRotationalVelocity()) &&
+            std::isfinite(state.GetHeading()) &&
+            std::isfinite(state.GetForwardVelocity()) &&
+            std::isfinite(state.GetRightwardVelocity()) &&
+            std::isfinite(state.GetYawRate()) &&
             std::isfinite(state.GetWheelSpeedLeft()) &&
             std::isfinite(state.GetWheelSpeedRight()) &&
             std::isfinite(state.GetGyroBiasZ());
     }
 
-    float SignalValue(const MazeMap::VehicleState& state, SignalKind signal) noexcept
+    static float SignalValue(const MazeMap::VehicleState& state, SignalKind signal) noexcept
     {
         switch (signal)
         {
         case SignalKind::ForwardVelocity:
-            return state.GetVelocity();
+            return state.GetForwardVelocity();
         case SignalKind::YawRate:
-            return state.GetRotationalVelocity();
+            return state.GetYawRate();
         case SignalKind::Heading:
-            return state.GetOrientation();
+            return state.GetHeading();
         default:
             return 0.0f;
         }
     }
 
-    float SignalError(const ScenarioSpec& spec, const MazeMap::VehicleState& state) noexcept
+    static float SignalError(const ScenarioSpec& spec, const MazeMap::VehicleState& state) noexcept
     {
         const float target = ScenarioTarget(spec);
         const float value = SignalValue(state, spec.signal);
         if (spec.signal == SignalKind::Heading)
         {
-            return MazeMap::VehicleState::NormalizeAngle(target - value);
+            return NormalizeAngle(target - value);
         }
         return target - value;
     }
 
-    MazeMap::VehicleState BuildInitialState(const ScenarioSpec& spec) noexcept
+    static MazeMap::VehicleState BuildInitialState(const ScenarioSpec& spec) noexcept
     {
         MazeMap::VehicleState state{};
-        state.SetOrientation(spec.initialYawRad);
-        state.SetVelocity(spec.initialForwardMps);
-        state.SetRotationalVelocity(spec.initialYawRateRadps);
-        float leftOmegaRadps = 0.0f;
-        float rightOmegaRadps = 0.0f;
-        MazeMap::Vehicle::WheelOmegasFromBodyVelocity(
+        state.SetHeading(spec.initialYawRad);
+        state.SetForwardVelocity(spec.initialForwardMps);
+        state.SetYawRate(spec.initialYawRateRadps);
+        float leftWheelSpeedRadps = 0.0f;
+        float rightWheelSpeedRadps = 0.0f;
+        MazeMap::Vehicle::WheelSpeedsFromBodyVelocity(
             spec.initialForwardMps,
             spec.initialYawRateRadps,
-            leftOmegaRadps,
-            rightOmegaRadps);
-        state.SetWheelSpeedLeft(leftOmegaRadps);
-        state.SetWheelSpeedRight(rightOmegaRadps);
+            leftWheelSpeedRadps,
+            rightWheelSpeedRadps);
+        state.SetWheelSpeedLeft(leftWheelSpeedRadps);
+        state.SetWheelSpeedRight(rightWheelSpeedRadps);
         return state;
     }
 
-    void PublishTruthToRuntime(
+    static void PublishTruthToRuntime(
         MazeMap::VehicleState& runtimeState,
         const MazeMap::VehicleState& truth,
         const WheelObservationState& wheels,
@@ -921,31 +926,30 @@ namespace
         bool advanceTime) noexcept
     {
         SensorSnapshot snapshot{};
-        snapshot.gyroRawRadps = truth.GetRotationalVelocity();
-        snapshot.gyroRadps = truth.GetRotationalVelocity();
-        snapshot.encoderObservationValid = true;
-        snapshot.leftEncoderDistanceM = wheels.leftDistanceM;
-        snapshot.rightEncoderDistanceM = wheels.rightDistanceM;
-        snapshot.encoderObservation.leftDistanceDeltaM = leftDistanceDeltaM;
-        snapshot.encoderObservation.rightDistanceDeltaM = rightDistanceDeltaM;
-        snapshot.encoderObservation.leftVelocityMps =
-            MazeMap::Vehicle::WheelLinearVelocityFromOmega(truth.GetWheelSpeedLeft());
-        snapshot.encoderObservation.rightVelocityMps =
-            MazeMap::Vehicle::WheelLinearVelocityFromOmega(truth.GetWheelSpeedRight());
-        snapshot.encoderObservation.omegaLeftRadps = truth.GetWheelSpeedLeft();
-        snapshot.encoderObservation.omegaRightRadps = truth.GetWheelSpeedRight();
+        snapshot.SetRawYawRateRadps(truth.GetYawRate());
+        snapshot.SetYawRateRadps(truth.GetYawRate());
+        snapshot.SetEncoderObservationValid(true);
+        snapshot.SetEncoderDistancesM(wheels.leftDistanceM, wheels.rightDistanceM);
+        MazeMap::EncoderObs encoderObservation{};
+        encoderObservation.SetLeftDistanceDeltaM(leftDistanceDeltaM);
+        encoderObservation.SetRightDistanceDeltaM(rightDistanceDeltaM);
+        encoderObservation.SetLeftVelocityMps(MazeMap::Vehicle::WheelLinearVelocityFromWheelSpeed(truth.GetWheelSpeedLeft()));
+        encoderObservation.SetRightVelocityMps(MazeMap::Vehicle::WheelLinearVelocityFromWheelSpeed(truth.GetWheelSpeedRight()));
+        encoderObservation.SetLeftWheelSpeedRadps(truth.GetWheelSpeedLeft());
+        encoderObservation.SetRightWheelSpeedRadps(truth.GetWheelSpeedRight());
+        snapshot.SetEncoderObservation(encoderObservation);
 
         runtimeState.SetPosition(truth.GetPosition());
-        runtimeState.SetOrientation(truth.GetOrientation());
-        runtimeState.SetVelocity(truth.GetVelocity());
-        runtimeState.SetLateralVelocity(truth.GetLateralVelocity());
-        runtimeState.SetRotationalVelocity(truth.GetRotationalVelocity());
+        runtimeState.SetHeading(truth.GetHeading());
+        runtimeState.SetForwardVelocity(truth.GetForwardVelocity());
+        runtimeState.SetRightwardVelocity(truth.GetRightwardVelocity());
+        runtimeState.SetYawRate(truth.GetYawRate());
         runtimeState.SetWheelSpeedLeft(truth.GetWheelSpeedLeft());
         runtimeState.SetWheelSpeedRight(truth.GetWheelSpeedRight());
         runtimeState.SetGyroBiasZ(truth.GetGyroBiasZ());
-        runtimeState.SetLongitudinalAcceleration(0.0f);
-        runtimeState.SetLateralAcceleration(0.0f);
-        runtimeState.SetYawAcceleration(0.0f);
+        runtimeState.SetForwardAcceleration(0.0f);
+        runtimeState.SetRightAcceleration(0.0f);
+        runtimeState.SetYawAccel(0.0f);
         if (advanceTime)
         {
             runtimeState.SetTime(runtimeState.GetTime() + dtSeconds);
@@ -954,11 +958,11 @@ namespace
         runtimeState.SetSensorSnapshot(snapshot);
     }
 
-    bool AdvanceTruth(
+    static bool AdvanceTruth(
         MazeMap::PlantModel& plant,
         MazeMap::VehicleState& runtimeState,
         WheelObservationState& wheels,
-        const CommandVector& control) noexcept
+        const MazeMap::App::Internal::CommandVector& control) noexcept
     {
         const float previousLeftWheelSpeedRadps = runtimeState.GetWheelSpeedLeft();
         const float previousRightWheelSpeedRadps = runtimeState.GetWheelSpeedRight();
@@ -980,32 +984,32 @@ namespace
         return VehicleStateIsFinite(runtimeState);
     }
 
-    MazeMap::VehicleState BuildAcceptanceTruthState(
+    static MazeMap::VehicleState BuildAcceptanceTruthState(
         const float forwardMps,
         const float yawRad) noexcept
     {
         MazeMap::VehicleState state{};
-        state.SetOrientation(yawRad);
-        state.SetVelocity(forwardMps);
-        state.SetWheelSpeedLeft(MazeMap::Vehicle::WheelOmegaFromLinearVelocity(forwardMps));
-        state.SetWheelSpeedRight(MazeMap::Vehicle::WheelOmegaFromLinearVelocity(forwardMps));
+        state.SetHeading(yawRad);
+        state.SetForwardVelocity(forwardMps);
+        state.SetWheelSpeedLeft(MazeMap::Vehicle::WheelSpeedFromLinearVelocity(forwardMps));
+        state.SetWheelSpeedRight(MazeMap::Vehicle::WheelSpeedFromLinearVelocity(forwardMps));
         return state;
     }
 
-    float AverageEncoderDistanceM(const WheelObservationState& wheels) noexcept
+    static float AverageEncoderDistanceM(const WheelObservationState& wheels) noexcept
     {
         return 0.5f * (wheels.leftDistanceM + wheels.rightDistanceM);
     }
 
-    SensorSnapshot BuildDriveManeuverSensorSnapshot(const float yawRateRadps = 0.0f) noexcept
+    static SensorSnapshot BuildDriveManeuverSensorSnapshot(const float yawRateRadps = 0.0f) noexcept
     {
         SensorSnapshot snapshot{};
-        snapshot.gyroRawRadps = yawRateRadps;
-        snapshot.gyroRadps = yawRateRadps;
+        snapshot.SetRawYawRateRadps(yawRateRadps);
+        snapshot.SetYawRateRadps(yawRateRadps);
         return snapshot;
     }
 
-    int32_t ConsumeWholeEncoderCounts(const float deltaCounts, float& remainderCounts) noexcept
+    static int32_t ConsumeWholeEncoderCounts(const float deltaCounts, float& remainderCounts) noexcept
     {
         remainderCounts += deltaCounts;
         const int32_t wholeCounts =
@@ -1016,7 +1020,7 @@ namespace
         return wholeCounts;
     }
 
-    bool ApplyEncoderObservation(
+    static bool ApplyEncoderObservation(
         MazeMap::App::Internal::SharedRobotRuntime& runtime,
         const float leftDistanceDeltaM,
         const float rightDistanceDeltaM,
@@ -1024,7 +1028,7 @@ namespace
         float& leftEncoderRemainderCounts,
         float& rightEncoderRemainderCounts,
         const float dtSeconds,
-        const CommandVector& appliedControl)
+        const MazeMap::App::Internal::CommandVector& appliedControl)
     {
         const float distancePerCountM = MazeMap::Vehicle::DriveEncoderDistanceFromCounts(1);
         const int32_t leftCounts =
@@ -1034,31 +1038,28 @@ namespace
 
         MazeMap::VehicleState& runtimeState = runtime.RuntimeState();
         SensorSnapshot snapshot = BuildDriveManeuverSensorSnapshot(yawRateRadps);
-        snapshot.encoderObservation.totalLeftCounts = leftCounts;
-        snapshot.encoderObservation.totalRightCounts = rightCounts;
-        snapshot.encoderObservation.leftDistanceDeltaM = static_cast<float>(leftCounts) * distancePerCountM;
-        snapshot.encoderObservation.rightDistanceDeltaM = static_cast<float>(rightCounts) * distancePerCountM;
+        MazeMap::EncoderObs encoderObservation = snapshot.EncoderObservation();
+        encoderObservation.SetTotalLeftCounts(leftCounts);
+        encoderObservation.SetTotalRightCounts(rightCounts);
+        encoderObservation.SetLeftDistanceDeltaM(static_cast<float>(leftCounts) * distancePerCountM);
+        encoderObservation.SetRightDistanceDeltaM(static_cast<float>(rightCounts) * distancePerCountM);
         if ((dtSeconds > 0.0f) && std::isfinite(dtSeconds))
         {
             const float invDtSeconds = 1.0f / dtSeconds;
-            snapshot.encoderObservation.leftVelocityMps =
-                snapshot.encoderObservation.leftDistanceDeltaM * invDtSeconds;
-            snapshot.encoderObservation.rightVelocityMps =
-                snapshot.encoderObservation.rightDistanceDeltaM * invDtSeconds;
-            snapshot.encoderObservation.omegaLeftRadps =
-                MazeMap::Vehicle::WheelOmegaFromLinearVelocity(snapshot.encoderObservation.leftVelocityMps);
-            snapshot.encoderObservation.omegaRightRadps =
-                MazeMap::Vehicle::WheelOmegaFromLinearVelocity(snapshot.encoderObservation.rightVelocityMps);
+            encoderObservation.SetLeftVelocityMps(encoderObservation.LeftDistanceDeltaM() * invDtSeconds);
+            encoderObservation.SetRightVelocityMps(encoderObservation.RightDistanceDeltaM() * invDtSeconds);
+            encoderObservation.SetLeftWheelSpeedRadps(MazeMap::Vehicle::WheelSpeedFromLinearVelocity(encoderObservation.LeftVelocityMps()));
+            encoderObservation.SetRightWheelSpeedRadps(MazeMap::Vehicle::WheelSpeedFromLinearVelocity(encoderObservation.RightVelocityMps()));
         }
-        snapshot.encoderObservationValid = true;
-        snapshot.leftEncoderTotalCounts =
-            runtimeState.GetSensorSnapshot().leftEncoderTotalCounts + static_cast<std::int64_t>(leftCounts);
-        snapshot.rightEncoderTotalCounts =
-            runtimeState.GetSensorSnapshot().rightEncoderTotalCounts + static_cast<std::int64_t>(rightCounts);
-        snapshot.leftEncoderDistanceM =
-            MazeMap::Vehicle::DriveEncoderDistanceFromCounts(snapshot.leftEncoderTotalCounts);
-        snapshot.rightEncoderDistanceM =
-            MazeMap::Vehicle::DriveEncoderDistanceFromCounts(snapshot.rightEncoderTotalCounts);
+        snapshot.SetEncoderObservation(encoderObservation, true);
+        const std::int64_t leftEncoderTotalCounts =
+            runtimeState.GetSensorSnapshot().LeftEncoderTotalCounts() + static_cast<std::int64_t>(leftCounts);
+        const std::int64_t rightEncoderTotalCounts =
+            runtimeState.GetSensorSnapshot().RightEncoderTotalCounts() + static_cast<std::int64_t>(rightCounts);
+        snapshot.SetEncoderTotals(leftEncoderTotalCounts, rightEncoderTotalCounts);
+        snapshot.SetEncoderDistancesM(
+            MazeMap::Vehicle::DriveEncoderDistanceFromCounts(leftEncoderTotalCounts),
+            MazeMap::Vehicle::DriveEncoderDistanceFromCounts(rightEncoderTotalCounts));
 
         runtimeState.SetSensorSnapshot(snapshot);
         if (std::isfinite(dtSeconds) && (dtSeconds > 0.0f))
@@ -1080,15 +1081,14 @@ namespace
             return false;
         }
 
-        if (snapshot.encoderObservationValid)
+        if (snapshot.EncoderObservationValid())
         {
-            (void)estimator.updateEncoderPair(snapshot.encoderObservation, dtSeconds, false);
+            (void)estimator.updateEncoderPair(snapshot.EncoderObservation(), dtSeconds, false);
         }
 
-        if (std::isfinite(snapshot.gyroRawRadps))
+        if (std::isfinite(snapshot.RawYawRateRadps()))
         {
-            const MazeMap::MeasurementUpdateResult yawUpdate = estimator.updateYawRate(snapshot.gyroRawRadps);
-            if (!yawUpdate.accepted)
+            if (!estimator.updateYawRate(snapshot.RawYawRateRadps()))
             {
                 return false;
             }
@@ -1099,7 +1099,7 @@ namespace
         return !estimator.HasFault();
     }
 
-    void PrimeDriveForSmoothEntry(
+    static void PrimeDriveForSmoothEntry(
         MazeMap::App::Internal::SharedRobotRuntime& runtime,
         MazeMap::VehicleState& truth,
         float& leftEncoderRemainderCounts,
@@ -1121,9 +1121,9 @@ namespace
 
         (void)runtime.Estimator().ResetPose(0.0f, -projectedForwardDistanceM, 0.0f);
         MazeMap::VehicleState& runtimeState = runtime.RuntimeState();
-        runtimeState.SetVelocity(kSmoothManeuverEntrySpeedMps);
-        runtimeState.SetWheelSpeedLeft(MazeMap::Vehicle::WheelOmegaFromLinearVelocity(kSmoothManeuverEntrySpeedMps));
-        runtimeState.SetWheelSpeedRight(MazeMap::Vehicle::WheelOmegaFromLinearVelocity(kSmoothManeuverEntrySpeedMps));
+        runtimeState.SetForwardVelocity(kSmoothManeuverEntrySpeedMps);
+        runtimeState.SetWheelSpeedLeft(MazeMap::Vehicle::WheelSpeedFromLinearVelocity(kSmoothManeuverEntrySpeedMps));
+        runtimeState.SetWheelSpeedRight(MazeMap::Vehicle::WheelSpeedFromLinearVelocity(kSmoothManeuverEntrySpeedMps));
         (void)ApplyEncoderObservation(
             runtime,
             kSmoothManeuverEntrySpeedMps * kTickSeconds,
@@ -1132,16 +1132,16 @@ namespace
             leftEncoderRemainderCounts,
             rightEncoderRemainderCounts,
             kTickSeconds,
-            CommandVector::Brake());
+            MazeMap::App::Internal::CommandVector::Brake());
     }
 
-    bool AdvanceRuntimeDriveCycle(
+    static bool AdvanceRuntimeDriveCycle(
         MazeMap::App::Internal::SharedRobotRuntime& runtime,
         MazeMap::PlantModel& truthPlant,
         MazeMap::VehicleState& truth,
         float& leftEncoderRemainderCounts,
         float& rightEncoderRemainderCounts,
-        const CommandVector& control)
+        const MazeMap::App::Internal::CommandVector& control)
     {
         const float previousLeftWheelSpeedRadps = truth.GetWheelSpeedLeft();
         const float previousRightWheelSpeedRadps = truth.GetWheelSpeedRight();
@@ -1162,16 +1162,16 @@ namespace
             runtime,
             leftDistanceDeltaM,
             rightDistanceDeltaM,
-            truth.GetRotationalVelocity(),
+            truth.GetYawRate(),
             leftEncoderRemainderCounts,
             rightEncoderRemainderCounts,
             kTickSeconds,
             control);
     }
 
-    void RecordAcceptanceTelemetry(
+    static void RecordAcceptanceTelemetry(
         AcceptanceMetrics& metrics,
-        const CommandVector& control,
+        const MazeMap::App::Internal::CommandVector& control,
         const DriveTelemetry& telemetry) noexcept
     {
         metrics.allControlsFinite = metrics.allControlsFinite && control.IsFinite();
@@ -1189,8 +1189,10 @@ namespace
             std::isfinite(telemetry.requestedForwardAccelMps2) &&
             std::isfinite(telemetry.requestedYawAccelRadps2) &&
             std::isfinite(telemetry.requestedYawRad);
-        metrics.solverClean = metrics.solverClean && (telemetry.solverFailureFlags == 0U);
-        if (telemetry.solverFailureFlags != 0U)
+        metrics.solverClean =
+            metrics.solverClean &&
+            ((telemetry.commandKindFlags & DriveTelemetry::kCommandKindSolverFailureEvidence) == 0U);
+        if ((telemetry.commandKindFlags & DriveTelemetry::kCommandKindSolverFailureEvidence) != 0U)
         {
             ++metrics.solverFailureCount;
         }
@@ -1200,7 +1202,7 @@ namespace
         }
     }
 
-    void CaptureAcceptanceFinalState(
+    static void CaptureAcceptanceFinalState(
         AcceptanceMetrics& metrics,
         const MazeMap::VehicleState& truth,
         const WheelObservationState& wheels) noexcept
@@ -1214,11 +1216,11 @@ namespace
         metrics.encoderAverageDistanceM = AverageEncoderDistanceM(wheels);
         metrics.finalXM = truth.GetPositionX();
         metrics.finalYM = truth.GetPositionY();
-        metrics.finalYawRad = truth.GetOrientation();
+        metrics.finalYawRad = truth.GetHeading();
         metrics.elapsedSeconds = static_cast<float>(metrics.appliedTicks) * kTickSeconds;
     }
 
-    double ComputeNormalizedMetricScore(
+    static double ComputeNormalizedMetricScore(
         const float value,
         const float limit,
         const double weight) noexcept
@@ -1239,7 +1241,7 @@ namespace
         return baseScore + (9.0 * weight * excess * excess);
     }
 
-    double ComputeCompletionScore(const AcceptanceMetrics& metrics) noexcept
+    static double ComputeCompletionScore(const AcceptanceMetrics& metrics) noexcept
     {
         if (metrics.completed && (metrics.appliedTicks > 0))
         {
@@ -1253,7 +1255,7 @@ namespace
         return kAcceptanceCompletionScoreWeight * (2.0 - (std::min)(progress, 1.0));
     }
 
-    double ComputeCommandEvidenceScore(const AcceptanceMetrics& metrics) noexcept
+    static double ComputeCommandEvidenceScore(const AcceptanceMetrics& metrics) noexcept
     {
         double score = 0.0;
         score += metrics.allControlsFinite ? 0.0 : kAcceptanceCommandEvidenceScoreWeight;
@@ -1267,7 +1269,7 @@ namespace
         return score;
     }
 
-    double ComputeAcceptancePenalty(const AcceptanceMetrics& metrics) noexcept
+    static double ComputeAcceptancePenalty(const AcceptanceMetrics& metrics) noexcept
     {
         if ((metrics.metric == "drive_primitive_completion") || (metrics.metric == "completion"))
         {
@@ -1337,7 +1339,7 @@ namespace
         return ComputeCommandEvidenceScore(metrics);
     }
 
-    void FinalizeAcceptance(AcceptanceMetrics& metrics, const bool acceptanceCondition) noexcept
+    static void FinalizeAcceptance(AcceptanceMetrics& metrics, const bool acceptanceCondition) noexcept
     {
         metrics.passed =
             metrics.started &&
@@ -1352,7 +1354,7 @@ namespace
         metrics.scorePenalty = ComputeAcceptancePenalty(metrics);
     }
 
-    AcceptanceMetrics RunStartStraightAcceptance(const GainSet& gains)
+    static AcceptanceMetrics RunStartStraightAcceptance(const GainSet& gains)
     {
         MazeMap::PDCluster cluster = BuildCandidateCluster(gains);
         MazeMap::App::Internal::SharedRobotRuntime runtime(kTickSeconds);
@@ -1388,7 +1390,7 @@ namespace
         for (int tick = 0; tick < kStartStraightMaxTicks; ++tick)
         {
             bool done = false;
-            const CommandVector control = drive.GetNextControls(done);
+            const MazeMap::App::Internal::CommandVector control = drive.GetNextControls(done);
             if (done)
             {
                 metrics.completed = true;
@@ -1411,34 +1413,34 @@ namespace
         return metrics;
     }
 
-    MazeMap::DirectionalLocation BuildManeuverStart() noexcept
+    static MazeMap::DirectionalLocation BuildManeuverStart() noexcept
     {
         return MazeMap::DirectionalLocation(MazeMap::MazeLocation(0U, 0U), MazeMap::Up);
     }
 
-    MazeMap::DirectionalLocation BuildNominalEndLocation(const MazeMap::ManeuverCode code)
+    static MazeMap::DirectionalLocation BuildNominalEndLocation(const MazeMap::ManeuverCode code)
     {
         return MazeMap::ManeuverSet::GetSet().Move(code, BuildManeuverStart());
     }
 
-    float BuildNominalEndXMeters(const MazeMap::ManeuverCode code)
+    static float BuildNominalEndXMeters(const MazeMap::ManeuverCode code)
     {
         const MazeMap::DirectionalLocation nominalEnd = BuildNominalEndLocation(code);
         return 0.5f * MazeMap::Config::kCellSizeM * static_cast<float>(nominalEnd.GetLocation().GetX());
     }
 
-    float BuildNominalEndYMeters(const MazeMap::ManeuverCode code)
+    static float BuildNominalEndYMeters(const MazeMap::ManeuverCode code)
     {
         const MazeMap::DirectionalLocation nominalEnd = BuildNominalEndLocation(code);
         return 0.5f * MazeMap::Config::kCellSizeM * static_cast<float>(nominalEnd.GetLocation().GetY());
     }
 
-    float BuildNominalEndYawRad(const MazeMap::ManeuverCode code)
+    static float BuildNominalEndYawRad(const MazeMap::ManeuverCode code)
     {
         return DirectionToYawRad(BuildNominalEndLocation(code).GetDirection());
     }
 
-    const char* ManeuverCodeLabel(const MazeMap::ManeuverCode code) noexcept
+    static const char* ManeuverCodeLabel(const MazeMap::ManeuverCode code) noexcept
     {
         switch (code)
         {
@@ -1481,29 +1483,25 @@ namespace
         }
     }
 
-    std::string LowercaseCopy(std::string text)
+    static std::string LowercaseCopy(std::string text)
     {
-        std::transform(
-            text.begin(),
-            text.end(),
-            text.begin(),
-            [](const unsigned char ch)
-            {
-                return static_cast<char>(std::tolower(ch));
-            });
+        for (char& ch : text)
+        {
+            ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        }
         return text;
     }
 
-    float ComputeInPlaceTurnKinematicTimeSeconds(
+    static float ComputeInPlaceTurnKinematicTimeSeconds(
         const float angleRad,
         const MotionLimits& limits) noexcept
     {
         return limits.ComputeMinimumTurnDurationSeconds(angleRad);
     }
 
-    void RecordManeuverTraceTelemetry(
+    static void RecordManeuverTraceTelemetry(
         ManeuverAcceptanceTrace& trace,
-        const CommandVector& control,
+        const MazeMap::App::Internal::CommandVector& control,
         const DriveTelemetry& telemetry) noexcept
     {
         trace.allControlsFinite = trace.allControlsFinite && control.IsFinite();
@@ -1521,8 +1519,10 @@ namespace
             std::isfinite(telemetry.requestedForwardAccelMps2) &&
             std::isfinite(telemetry.requestedYawAccelRadps2) &&
             std::isfinite(telemetry.requestedYawRad);
-        trace.solverClean = trace.solverClean && (telemetry.solverFailureFlags == 0U);
-        if (telemetry.solverFailureFlags != 0U)
+        trace.solverClean =
+            trace.solverClean &&
+            ((telemetry.commandKindFlags & DriveTelemetry::kCommandKindSolverFailureEvidence) == 0U);
+        if ((telemetry.commandKindFlags & DriveTelemetry::kCommandKindSolverFailureEvidence) != 0U)
         {
             ++trace.solverFailureCount;
         }
@@ -1594,7 +1594,7 @@ namespace
             }
 
             bool done = false;
-            const CommandVector control = drive.GetNextControls(done);
+            const MazeMap::App::Internal::CommandVector control = drive.GetNextControls(done);
             if (done)
             {
                 trace.completed = true;
@@ -1620,12 +1620,12 @@ namespace
         }
 
         const SensorSnapshot& finalSnapshot = runtime.RuntimeState().GetSensorSnapshot();
-        trace.wheels.leftDistanceM = finalSnapshot.leftEncoderDistanceM;
-        trace.wheels.rightDistanceM = finalSnapshot.rightEncoderDistanceM;
+        trace.wheels.leftDistanceM = finalSnapshot.LeftEncoderDistanceM();
+        trace.wheels.rightDistanceM = finalSnapshot.RightEncoderDistanceM();
         return trace;
     }
 
-    double ComputeNormalizedSpan(const std::vector<float>& values) noexcept
+    static double ComputeNormalizedSpan(const std::vector<float>& values) noexcept
     {
         if (values.size() < 2U)
         {
@@ -1644,7 +1644,7 @@ namespace
         return static_cast<double>(*minmax.second - *minmax.first) / average;
     }
 
-    std::vector<float> CollectLinearCommandMagnitudes(const ManeuverAcceptanceTrace& trace)
+    static std::vector<float> CollectLinearCommandMagnitudes(const ManeuverAcceptanceTrace& trace)
     {
         std::vector<float> magnitudes;
         magnitudes.reserve(trace.samples.size());
@@ -1655,7 +1655,7 @@ namespace
         return magnitudes;
     }
 
-    std::vector<float> CollectTurnYawRateMagnitudes(const ManeuverAcceptanceTrace& trace)
+    static std::vector<float> CollectTurnYawRateMagnitudes(const ManeuverAcceptanceTrace& trace)
     {
         std::vector<float> magnitudes;
         if (trace.samples.empty())
@@ -1663,14 +1663,14 @@ namespace
             return magnitudes;
         }
 
-        float maxOmegaMagnitudeRadps = 0.0f;
+        float maxYawRateMagnitudeRadps = 0.0f;
         for (const AcceptanceCommandSample& sample : trace.samples)
         {
-            maxOmegaMagnitudeRadps =
-                (std::max)(maxOmegaMagnitudeRadps, std::fabs(sample.angularCommandRadps));
+            maxYawRateMagnitudeRadps =
+                (std::max)(maxYawRateMagnitudeRadps, std::fabs(sample.angularCommandRadps));
         }
 
-        const float plateauThresholdRadps = kManeuverTurnPlateauFraction * maxOmegaMagnitudeRadps;
+        const float plateauThresholdRadps = kManeuverTurnPlateauFraction * maxYawRateMagnitudeRadps;
         for (const AcceptanceCommandSample& sample : trace.samples)
         {
             const float magnitudeRadps = std::fabs(sample.angularCommandRadps);
@@ -1683,7 +1683,51 @@ namespace
         return magnitudes;
     }
 
-    std::vector<float> CollectRampYawAccelMagnitudes(const ManeuverAcceptanceTrace& trace)
+    static void AppendTrimmedRampYawAccelMagnitudes(
+        const ManeuverAcceptanceTrace& trace,
+        std::vector<float>& magnitudes,
+        const std::size_t deltaBeginIndex,
+        const std::size_t deltaEndIndexExclusive)
+    {
+        if (deltaBeginIndex >= deltaEndIndexExclusive)
+        {
+            return;
+        }
+
+        const std::size_t regionLength = deltaEndIndexExclusive - deltaBeginIndex;
+        if (regionLength <= (2U * kManeuverRampDeltaTrimSamples))
+        {
+            return;
+        }
+
+        const std::size_t trimmedBeginIndex = deltaBeginIndex + kManeuverRampDeltaTrimSamples;
+        const std::size_t trimmedEndIndexExclusive = deltaEndIndexExclusive - kManeuverRampDeltaTrimSamples;
+        for (std::size_t index = trimmedBeginIndex; index < trimmedEndIndexExclusive; ++index)
+        {
+            const float previousYawRateMagnitudeRadps =
+                std::fabs(trace.samples[index - 1U].angularCommandRadps);
+            const float currentYawRateMagnitudeRadps =
+                std::fabs(trace.samples[index].angularCommandRadps);
+            if ((previousYawRateMagnitudeRadps <= kManeuverYawRateMagnitudeEpsilonRadps) ||
+                (currentYawRateMagnitudeRadps <= kManeuverYawRateMagnitudeEpsilonRadps))
+            {
+                continue;
+            }
+
+            const float dtSeconds = trace.samples[index].timeSeconds - trace.samples[index - 1U].timeSeconds;
+            if (!(dtSeconds > 0.0f))
+            {
+                continue;
+            }
+
+            magnitudes.push_back(
+                std::fabs(
+                    (trace.samples[index].angularCommandRadps - trace.samples[index - 1U].angularCommandRadps) /
+                    dtSeconds));
+        }
+    }
+
+    static std::vector<float> CollectRampYawAccelMagnitudes(const ManeuverAcceptanceTrace& trace)
     {
         std::vector<float> magnitudes;
         if (trace.samples.size() < 3U)
@@ -1691,18 +1735,18 @@ namespace
             return magnitudes;
         }
 
-        float maxOmegaMagnitudeRadps = 0.0f;
+        float maxYawRateMagnitudeRadps = 0.0f;
         std::size_t plateauBeginIndex = trace.samples.size();
         std::size_t plateauEndIndex = 0U;
         for (std::size_t index = 0U; index < trace.samples.size(); ++index)
         {
-            maxOmegaMagnitudeRadps =
+            maxYawRateMagnitudeRadps =
                 (std::max)(
-                    maxOmegaMagnitudeRadps,
+                    maxYawRateMagnitudeRadps,
                     std::fabs(trace.samples[index].angularCommandRadps));
         }
 
-        const float plateauThresholdRadps = kManeuverTurnPlateauFraction * maxOmegaMagnitudeRadps;
+        const float plateauThresholdRadps = kManeuverTurnPlateauFraction * maxYawRateMagnitudeRadps;
         for (std::size_t index = 0U; index < trace.samples.size(); ++index)
         {
             if (std::fabs(trace.samples[index].angularCommandRadps) >= plateauThresholdRadps)
@@ -1717,53 +1761,12 @@ namespace
             return magnitudes;
         }
 
-        const auto appendTrimmedRegionMagnitudes =
-            [&](const std::size_t deltaBeginIndex, const std::size_t deltaEndIndexExclusive)
-            {
-                if (deltaBeginIndex >= deltaEndIndexExclusive)
-                {
-                    return;
-                }
-
-                const std::size_t regionLength = deltaEndIndexExclusive - deltaBeginIndex;
-                if (regionLength <= (2U * kManeuverRampDeltaTrimSamples))
-                {
-                    return;
-                }
-
-                const std::size_t trimmedBeginIndex = deltaBeginIndex + kManeuverRampDeltaTrimSamples;
-                const std::size_t trimmedEndIndexExclusive = deltaEndIndexExclusive - kManeuverRampDeltaTrimSamples;
-                for (std::size_t index = trimmedBeginIndex; index < trimmedEndIndexExclusive; ++index)
-                {
-                    const float previousOmegaMagnitudeRadps =
-                        std::fabs(trace.samples[index - 1U].angularCommandRadps);
-                    const float currentOmegaMagnitudeRadps =
-                        std::fabs(trace.samples[index].angularCommandRadps);
-                    if ((previousOmegaMagnitudeRadps <= kManeuverOmegaMagnitudeEpsilonRadps) ||
-                        (currentOmegaMagnitudeRadps <= kManeuverOmegaMagnitudeEpsilonRadps))
-                    {
-                        continue;
-                    }
-
-                    const float dtSeconds = trace.samples[index].timeSeconds - trace.samples[index - 1U].timeSeconds;
-                    if (!(dtSeconds > 0.0f))
-                    {
-                        continue;
-                    }
-
-                    magnitudes.push_back(
-                        std::fabs(
-                            (trace.samples[index].angularCommandRadps - trace.samples[index - 1U].angularCommandRadps) /
-                            dtSeconds));
-                }
-            };
-
-        appendTrimmedRegionMagnitudes(1U, plateauBeginIndex + 1U);
-        appendTrimmedRegionMagnitudes(plateauEndIndex + 1U, trace.samples.size());
+        AppendTrimmedRampYawAccelMagnitudes(trace, magnitudes, 1U, plateauBeginIndex + 1U);
+        AppendTrimmedRampYawAccelMagnitudes(trace, magnitudes, plateauEndIndex + 1U, trace.samples.size());
         return magnitudes;
     }
 
-    AcceptanceMetrics BuildManeuverAcceptanceBase(
+    static AcceptanceMetrics BuildManeuverAcceptanceBase(
         const ManeuverAcceptanceTrace& trace,
         const MazeMap::ManeuverCode code,
         const bool smoothTurn,
@@ -1817,7 +1820,7 @@ namespace
         return metrics;
     }
 
-    AcceptanceMetrics MakeCompletionAcceptance(
+    static AcceptanceMetrics MakeCompletionAcceptance(
         const ManeuverAcceptanceTrace& trace,
         const MazeMap::ManeuverCode code,
         const bool smoothTurn)
@@ -1828,7 +1831,7 @@ namespace
         return metrics;
     }
 
-    AcceptanceMetrics MakeCommandEvidenceAcceptance(
+    static AcceptanceMetrics MakeCommandEvidenceAcceptance(
         const ManeuverAcceptanceTrace& trace,
         const MazeMap::ManeuverCode code,
         const bool smoothTurn)
@@ -1846,7 +1849,7 @@ namespace
         return metrics;
     }
 
-    AcceptanceMetrics MakeInPlaceShiftAcceptance(
+    static AcceptanceMetrics MakeInPlaceShiftAcceptance(
         const ManeuverAcceptanceTrace& trace,
         const MazeMap::ManeuverCode code)
     {
@@ -1860,7 +1863,7 @@ namespace
         return metrics;
     }
 
-    AcceptanceMetrics MakeInPlaceHeadingAcceptance(
+    static AcceptanceMetrics MakeInPlaceHeadingAcceptance(
         const ManeuverAcceptanceTrace& trace,
         const MazeMap::ManeuverCode code)
     {
@@ -1874,7 +1877,7 @@ namespace
         return metrics;
     }
 
-    AcceptanceMetrics MakeInPlaceTimeAcceptance(
+    static AcceptanceMetrics MakeInPlaceTimeAcceptance(
         const ManeuverAcceptanceTrace& trace,
         const MazeMap::ManeuverCode code)
     {
@@ -1898,7 +1901,7 @@ namespace
         return metrics;
     }
 
-    AcceptanceMetrics MakeSmoothVelocityVariationAcceptance(
+    static AcceptanceMetrics MakeSmoothVelocityVariationAcceptance(
         const ManeuverAcceptanceTrace& trace,
         const MazeMap::ManeuverCode code)
     {
@@ -1914,7 +1917,7 @@ namespace
         return metrics;
     }
 
-    AcceptanceMetrics MakeSmoothYawAccelerationVariationAcceptance(
+    static AcceptanceMetrics MakeSmoothYawAccelerationVariationAcceptance(
         const ManeuverAcceptanceTrace& trace,
         const MazeMap::ManeuverCode code)
     {
@@ -1931,7 +1934,7 @@ namespace
         return metrics;
     }
 
-    AcceptanceMetrics MakeSmoothYawRateVariationAcceptance(
+    static AcceptanceMetrics MakeSmoothYawRateVariationAcceptance(
         const ManeuverAcceptanceTrace& trace,
         const MazeMap::ManeuverCode code)
     {
@@ -1947,7 +1950,7 @@ namespace
         return metrics;
     }
 
-    AcceptanceMetrics MakeSmoothFinalPositionAcceptance(
+    static AcceptanceMetrics MakeSmoothFinalPositionAcceptance(
         const ManeuverAcceptanceTrace& trace,
         const MazeMap::ManeuverCode code)
     {
@@ -1961,7 +1964,7 @@ namespace
         return metrics;
     }
 
-    AcceptanceMetrics MakeSmoothFinalHeadingAcceptance(
+    static AcceptanceMetrics MakeSmoothFinalHeadingAcceptance(
         const ManeuverAcceptanceTrace& trace,
         const MazeMap::ManeuverCode code)
     {
@@ -1975,7 +1978,7 @@ namespace
         return metrics;
     }
 
-    double ComputeScenarioScore(const ScenarioMetrics& metrics) noexcept
+    static double ComputeScenarioScore(const ScenarioMetrics& metrics) noexcept
     {
         const double excursion = (std::max)(
             static_cast<double>(std::fabs(metrics.target - metrics.initial)),
@@ -2034,7 +2037,7 @@ namespace
             failureTerm;
     }
 
-    double ComputeResponseFailurePenalty(const ScenarioMetrics& metrics) noexcept
+    static double ComputeResponseFailurePenalty(const ScenarioMetrics& metrics) noexcept
     {
         const double excursion = (std::max)(
             static_cast<double>(std::fabs(metrics.target - metrics.initial)),
@@ -2046,7 +2049,7 @@ namespace
         return 500000.0 * poorResponseExcess * poorResponseExcess;
     }
 
-    bool IsScenarioOscillatory(const ScenarioMetrics& metrics) noexcept
+    static bool IsScenarioOscillatory(const ScenarioMetrics& metrics) noexcept
     {
         const double excursion = (std::max)(
             static_cast<double>(std::fabs(metrics.target - metrics.initial)),
@@ -2067,7 +2070,7 @@ namespace
             (repeatedCrossing && lateRinging);
     }
 
-    double ComputeOscillationPenalty(const ScenarioMetrics& metrics) noexcept
+    static double ComputeOscillationPenalty(const ScenarioMetrics& metrics) noexcept
     {
         const double excursion = (std::max)(
             static_cast<double>(std::fabs(metrics.target - metrics.initial)),
@@ -2085,7 +2088,7 @@ namespace
             (120.0 * lateRmsTerm);
     }
 
-    ScenarioMetrics RunScenario(const ScenarioSpec& spec, const GainSet& gains)
+    static ScenarioMetrics RunScenario(const ScenarioSpec& spec, const GainSet& gains)
     {
         MazeMap::Vehicle vehicle{};
         vehicle.SetFanDuty(kFanDuty);
@@ -2125,10 +2128,10 @@ namespace
         const float initialError = SignalError(spec, runtimeState);
         const float initialAbsError = std::fabs(initialError);
         metrics.minimumAbsError = initialAbsError;
-        metrics.maxAbsForwardVelocityMps = std::fabs(runtimeState.GetVelocity());
-        metrics.maxAbsYawRateRadps = std::fabs(runtimeState.GetRotationalVelocity());
+        metrics.maxAbsForwardVelocityMps = std::fabs(runtimeState.GetForwardVelocity());
+        metrics.maxAbsYawRateRadps = std::fabs(runtimeState.GetYawRate());
         metrics.maxAbsKinematicLateralAccelMps2 =
-            std::fabs(runtimeState.GetVelocity() * runtimeState.GetRotationalVelocity());
+            std::fabs(runtimeState.GetForwardVelocity() * runtimeState.GetYawRate());
         const float scenarioScale = ScenarioScale(spec);
         const float crossingDeadband =
             (std::max)((std::max)(spec.tolerance * 0.10f, scenarioScale * 0.001f), 1.0e-5f);
@@ -2155,7 +2158,7 @@ namespace
 
         for (int sample = 0; sample < maxSamples; ++sample)
         {
-            const CommandVector control =
+            const MazeMap::App::Internal::CommandVector control =
                 driveBase.ProposeBodyTick(
                     spec.targetForwardMps,
                     spec.targetYawRateRadps,
@@ -2168,7 +2171,7 @@ namespace
             {
                 ++metrics.nonFiniteCount;
             }
-            if (telemetry.solverFailureFlags != 0U)
+            if ((telemetry.commandKindFlags & DriveTelemetry::kCommandKindSolverFailureEvidence) != 0U)
             {
                 ++metrics.solverFailureCount;
             }
@@ -2184,19 +2187,19 @@ namespace
                 ++plantClipSamples;
             }
 
-            const float previousForwardMps = runtimeState.GetVelocity();
-            const float previousYawRateRadps = runtimeState.GetRotationalVelocity();
+            const float previousForwardMps = runtimeState.GetForwardVelocity();
+            const float previousYawRateRadps = runtimeState.GetYawRate();
             const bool advanced = AdvanceTruth(plant, runtimeState, wheels, control);
             ++metrics.samples;
 
             const float forwardAccelMps2 =
-                (runtimeState.GetVelocity() - previousForwardMps) / kTickSeconds;
+                (runtimeState.GetForwardVelocity() - previousForwardMps) / kTickSeconds;
             const float yawAccelRadps2 =
-                (runtimeState.GetRotationalVelocity() - previousYawRateRadps) / kTickSeconds;
+                (runtimeState.GetYawRate() - previousYawRateRadps) / kTickSeconds;
             metrics.maxAbsForwardVelocityMps =
-                (std::max)(metrics.maxAbsForwardVelocityMps, std::fabs(runtimeState.GetVelocity()));
+                (std::max)(metrics.maxAbsForwardVelocityMps, std::fabs(runtimeState.GetForwardVelocity()));
             metrics.maxAbsYawRateRadps =
-                (std::max)(metrics.maxAbsYawRateRadps, std::fabs(runtimeState.GetRotationalVelocity()));
+                (std::max)(metrics.maxAbsYawRateRadps, std::fabs(runtimeState.GetYawRate()));
             metrics.maxAbsForwardAccelMps2 =
                 (std::max)(metrics.maxAbsForwardAccelMps2, std::fabs(forwardAccelMps2));
             metrics.maxAbsYawAccelRadps2 =
@@ -2204,11 +2207,11 @@ namespace
             metrics.maxAbsKinematicLateralAccelMps2 =
                 (std::max)(
                     metrics.maxAbsKinematicLateralAccelMps2,
-                    std::fabs(runtimeState.GetVelocity() * runtimeState.GetRotationalVelocity()));
+                    std::fabs(runtimeState.GetForwardVelocity() * runtimeState.GetYawRate()));
 
             if (metrics.forwardVelocityStepActive && (sample < kVelocityStepRmsWindowTicks))
             {
-                const float velocityErrorMps = spec.targetForwardMps - runtimeState.GetVelocity();
+                const float velocityErrorMps = spec.targetForwardMps - runtimeState.GetForwardVelocity();
                 if (std::isfinite(velocityErrorMps))
                 {
                     first500VelocitySquaredError +=
@@ -2219,7 +2222,7 @@ namespace
 
             if (metrics.yawRateStepActive && (sample < kYawRateStepRmsWindowTicks))
             {
-                const float yawRateErrorRadps = spec.targetYawRateRadps - runtimeState.GetRotationalVelocity();
+                const float yawRateErrorRadps = spec.targetYawRateRadps - runtimeState.GetYawRate();
                 if (std::isfinite(yawRateErrorRadps))
                 {
                     first500YawRateSquaredError +=
@@ -2404,7 +2407,7 @@ namespace
         return metrics;
     }
 
-    std::vector<AcceptanceMetrics> RunAcceptanceScenarios(const GainSet& gains)
+    static std::vector<AcceptanceMetrics> RunAcceptanceScenarios(const GainSet& gains)
     {
         std::vector<AcceptanceMetrics> acceptances;
         constexpr std::array<MazeMap::ManeuverCode, 4U> inPlaceManeuvers = {{
@@ -2457,7 +2460,7 @@ namespace
         return acceptances;
     }
 
-    EvaluationResult Evaluate(const GainSet& gains)
+    static EvaluationResult Evaluate(const GainSet& gains)
     {
         EvaluationResult result{};
         result.gains = gains;
@@ -2481,13 +2484,13 @@ namespace
         return result;
     }
 
-    SearchRange BuildRange(float seed, float fallbackMaximum, float multiplier) noexcept
+    static SearchRange BuildRange(float seed, float fallbackMaximum, float multiplier) noexcept
     {
         const float maximum = (std::max)(fallbackMaximum, std::isfinite(seed) ? (seed * multiplier) : fallbackMaximum);
         return { 0.0f, maximum };
     }
 
-    std::array<SearchRange, static_cast<std::size_t>(GainIndex::Count)> BuildInitialSearchRanges(const GainSet& seed) noexcept
+    static std::array<SearchRange, static_cast<std::size_t>(GainIndex::Count)> BuildInitialSearchRanges(const GainSet& seed) noexcept
     {
         return {{
             BuildRange(seed.velocityKp, 120.0f, 5.0f),
@@ -2499,7 +2502,7 @@ namespace
         }};
     }
 
-    std::vector<float> BuildGridValues(const SearchRange& range, std::size_t gridPoints)
+    static std::vector<float> BuildGridValues(const SearchRange& range, std::size_t gridPoints)
     {
         gridPoints = (std::max)(static_cast<std::size_t>(2U), gridPoints);
         std::vector<float> values;
@@ -2519,20 +2522,21 @@ namespace
         return values;
     }
 
-    void AddTopCandidate(std::vector<EvaluationResult>& topCandidates, EvaluationResult candidate, std::size_t maxCount)
+    static void AddTopCandidate(std::vector<EvaluationResult>& topCandidates, EvaluationResult candidate, std::size_t maxCount)
     {
         if (maxCount == 0U)
         {
             return;
         }
 
-        auto insertAt = std::find_if(
-            topCandidates.begin(),
-            topCandidates.end(),
-            [&candidate](const EvaluationResult& existing)
+        auto insertAt = topCandidates.begin();
+        for (; insertAt != topCandidates.end(); ++insertAt)
+        {
+            if (candidate.score < insertAt->score)
             {
-                return candidate.score < existing.score;
-            });
+                break;
+            }
+        }
         topCandidates.insert(insertAt, std::move(candidate));
         if (topCandidates.size() > maxCount)
         {
@@ -2540,14 +2544,15 @@ namespace
         }
     }
 
-    struct SearchResult
+    class SearchResult
     {
+    public:
         EvaluationResult best{};
         std::vector<EvaluationResult> topCandidates;
         std::size_t evaluatedCandidates = 0U;
     };
 
-    SearchResult RunSearch(const GainSet& seed, const Options& options)
+    static SearchResult RunSearch(const GainSet& seed, const Options& options)
     {
         SearchResult result{};
         result.best = Evaluate(seed);
@@ -2592,7 +2597,7 @@ namespace
         return result;
     }
 
-    bool ParseArgs(int argc, char* argv[], Options& options, std::string& error)
+    static bool ParseArgs(int argc, char* argv[], Options& options, std::string& error)
     {
         options.candidate = ExtractTunedGains(MazeMap::Config::kDriveBasePDCluster);
         for (int index = 1; index < argc; ++index)
@@ -2705,7 +2710,7 @@ namespace
         return true;
     }
 
-    std::string JsonString(const std::string& value)
+    static std::string JsonString(const std::string& value)
     {
         std::ostringstream output;
         output << '"';
@@ -2737,7 +2742,7 @@ namespace
         return output.str();
     }
 
-    void WriteJsonNumber(std::ostream& output, double value)
+    static void WriteJsonNumber(std::ostream& output, double value)
     {
         if (!std::isfinite(value))
         {
@@ -2747,7 +2752,7 @@ namespace
         output << std::setprecision(10) << value;
     }
 
-    void WriteGainsJson(std::ostream& output, const GainSet& gains, int indent)
+    static void WriteGainsJson(std::ostream& output, const GainSet& gains, int indent)
     {
         const std::string pad(static_cast<std::size_t>(indent), ' ');
         output << "{\n"
@@ -2769,7 +2774,7 @@ namespace
             << pad << "}";
     }
 
-    void WriteScenarioJson(std::ostream& output, const ScenarioMetrics& metrics, int indent)
+    static void WriteScenarioJson(std::ostream& output, const ScenarioMetrics& metrics, int indent)
     {
         const std::string pad(static_cast<std::size_t>(indent), ' ');
         output << "{\n"
@@ -2781,7 +2786,7 @@ namespace
         WriteJsonNumber(output, metrics.initialForwardMps);
         output << ",\n" << pad << "    \"initial_yaw_rate_radps\": ";
         WriteJsonNumber(output, metrics.initialYawRateRadps);
-        output << ",\n" << pad << "    \"initial_yaw_rad\": ";
+        output << ",\n" << pad << "    \"initial_heading_rad\": ";
         WriteJsonNumber(output, metrics.initialYawRad);
         output << ",\n" << pad << "    \"target_forward_mps\": ";
         WriteJsonNumber(output, metrics.targetForwardMps);
@@ -2791,7 +2796,7 @@ namespace
         WriteJsonNumber(output, metrics.targetForwardAccelMps2);
         output << ",\n" << pad << "    \"target_yaw_accel_radps2\": ";
         WriteJsonNumber(output, metrics.targetYawAccelRadps2);
-        output << ",\n" << pad << "    \"target_yaw_rad\": ";
+        output << ",\n" << pad << "    \"target_heading_rad\": ";
         WriteJsonNumber(output, metrics.targetYawRad);
         output << ",\n" << pad << "    \"target_kinematic_lateral_accel_mps2\": ";
         WriteJsonNumber(output, metrics.targetKinematicLateralAccelMps2);
@@ -2902,7 +2907,7 @@ namespace
         output << "\n" << pad << "}";
     }
 
-    void WriteAcceptanceJson(std::ostream& output, const AcceptanceMetrics& metrics, int indent)
+    static void WriteAcceptanceJson(std::ostream& output, const AcceptanceMetrics& metrics, int indent)
     {
         const std::string pad(static_cast<std::size_t>(indent), ' ');
         output << "{\n"
@@ -2927,7 +2932,7 @@ namespace
             << pad << "    \"target_distance_m\": ";
         WriteJsonNumber(output, metrics.targetDistanceM);
         output << ",\n"
-            << pad << "    \"target_yaw_rad\": ";
+            << pad << "    \"target_heading_rad\": ";
         WriteJsonNumber(output, metrics.targetYawRad);
         output << ",\n"
             << pad << "    \"heading_tolerance_rad\": ";
@@ -2964,7 +2969,7 @@ namespace
             << pad << "    \"y_m\": ";
         WriteJsonNumber(output, metrics.finalYM);
         output << ",\n"
-            << pad << "    \"yaw_rad\": ";
+            << pad << "    \"heading_rad\": ";
         WriteJsonNumber(output, metrics.finalYawRad);
         output << ",\n"
             << pad << "    \"encoder_average_distance_m\": ";
@@ -3011,7 +3016,7 @@ namespace
         output << "\n" << pad << "}";
     }
 
-    void WriteEvaluationJson(std::ostream& output, const char* label, const EvaluationResult& result, int indent)
+    static void WriteEvaluationJson(std::ostream& output, const char* label, const EvaluationResult& result, int indent)
     {
         const std::string pad(static_cast<std::size_t>(indent), ' ');
         output << pad << JsonString(label) << ": {\n"
@@ -3040,7 +3045,7 @@ namespace
         output << pad << "  ]\n" << pad << "}";
     }
 
-    void WriteTopCandidatesJson(std::ostream& output, const std::vector<EvaluationResult>& topCandidates, int indent)
+    static void WriteTopCandidatesJson(std::ostream& output, const std::vector<EvaluationResult>& topCandidates, int indent)
     {
         const std::string pad(static_cast<std::size_t>(indent), ' ');
         output << "[\n";
@@ -3060,7 +3065,7 @@ namespace
         output << pad << "]";
     }
 
-    void WriteOutputJson(
+    static void WriteOutputJson(
         const EvaluationResult& baseline,
         const EvaluationResult& candidate,
         const Options& options,
@@ -3097,10 +3102,10 @@ namespace
             << "    \"tick_seconds\": ";
         WriteJsonNumber(std::cout, kTickSecondsExact);
         std::cout << ",\n"
-            << "    \"velocity_error_first_500_ticks\": \"RMS(targetForwardMps - state.u) over the first 500 0.001s ticks when targetForwardMps steps from its initial value.\",\n"
-            << "    \"yaw_rate_error_first_500_ticks\": \"RMS(targetYawRateRadps - state.r) over the first 500 0.001s ticks when targetYawRateRadps steps from its initial value.\",\n"
-            << "    \"forward_accel_error_first_100_ticks\": \"RMS((nextU - prevU) / 0.001 - DriveTelemetry.composedForwardAccelMps2) over the first 100 ticks for forward velocity steps when the composed objective is finite and active; fallback samples use RMS((nextU - prevU) / 0.001) as undesired forward acceleration when the objective is inactive or non-finite.\",\n"
-            << "    \"yaw_accel_error_first_100_ticks\": \"RMS((nextR - prevR) / 0.001 - DriveTelemetry.composedYawAccelRadps2) over the first 100 ticks for yaw-rate or heading steps when the composed objective is finite and active; fallback samples use RMS((nextR - prevR) / 0.001) as undesired yaw acceleration when the objective is inactive or non-finite.\"\n"
+            << "    \"velocity_error_first_500_ticks\": \"RMS(targetForwardMps - state.vf) over the first 500 0.001s ticks when targetForwardMps steps from its initial value.\",\n"
+            << "    \"yaw_rate_error_first_500_ticks\": \"RMS(targetYawRateRadps - state.yaw_rate) over the first 500 0.001s ticks when targetYawRateRadps steps from its initial value.\",\n"
+            << "    \"forward_accel_error_first_100_ticks\": \"RMS((nextVf - prevVf) / 0.001 - DriveTelemetry.composedForwardAccelMps2) over the first 100 ticks for forward velocity steps when the composed objective is finite and active; fallback samples use RMS((nextVf - prevVf) / 0.001) as undesired forward acceleration when the objective is inactive or non-finite.\",\n"
+            << "    \"yaw_accel_error_first_100_ticks\": \"RMS((nextYawRate - prevYawRate) / 0.001 - DriveTelemetry.composedYawAccelRadps2) over the first 100 ticks for yaw-rate or heading steps when the composed objective is finite and active; fallback samples use RMS((nextYawRate - prevYawRate) / 0.001) as undesired yaw acceleration when the objective is inactive or non-finite.\"\n"
             << "  },\n"
             << "  \"score_weights\": {\n"
             << "    \"velocity_error_first_500_ticks\": ";
@@ -3183,7 +3188,6 @@ namespace
         }
         std::cout << "}\n";
     }
-}
 
 int main(int argc, char* argv[])
 {

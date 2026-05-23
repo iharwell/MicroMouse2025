@@ -44,90 +44,94 @@ namespace MazeMap
 
         if (std::isfinite(dtSeconds) && (dtSeconds > 0.0f))
         {
-            if (!estimator.predict(dtSeconds, appliedControl))
+            if (!estimator.predict(
+                    dtSeconds,
+                    appliedControl,
+                    snapshot.EncoderObservation(),
+                    snapshot.EncoderObservationValid()))
             {
                 return;
             }
         }
 
-        const bool updateYawFromEncoder = !std::isfinite(snapshot.gyroRawRadps);
-        if (snapshot.encoderObservationValid)
+        const bool updateYawFromEncoder = !std::isfinite(snapshot.RawYawRateRadps());
+        if (snapshot.EncoderObservationValid())
         {
-            (void)estimator.updateEncoderPair(snapshot.encoderObservation, dtSeconds, updateYawFromEncoder);
+            (void)estimator.updateEncoderPair(snapshot.EncoderObservation(), dtSeconds, updateYawFromEncoder);
         }
 
-        if (std::isfinite(snapshot.gyroRawRadps))
+        if (std::isfinite(snapshot.RawYawRateRadps()))
         {
-            const MeasurementUpdateResult yawUpdate = estimator.updateYawRate(snapshot.gyroRawRadps);
-            if (!yawUpdate.accepted)
+            if (!estimator.updateYawRate(snapshot.RawYawRateRadps()))
             {
                 return;
             }
         }
 
-        ImuAccelObs accelObservation{};
-        accelObservation.valid =
-            snapshot.accelBiasValid &&
-            std::isfinite(snapshot.accelBodyXMps2) &&
-            std::isfinite(snapshot.accelBodyYMps2);
-        accelObservation.accelBodyXMps2 = snapshot.accelBodyXMps2;
-        accelObservation.accelBodyYMps2 = snapshot.accelBodyYMps2;
+        const bool accelObservationValid =
+            snapshot.AccelerationBiasValid() &&
+            std::isfinite(snapshot.BodyRightAccelerationMps2()) &&
+            std::isfinite(snapshot.BodyForwardAccelerationMps2());
+        const ImuAccelObs accelObservation(
+            accelObservationValid,
+            snapshot.BodyForwardAccelerationMps2(),
+            snapshot.BodyRightAccelerationMps2());
         (void)estimator.updatePlanarAccel(accelObservation);
 
         if (map != nullptr)
         {
             const Vehicle wallSensorOwner;
-            const float frontLeftMaxRangeM = wallSensorOwner.FrontLeft.DistanceFromDifferentialLight(0.0f);
-            const float frontRightMaxRangeM = wallSensorOwner.FrontRight.DistanceFromDifferentialLight(0.0f);
-            const float sideLeftMaxRangeM = wallSensorOwner.SideLeft.DistanceFromDifferentialLight(0.0f);
-            const float sideRightMaxRangeM = wallSensorOwner.SideRight.DistanceFromDifferentialLight(0.0f);
+            const float frontLeftMaxRangeM = wallSensorOwner.FrontLeftWallSensor().DistanceFromDifferentialLight(0.0f);
+            const float frontRightMaxRangeM = wallSensorOwner.FrontRightWallSensor().DistanceFromDifferentialLight(0.0f);
+            const float sideLeftMaxRangeM = wallSensorOwner.SideLeftWallSensor().DistanceFromDifferentialLight(0.0f);
+            const float sideRightMaxRangeM = wallSensorOwner.SideRightWallSensor().DistanceFromDifferentialLight(0.0f);
             WallObs frontLeftObs{};
             WallObs frontRightObs{};
             WallObs unusedFrontLeftObs{};
             WallObs unusedFrontRightObs{};
-            BuildFrontWallObservations(
-                snapshot.frontWallObservationValid,
-                snapshot.frontWall,
-                snapshot.frontWallUsesFallbackDetection,
-                snapshot.frontWallUsesCharacterizationDetection,
-                snapshot.frontLeftDistanceM,
-                snapshot.frontRightDistanceM,
+            WallObs::BuildFrontWallObservations(
+                snapshot.FrontWallObservationValid(),
+                snapshot.HasFrontWall(),
+                snapshot.FrontWallUsesFallbackDetection(),
+                snapshot.FrontWallUsesCharacterizationDetection(),
+                snapshot.FrontLeftDistanceM(),
+                snapshot.FrontRightDistanceM(),
                 frontLeftMaxRangeM,
                 frontLeftObs,
                 unusedFrontRightObs);
-            BuildFrontWallObservations(
-                snapshot.frontWallObservationValid,
-                snapshot.frontWall,
-                snapshot.frontWallUsesFallbackDetection,
-                snapshot.frontWallUsesCharacterizationDetection,
-                snapshot.frontLeftDistanceM,
-                snapshot.frontRightDistanceM,
+            WallObs::BuildFrontWallObservations(
+                snapshot.FrontWallObservationValid(),
+                snapshot.HasFrontWall(),
+                snapshot.FrontWallUsesFallbackDetection(),
+                snapshot.FrontWallUsesCharacterizationDetection(),
+                snapshot.FrontLeftDistanceM(),
+                snapshot.FrontRightDistanceM(),
                 frontRightMaxRangeM,
                 unusedFrontLeftObs,
                 frontRightObs);
-            if (frontLeftObs.valid && frontRightObs.valid)
+            if (frontLeftObs.IsValid() && frontRightObs.IsValid())
             {
                 (void)estimator.updateFrontPair(frontLeftObs, frontRightObs, *map, true);
             }
 
-            const WallObs leftSideObs = BuildSideWallObservation(
-                snapshot.leftDistanceValidForControl,
-                snapshot.leftTransitionDetected,
-                snapshot.leftWallObservation,
-                snapshot.sideLeftDistanceM,
+            const WallObs leftSideObs = WallObs::BuildSideWallObservation(
+                snapshot.LeftDistanceValidForControl(),
+                snapshot.LeftTransitionDetected(),
+                snapshot.HasLeftWallObservation(),
+                snapshot.SideLeftDistanceM(),
                 sideLeftMaxRangeM);
-            if (leftSideObs.valid)
+            if (leftSideObs.IsValid())
             {
                 (void)estimator.updateSideSensor(RelativeDirection::Left90, leftSideObs, *map, true);
             }
 
-            const WallObs rightSideObs = BuildSideWallObservation(
-                snapshot.rightDistanceValidForControl,
-                snapshot.rightTransitionDetected,
-                snapshot.rightWallObservation,
-                snapshot.sideRightDistanceM,
+            const WallObs rightSideObs = WallObs::BuildSideWallObservation(
+                snapshot.RightDistanceValidForControl(),
+                snapshot.RightTransitionDetected(),
+                snapshot.HasRightWallObservation(),
+                snapshot.SideRightDistanceM(),
                 sideRightMaxRangeM);
-            if (rightSideObs.valid)
+            if (rightSideObs.IsValid())
             {
                 (void)estimator.updateSideSensor(RelativeDirection::Right90, rightSideObs, *map, true);
             }

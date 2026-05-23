@@ -72,21 +72,21 @@ namespace MazeMap::App
             const float yawRateRadps)
         {
             SensorSnapshot snapshot{};
-            snapshot.gyroRawRadps = yawRateRadps;
-            snapshot.gyroRadps = yawRateRadps;
-            snapshot.leftEncoderDistanceM = encoderProgressM;
-            snapshot.rightEncoderDistanceM = encoderProgressM;
-            snapshot.encoderObservationValid = true;
-            snapshot.encoderObservation.leftDistanceDeltaM = 0.0f;
-            snapshot.encoderObservation.rightDistanceDeltaM = 0.0f;
-            snapshot.encoderObservation.leftVelocityMps = forwardMps;
-            snapshot.encoderObservation.rightVelocityMps = forwardMps;
+            snapshot.SetRawYawRateRadps(yawRateRadps);
+            snapshot.SetYawRateRadps(yawRateRadps);
+            snapshot.SetEncoderDistancesM(encoderProgressM, encoderProgressM);
+            MazeMap::EncoderObs encoderObservation{};
+            encoderObservation.SetLeftDistanceDeltaM(0.0f);
+            encoderObservation.SetRightDistanceDeltaM(0.0f);
+            encoderObservation.SetLeftVelocityMps(forwardMps);
+            encoderObservation.SetRightVelocityMps(forwardMps);
+            snapshot.SetEncoderObservation(encoderObservation, true);
 
             VehicleState& state = runtime.RuntimeState();
             state.SetSensorSnapshot(snapshot);
-            state.SetOrientation(yawRad);
-            state.SetVelocity(forwardMps);
-            state.SetRotationalVelocity(yawRateRadps);
+            state.SetHeading(yawRad);
+            state.SetForwardVelocity(forwardMps);
+            state.SetYawRate(yawRateRadps);
         }
 
         struct ProfileSample final

@@ -17,9 +17,9 @@ namespace MazeMap
     namespace
     {
 
-        void GetRepresentativeWheelOmegas(float& leftOmegaRadps, float& rightOmegaRadps) noexcept
+        void GetRepresentativeWheelSpeeds(float& leftWheelSpeedRadps, float& rightWheelSpeedRadps) noexcept
         {
-            Vehicle::WheelOmegasFromBodyVelocity(0.72f, 1.35f, leftOmegaRadps, rightOmegaRadps);
+            Vehicle::WheelSpeedsFromBodyVelocity(0.72f, 1.35f, leftWheelSpeedRadps, rightWheelSpeedRadps);
         }
     }
 
@@ -67,7 +67,10 @@ namespace MazeMap
             VehicleState runtimeState;
             auto plant = PlantModel(vehicle, runtimeState);
             EncoderObs observation{};
-            GetRepresentativeWheelOmegas(observation.omegaLeftRadps, observation.omegaRightRadps);
+            float leftWheelSpeedRadps = 0.0f;
+            float rightWheelSpeedRadps = 0.0f;
+            GetRepresentativeWheelSpeeds(leftWheelSpeedRadps, rightWheelSpeedRadps);
+            observation.SetWheelSpeedRadps(leftWheelSpeedRadps, rightWheelSpeedRadps);
             const float actualYawRateRadps = plant.measuredYawRateRadps(observation);
             std::wstringstream message;
             message << L"PM05_VEHICLE_PLANT_BOUNDARY"
@@ -125,7 +128,10 @@ namespace MazeMap
             VehicleState runtimeState;
             auto plant = PlantModel(vehicle, runtimeState);
             EncoderObs observation{};
-            GetRepresentativeWheelOmegas(observation.omegaLeftRadps, observation.omegaRightRadps);
+            float leftWheelSpeedRadps = 0.0f;
+            float rightWheelSpeedRadps = 0.0f;
+            GetRepresentativeWheelSpeeds(leftWheelSpeedRadps, rightWheelSpeedRadps);
+            observation.SetWheelSpeedRadps(leftWheelSpeedRadps, rightWheelSpeedRadps);
             const float actualSpeedMps = plant.measuredLinearSpeedMps(observation);
             std::wstringstream message;
             message << L"PM05_VEHICLE_PLANT_BOUNDARY"
@@ -169,11 +175,11 @@ namespace MazeMap
             Vehicle vehicle;
             VehicleState runtimeState;
             auto plant = PlantModel(vehicle, runtimeState);
-            runtimeState.SetLateralVelocity(100.0f);
+            runtimeState.SetRightwardVelocity(100.0f);
             constexpr float dtSeconds = 0.001f;
             plant.integrate(App::Internal::CommandVector{}, dtSeconds);
             const float actualAccelMps2 =
-                std::fabs(runtimeState.GetLateralAcceleration());
+                std::fabs(runtimeState.GetRightAcceleration());
             const float expectedAccelMps2 =
                 Vehicle::GetSustainedLateralAccelerationReferenceMps2();
             std::wstringstream message;
@@ -195,13 +201,13 @@ namespace MazeMap
             Vehicle vehicle;
             VehicleState runtimeState;
             auto plant = PlantModel(vehicle, runtimeState);
-            runtimeState.SetVelocity(0.30f);
-            runtimeState.SetWheelSpeedLeft(Vehicle::WheelOmegaFromLinearVelocity(0.30f));
-            runtimeState.SetWheelSpeedRight(Vehicle::WheelOmegaFromLinearVelocity(0.30f));
+            runtimeState.SetForwardVelocity(0.30f);
+            runtimeState.SetWheelSpeedLeft(Vehicle::WheelSpeedFromLinearVelocity(0.30f));
+            runtimeState.SetWheelSpeedRight(Vehicle::WheelSpeedFromLinearVelocity(0.30f));
 
             const App::Internal::CommandVector command =
                 plant.ComputeFeedforward(1.20f, 0.0f);
-            const float initialForwardVelocityMps = runtimeState.GetVelocity();
+            const float initialForwardVelocityMps = runtimeState.GetForwardVelocity();
             plant.integrate(command, 0.001f);
             std::wstringstream commandMessage;
             commandMessage << L"PM05_VEHICLE_PLANT_BOUNDARY"
@@ -213,14 +219,14 @@ namespace MazeMap
             accelMessage << L"PM05_VEHICLE_PLANT_BOUNDARY"
                 << L"\nfield=forward_velocity_after_step_mps"
                 << L"\ninitial=" << initialForwardVelocityMps
-                << L"\nactual=" << runtimeState.GetVelocity()
+                << L"\nactual=" << runtimeState.GetForwardVelocity()
                 << L"\ncriterion=actual>initial";
 
             Assert::IsTrue(
                 command.IsFinite(),
                 commandMessage.str().c_str());
             Assert::IsTrue(
-                runtimeState.GetVelocity() > initialForwardVelocityMps,
+                runtimeState.GetForwardVelocity() > initialForwardVelocityMps,
                 accelMessage.str().c_str());
         }
 
@@ -229,9 +235,9 @@ namespace MazeMap
             Vehicle vehicle;
             VehicleState runtimeState;
             auto plant = PlantModel(vehicle, runtimeState);
-            runtimeState.SetVelocity(0.30f);
-            runtimeState.SetWheelSpeedLeft(Vehicle::WheelOmegaFromLinearVelocity(0.30f));
-            runtimeState.SetWheelSpeedRight(Vehicle::WheelOmegaFromLinearVelocity(0.30f));
+            runtimeState.SetForwardVelocity(0.30f);
+            runtimeState.SetWheelSpeedLeft(Vehicle::WheelSpeedFromLinearVelocity(0.30f));
+            runtimeState.SetWheelSpeedRight(Vehicle::WheelSpeedFromLinearVelocity(0.30f));
 
             const App::Internal::CommandVector command =
                 plant.ComputeFeedforward(1.20f, 0.0f);
@@ -281,13 +287,13 @@ namespace MazeMap
             std::wstringstream message;
             message << L"PM05_VEHICLE_PLANT_BOUNDARY"
                 << L"\nfield=yaw_rate_after_step_radps"
-                << L"\nactual=" << runtimeState.GetRotationalVelocity()
+                << L"\nactual=" << runtimeState.GetYawRate()
                 << L"\ncriterion=actual>0"
                 << L"\nleft_command=" << command.LeftCommand()
                 << L"\nright_command=" << command.RightCommand();
 
             Assert::IsTrue(
-                runtimeState.GetRotationalVelocity() > 0.0f,
+                runtimeState.GetYawRate() > 0.0f,
                 message.str().c_str());
         }
 
@@ -316,7 +322,7 @@ namespace MazeMap
         {
             Vehicle vehicle;
             VehicleState runtimeState;
-			runtimeState.SetRotationalVelocity(0.05f);
+			runtimeState.SetYawRate(0.05f);
             auto plant = PlantModel(vehicle, runtimeState);
 
             const App::Internal::CommandVector command =
@@ -350,13 +356,16 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(Kinematics_VehicleWheelOmegasRoundTripThroughPlantMeasuredSpeed)
+        TEST_METHOD(Kinematics_VehicleWheelSpeedsRoundTripThroughPlantMeasuredSpeed)
         {
             Vehicle vehicle;
             VehicleState runtimeState;
             auto plant = PlantModel(vehicle, runtimeState);
             EncoderObs observation{};
-            Vehicle::WheelOmegasFromBodyVelocity(0.30f, 1.75f, observation.omegaLeftRadps, observation.omegaRightRadps);
+            float leftWheelSpeedRadps = 0.0f;
+            float rightWheelSpeedRadps = 0.0f;
+            Vehicle::WheelSpeedsFromBodyVelocity(0.30f, 1.75f, leftWheelSpeedRadps, rightWheelSpeedRadps);
+            observation.SetWheelSpeedRadps(leftWheelSpeedRadps, rightWheelSpeedRadps);
             const float actualSpeedMps = plant.measuredLinearSpeedMps(observation);
             std::wstringstream message;
             message << L"PM05_VEHICLE_PLANT_BOUNDARY"
@@ -364,8 +373,8 @@ namespace MazeMap
                 << L"\nexpected=0.3"
                 << L"\nactual=" << actualSpeedMps
                 << L"\ntolerance=1e-6"
-                << L"\nleft_omega_radps=" << observation.omegaLeftRadps
-                << L"\nright_omega_radps=" << observation.omegaRightRadps;
+                << L"\nleft_wheel_speed_radps=" << observation.LeftWheelSpeedRadps()
+                << L"\nright_wheel_speed_radps=" << observation.RightWheelSpeedRadps();
 
             Assert::AreEqual(
                 0.30f,
@@ -374,13 +383,16 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(Kinematics_VehicleWheelOmegasRoundTripThroughPlantMeasuredYawRate)
+        TEST_METHOD(Kinematics_VehicleWheelSpeedsRoundTripThroughPlantMeasuredYawRate)
         {
             Vehicle vehicle;
             VehicleState runtimeState;
             auto plant = PlantModel(vehicle, runtimeState);
             EncoderObs observation{};
-            Vehicle::WheelOmegasFromBodyVelocity(0.30f, 1.75f, observation.omegaLeftRadps, observation.omegaRightRadps);
+            float leftWheelSpeedRadps = 0.0f;
+            float rightWheelSpeedRadps = 0.0f;
+            Vehicle::WheelSpeedsFromBodyVelocity(0.30f, 1.75f, leftWheelSpeedRadps, rightWheelSpeedRadps);
+            observation.SetWheelSpeedRadps(leftWheelSpeedRadps, rightWheelSpeedRadps);
             const float actualYawRateRadps = plant.measuredYawRateRadps(observation);
             std::wstringstream message;
             message << L"PM05_VEHICLE_PLANT_BOUNDARY"
@@ -388,8 +400,8 @@ namespace MazeMap
                 << L"\nexpected=1.75"
                 << L"\nactual=" << actualYawRateRadps
                 << L"\ntolerance=1e-6"
-                << L"\nleft_omega_radps=" << observation.omegaLeftRadps
-                << L"\nright_omega_radps=" << observation.omegaRightRadps;
+                << L"\nleft_wheel_speed_radps=" << observation.LeftWheelSpeedRadps()
+                << L"\nright_wheel_speed_radps=" << observation.RightWheelSpeedRadps();
 
             Assert::AreEqual(
                 1.75f,

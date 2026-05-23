@@ -282,19 +282,24 @@ def evaluate_cpp_expr(expression: str) -> float:
     return float(eval(sanitized, {"__builtins__": {}}, {"PI_F": math.pi}))
 
 
+def load_named_float(path: Path, name: str) -> float:
+    text = strip_cpp_comments(path.read_text(encoding="utf-8"))
+    match = re.search(
+        rf"(?:inline\s+)?static\s+constexpr\s+float\s+{re.escape(name)}\s*=\s*([^;]+);",
+        text,
+    )
+    if match is None:
+        raise ValueError(f"could not find float constant {name!r} in {path}")
+    return evaluate_cpp_expr(match.group(1))
+
+
 def load_vehicle_turn_geometry(repo_root: Path) -> VehicleTurnGeometry:
     vehicle_header = repo_root / "MazeMap" / "MazeMap" / "Vehicle.h"
     vehicle_cpp = repo_root / "MazeMap" / "MazeMap" / "Vehicle.cpp"
-    entries = extract_initializer_entries(
-        vehicle_header,
-        "inline static constexpr VehiclePhysicalModel kPhysicalModel",
-    )
-    if len(entries) < 8:
-        raise ValueError(f"unexpected VehiclePhysicalModel layout in {vehicle_header}")
-    width_m = evaluate_cpp_expr(entries[1])
-    effective_track_width_m = evaluate_cpp_expr(entries[5])
-    track_width_physical_min_m = evaluate_cpp_expr(entries[6])
-    track_width_physical_max_m = evaluate_cpp_expr(entries[7])
+    width_m = load_named_float(vehicle_header, "kPhysicalWidthM")
+    effective_track_width_m = load_named_float(vehicle_header, "kPhysicalTrackWidthM")
+    track_width_physical_min_m = load_named_float(vehicle_header, "kTrackWidthPhysicalMinM")
+    track_width_physical_max_m = load_named_float(vehicle_header, "kTrackWidthPhysicalMaxM")
 
     cpp_text = strip_cpp_comments(vehicle_cpp.read_text(encoding="utf-8"))
     position_match = re.search(

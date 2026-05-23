@@ -51,7 +51,7 @@ This document is a navigation index for the first-party source tree under `MazeM
 - `ManeuverQueue.h`: queue used to stage maneuvers for execution.
 - `ManeuverSet.h` / `ManeuverSet.cpp`: registry of legal maneuvers and the movement semantics attached to each maneuver code, including derived travel distance and maneuver-target queries used by execution code.
 - `MaskQueue.h` / `MaskQueue.cpp`: queue helpers built on maze masks for flood-fill style searches.
-- `MapEvidenceUpdater.h` / `MapEvidenceUpdater.cpp`: accumulate accepted UKF wall observations into per-edge maze evidence.
+- `MapEvidenceUpdater.h` / `MapEvidenceUpdater.cpp`: accumulate accepted estimator wall observations into per-edge maze evidence.
 - `Maze.h` / `Maze.cpp`: full maze representation, indexing, wall knowledge, and goal-cell handling.
 - `MazeLocation.h` / `MazeLocation.cpp`: physical or logical location within a maze cell, including conversions between them.
 - `Application.h` / `Application.cpp`: top-level application object and setup/loop entry.
@@ -78,7 +78,7 @@ This document is a navigation index for the first-party source tree under `MazeM
 - `MotionTargetProjection.h`: helpers that project control targets into the robot motion frame.
 - `MotorEncoderDrive.h`: motor+encoder drive abstraction with physical model and hardware configuration.
 - `MotorModelUnits.h`: unit conversions and constants for motor modeling.
-- `MouseUkfFacade.h` / `MouseUkfFacade.cpp`: high-level estimator facade that combines the SR-UKF core with maze-evidence updates.
+- `Estimator.h` / `Estimator.cpp`: high-level estimator owner for prediction, measurement updates, diagnostics, and maze-evidence updates.
 - `OpenFloorMeasurementSpec.h`: IDs and geometry definitions for open-floor measurement routines.
 - `OpenFloorMainLoggerV2.h`: row-definition header for the standardized open-floor primary sample stream.
 - `OpenFloorRunManifestWriter.h`: class-named entry header for the open-floor manifest writer defined in the runtime infrastructure layer.
@@ -88,29 +88,28 @@ This document is a navigation index for the first-party source tree under `MazeM
 - `PathFinder.h` / `PathFinder.cpp`: abstract path-finding contract and shared gradient-descent implementation.
 - `PathPoint.h` / `PathPoint.cpp`: per-point path helpers for path containers.
 - `pch.h` / `pch.cpp`: precompiled-header setup for the production library.
-- `PlantModel.h` / `PlantModel.cpp`: vehicle process model, tire-force helpers, motor-command inverse dynamics, and plant parameter definitions used by the UKF.
+- `PlantModel.h` / `PlantModel.cpp`: vehicle process model, tire-force helpers, motor-command inverse dynamics, and plant parameter definitions used by the estimator.
 - `Pins.h`: board-level pin assignments shared by Teensy bring-up code and host-side runtime configuration.
 - `RollingAverageWindow.h`: small fixed-size rolling average helper.
 - `SearchRunPlanner.h`: search-run straight planning and replanning response helpers.
 - `Sensor.h`: generic sensor abstraction template.
 - `SmoothTurnYawRateController.h`: state bundle for smooth-turn yaw-rate control.
 - `StartupWaitProfile.h`: startup wait timing and policy constants.
-- `SrUkfCore.h` / `SrUkfCore.cpp`: estimator-specific square-root UKF core with encoder, IMU, and wall-update logic.
+- `UKF.h`: generic square-root UKF math and reusable UKF implementation used by `Estimator`.
 - `TeensyLayout.h`: Teensy-specific startup, SD-card bring-up, and board-support helper routines that consume `Pins.h` and `HardwareConfig.h`.
 - `TrackWidthEstimate.h`: helpers for estimating or adjusting effective track width.
 - `TractionLimitSweep.h`: structures for traction-limit sweep metrics and launch commands.
 - `TurnCommandGeometry.h`: helpers that derive geometry for turn commands.
 - `TurnWallEdgeTracker.h`: state bundle for tracking wall-edge timing during turns.
-- `UKF.h`: generic square-root UKF math and reusable UKF implementation.
 - `Vehicle.h` / `Vehicle.cpp`: physical vehicle model, limits, and utility accessors for the robot.
-- `VehicleState.h` / `VehicleState.cpp`: estimator state layout, observations, and the state container used by the UKF.
+- `VehicleState.h` / `VehicleState.cpp`: estimator state layout, observations, and the state container used by `Estimator`.
 - `WallBeliefMap.h`: wall-belief accumulation and update logic for partially known mazes.
 - `WallDetectionThresholds.h`: threshold helpers for wall detection decisions.
-- `WallGeometryModel.h` / `WallGeometryModel.cpp`: ray-cast wall-geometry prediction helpers used by UKF wall updates.
+- `WallGeometryModel.h` / `WallGeometryModel.cpp`: ray-cast wall-geometry prediction helpers used by estimator wall updates.
 - `WallObservationPipeline.h`: wall-observation classification and accumulation helpers.
 - `WallSensor.h`: wall-sensor abstraction and distance model.
 - `WallSensorCalibration.h`: wall-sensor calibration curve and supporting point definitions.
-- `WallSensorPreprocessor.h` / `WallSensorPreprocessor.cpp`: convert raw wall-sensor LED samples into typed UKF wall observations.
+- `WallSensorPreprocessor.h` / `WallSensorPreprocessor.cpp`: convert raw wall-sensor LED samples into typed estimator wall observations.
 - `WallSensorLedCalibrationPhase.h`: phase enum for LED calibration workflows.
 - `dllmain.cpp`: Windows DLL entrypoint for the library target.
 
@@ -146,11 +145,11 @@ This document is a navigation index for the first-party source tree under `MazeM
 - `PlantModelTestSupport.h`: plant-specific assertion helpers shared by the split `PlantModel` test files.
 - `RelativeDirectionalDistanceTest.cpp`: tests for relative directional distance math.
 - `SearchRunPlannerTest.cpp`: tests for search-run planning and replanning helpers.
-- `SrUkfCoreBiasAndStationaryTest.cpp`: stationary certification, gyro-bias seeding, and repeated-zero-motion regression tests for `SrUkfCore`.
-- `SrUkfCoreModeAndDiagnosticsTest.cpp`: mode classification, pivot-scrub, debug-dump, and IMU-update policy tests for `SrUkfCore`.
-- `SrUkfCoreMotionUpdateTest.cpp`: encoder, yaw, wall-update, and closed-loop motion propagation tests for `SrUkfCore`.
-- `SrUkfCoreReplayRegressionTest.cpp`: replay regression for the logged open-floor launch window that previously produced an X-pose jump.
-- `SrUkfCoreTestSupport.h`: shared `SrUkfCore` test helpers for debug-dump parsing, stationary-bias expectations, and repeated-cycle setup.
+- `EstimatorBiasAndStationaryTest.cpp`: stationary certification, gyro-bias seeding, and repeated-zero-motion regression tests for `Estimator`.
+- `EstimatorModeAndDiagnosticsTest.cpp`: mode classification, pivot-scrub, debug-dump, and IMU-update policy tests for `Estimator`.
+- `EstimatorMotionUpdateTest.cpp`: encoder, yaw, wall-update, and closed-loop motion propagation tests for `Estimator`.
+- `EstimatorReplayRegressionTest.cpp`: replay regression for the logged open-floor launch window that previously produced an X-pose jump.
+- `EstimatorFilterTestSupport.h`: shared estimator test helpers for debug-dump parsing, stationary-bias expectations, and repeated-cycle setup.
 - `Templates.h`: shared unit-test helper templates.
 - `UKFTest.cpp`: tests for the reusable square-root UKF math and covariance behavior.
 - `VehicleStateTest.cpp`: tests for stationary classification and zero-motion constraint behavior on `VehicleState`.

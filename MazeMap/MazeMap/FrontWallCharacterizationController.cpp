@@ -33,7 +33,7 @@ namespace MazeMap
     {
         float AverageEncoderDistanceM(const SensorSnapshot& snapshot) noexcept
         {
-            return 0.5f * (snapshot.leftEncoderDistanceM + snapshot.rightEncoderDistanceM);
+            return snapshot.AverageEncoderDistanceM();
         }
     }
 
@@ -43,8 +43,8 @@ namespace MazeMap
         limits.SetMaxSpeedMps(FrontWallCharacterizationConfig::kReverseSpeedMps);
         limits.SetAccelMps2(FrontWallCharacterizationConfig::kReverseAccelMps2);
         limits.SetDecelMps2(FrontWallCharacterizationConfig::kReverseAccelMps2);
-        limits.SetMaxAngularSpeedRadps(vehicle.GetMaxRotationalVelocity());
-        limits.SetAngularAccelRadps2(vehicle.GetMaxAngularAcceleration());
+        limits.SetMaxAngularSpeedRadps(vehicle.GetMaxYawRate());
+        limits.SetAngularAccelRadps2(vehicle.GetMaxYawAccel());
         return limits;
     }
 
@@ -113,7 +113,11 @@ public:
         }
 
         _phase = Phase::LaunchStartupSettle;
-        _loopController.StageNextSessionState(BuildLoopOptions());
+        const auto& runtimeState = _runtime.RuntimeState();
+        _loopController.StageNextSessionState(
+            FrontWallCharacterizationConfig::kControlPeriodUs,
+            runtimeState.GetPositionX(),
+            runtimeState.GetPositionY());
     }
 
 private:
@@ -194,16 +198,6 @@ private:
         }
 
         self->OnPauseGranted(loopController);
-    }
-
-    LoopController::SessionOptions BuildLoopOptions() const
-    {
-        LoopController::SessionOptions options{};
-        const auto& runtimeState = _runtime.RuntimeState();
-        options.controlPeriodUs = FrontWallCharacterizationConfig::kControlPeriodUs;
-        options.SessionStartPointX = runtimeState.GetPositionX();
-        options.SessionStartPointY = runtimeState.GetPositionY();
-        return options;
     }
 
     void ResetState() noexcept
@@ -428,8 +422,8 @@ private:
         }
 
         const bool collapsedToZero =
-            (snapshot.frontLeft.differentialLight <= FrontWallCharacterizationConfig::kCollapsedDifferentialLightThreshold) &&
-            (snapshot.frontRight.differentialLight <= FrontWallCharacterizationConfig::kCollapsedDifferentialLightThreshold);
+            (snapshot.FrontLeftTelemetry().differentialLight <= FrontWallCharacterizationConfig::kCollapsedDifferentialLightThreshold) &&
+            (snapshot.FrontRightTelemetry().differentialLight <= FrontWallCharacterizationConfig::kCollapsedDifferentialLightThreshold);
         if ((traveledDistanceM >= FrontWallCharacterizationConfig::kMinimumTravelBeforeCollapseCheckM) && collapsedToZero)
         {
             ++_captureCollapsedConsecutiveSamples;
@@ -493,12 +487,12 @@ private:
 
         const uint16_t index = storage.sampleCount;
         storage.distanceM[index] = traveledDistanceM;
-        storage.frontLeftAmbientLight[index] = snapshot.frontLeft.ambientLight;
-        storage.frontLeftLitLight[index] = snapshot.frontLeft.litLight;
-        storage.frontLeftDifferentialLight[index] = snapshot.frontLeft.differentialLight;
-        storage.frontRightAmbientLight[index] = snapshot.frontRight.ambientLight;
-        storage.frontRightLitLight[index] = snapshot.frontRight.litLight;
-        storage.frontRightDifferentialLight[index] = snapshot.frontRight.differentialLight;
+        storage.frontLeftAmbientLight[index] = snapshot.FrontLeftTelemetry().ambientLight;
+        storage.frontLeftLitLight[index] = snapshot.FrontLeftTelemetry().litLight;
+        storage.frontLeftDifferentialLight[index] = snapshot.FrontLeftTelemetry().differentialLight;
+        storage.frontRightAmbientLight[index] = snapshot.FrontRightTelemetry().ambientLight;
+        storage.frontRightLitLight[index] = snapshot.FrontRightTelemetry().litLight;
+        storage.frontRightDifferentialLight[index] = snapshot.FrontRightTelemetry().differentialLight;
         ++storage.sampleCount;
     }
 

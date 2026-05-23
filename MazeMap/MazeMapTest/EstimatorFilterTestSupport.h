@@ -3,7 +3,7 @@
 #include "CppUnitTest.h"
 
 #include "..\MazeMap\PlantModel.h"
-#include "..\MazeMap\SrUkfCore.h"
+#include "..\MazeMap\Estimator.h"
 #include "..\MazeMap\Vehicle.h"
 #include "..\MazeMap\VehicleState.h"
 
@@ -21,43 +21,44 @@
 
 namespace MazeMap
 {
-    constexpr float kUkfTestImuYawRateVarianceRadps2 = 1.2e-6f;
-    constexpr float kUkfTestImuYawRateSigmaRadps = 0.0010954451f;
-    constexpr float kUkfTestImuAccelSigmaMps2 = 0.569900f;
-    constexpr float kUkfTestGeneralEncoderLinearSpeedSigmaMps = 0.021187f;
-    constexpr float kUkfTestGeneralEncoderYawRateSigmaRadps = 0.111268f;
-    constexpr float kUkfTestStationaryEncoderVelocitySigmaMps = 0.002936f;
-    constexpr float kUkfTestEncoderPairNisThreshold = 13.81551f;
-    constexpr float kUkfTestPivotScrubMinCommandAngularRadps = 1.0f;
-    constexpr float kUkfTestStationaryCertificationDwellS = 0.150f;
-    constexpr float kUkfTestGyroBiasProcessVarianceStationaryRadps2PerSample = 3.0e-16f;
-    constexpr float kUkfTestGyroBiasProcessVarianceMovingRadps2PerSample = 0.0f;
-    constexpr float kUkfTestGyroBiasInitialVarianceUnseededRadps2 = 3.05e-4f;
-    constexpr std::uint16_t kUkfTestInitialStationaryGyroBiasSeedStartSample = 3U;
-    constexpr std::uint16_t kUkfTestInitialStationaryGyroBiasSeedEndSample = 8U;
+    constexpr float kEstimatorTestImuYawRateVarianceRadps2 = 1.2e-6f;
+    constexpr float kEstimatorTestImuYawRateSigmaRadps = 0.0010954451f;
+    constexpr float kEstimatorTestImuGyroSensitivityToleranceFraction = 0.003f;
+    constexpr float kEstimatorTestImuAccelSigmaMps2 = 0.569900f;
+    constexpr float kEstimatorTestGeneralEncoderLinearSpeedSigmaMps = 0.021187f;
+    constexpr float kEstimatorTestGeneralEncoderYawRateSigmaRadps = 0.111268f;
+    constexpr float kEstimatorTestStationaryEncoderVelocitySigmaMps = 0.002936f;
+    constexpr float kEstimatorTestEncoderPairNisThreshold = 13.81551f;
+    constexpr float kEstimatorTestPivotScrubMinCommandAngularRadps = 1.0f;
+    constexpr float kEstimatorTestStationaryCertificationDwellS = 0.150f;
+    constexpr float kEstimatorTestGyroBiasProcessVarianceStationaryRadps2PerSample = 3.0e-16f;
+    constexpr float kEstimatorTestGyroBiasProcessVarianceMovingRadps2PerSample = 0.0f;
+    constexpr float kEstimatorTestGyroBiasInitialVarianceUnseededRadps2 = 3.05e-4f;
+    constexpr std::uint16_t kEstimatorTestInitialStationaryGyroBiasSeedStartSample = 3U;
+    constexpr std::uint16_t kEstimatorTestInitialStationaryGyroBiasSeedEndSample = 8U;
 
-    struct SrUkfCoreTestRuntime final
+    struct EstimatorTestRuntime final
     {
         Vehicle vehicle{};
         VehicleState runtimeState{};
         PlantModel plantModel;
 
-        SrUkfCoreTestRuntime() noexcept
+        EstimatorTestRuntime() noexcept
             : plantModel(vehicle, runtimeState)
         {
             vehicle.SetFanDuty(0.80f);
         }
     };
 
-    inline SrUkfCore MakeDefaultSrUkfCore() noexcept
+    inline Estimator MakeDefaultEstimator() noexcept
     {
-        SrUkfCoreTestRuntime* const runtime = new SrUkfCoreTestRuntime();
-        return SrUkfCore(runtime->plantModel, runtime->runtimeState);
+        EstimatorTestRuntime* const runtime = new EstimatorTestRuntime();
+        return Estimator(runtime->vehicle, runtime->plantModel, runtime->runtimeState);
     }
 
     inline float StationaryGyroBiasMeasurementVarianceRadps2() noexcept
     {
-        return kUkfTestImuYawRateVarianceRadps2;
+        return kEstimatorTestImuYawRateVarianceRadps2;
     }
 
     struct InitialStationaryGyroBiasExpectation final
@@ -99,8 +100,8 @@ namespace MazeMap
             ++expectation.sampleOrdinal;
         }
 
-        if ((expectation.sampleOrdinal >= kUkfTestInitialStationaryGyroBiasSeedStartSample) &&
-            (expectation.sampleOrdinal <= kUkfTestInitialStationaryGyroBiasSeedEndSample))
+        if ((expectation.sampleOrdinal >= kEstimatorTestInitialStationaryGyroBiasSeedStartSample) &&
+            (expectation.sampleOrdinal <= kEstimatorTestInitialStationaryGyroBiasSeedEndSample))
         {
             expectation.seedAccumRadps += static_cast<double>(yawRateRadps);
             if (expectation.collectedSeedSamples < (std::numeric_limits<std::uint16_t>::max)())
@@ -112,16 +113,16 @@ namespace MazeMap
         const float measurementVarianceRadps2 = StationaryGyroBiasMeasurementVarianceRadps2();
         if (!expectation.seedApplied)
         {
-            if ((expectation.sampleOrdinal >= kUkfTestInitialStationaryGyroBiasSeedEndSample) &&
+            if ((expectation.sampleOrdinal >= kEstimatorTestInitialStationaryGyroBiasSeedEndSample) &&
                 (expectation.collectedSeedSamples > 0U))
             {
                 expectation.biasRadps = static_cast<float>(
                     expectation.seedAccumRadps /
                     static_cast<double>(expectation.collectedSeedSamples));
-                expectation.varianceRadps2 = kUkfTestGyroBiasInitialVarianceUnseededRadps2;
+                expectation.varianceRadps2 = kEstimatorTestGyroBiasInitialVarianceUnseededRadps2;
                 if (!(std::isfinite(expectation.varianceRadps2) && (expectation.varianceRadps2 > 0.0f)))
                 {
-                    expectation.varianceRadps2 = kUkfTestGyroBiasInitialVarianceUnseededRadps2;
+                    expectation.varianceRadps2 = kEstimatorTestGyroBiasInitialVarianceUnseededRadps2;
                 }
                 expectation.seedApplied = true;
             }
@@ -131,10 +132,10 @@ namespace MazeMap
         const float priorVarianceRadps2 =
             (std::isfinite(expectation.varianceRadps2) && (expectation.varianceRadps2 > 0.0f)) ?
             expectation.varianceRadps2 :
-            kUkfTestGyroBiasInitialVarianceUnseededRadps2;
+            kEstimatorTestGyroBiasInitialVarianceUnseededRadps2;
         const float predictedVarianceRadps2 =
             priorVarianceRadps2 +
-            kUkfTestGyroBiasProcessVarianceStationaryRadps2PerSample;
+            kEstimatorTestGyroBiasProcessVarianceStationaryRadps2PerSample;
         const float innovationVarianceRadps2 = predictedVarianceRadps2 + measurementVarianceRadps2;
         if (!(std::isfinite(predictedVarianceRadps2) && std::isfinite(innovationVarianceRadps2)) ||
             !(innovationVarianceRadps2 > 0.0f))
@@ -148,11 +149,11 @@ namespace MazeMap
         expectation.varianceRadps2 = (1.0f - kalmanGain) * predictedVarianceRadps2;
         if (!(std::isfinite(expectation.varianceRadps2) && (expectation.varianceRadps2 > 0.0f)))
         {
-            expectation.varianceRadps2 = kUkfTestGyroBiasInitialVarianceUnseededRadps2;
+            expectation.varianceRadps2 = kEstimatorTestGyroBiasInitialVarianceUnseededRadps2;
         }
     }
 
-    inline std::vector<std::pair<std::string, std::string>> CollectDebugDumpLines(const SrUkfCore& core)
+    inline std::vector<std::pair<std::string, std::string>> CollectDebugDumpLines(const Estimator& core)
     {
         std::vector<std::pair<std::string, std::string>> dumpLines;
         const bool dumpOk = core.WriteDebugTextDump(
@@ -183,7 +184,7 @@ namespace MazeMap
         const std::string rowToken = std::string("row=") + rowName;
         for (const auto& line : dumpLines)
         {
-            if (line.first == "ukf_dump_process_noise_sqrt_row" &&
+            if (line.first == "estimator_dump_process_noise_sqrt_row" &&
                 line.second.find(rowToken) != std::string::npos)
             {
                 return line.second;
@@ -220,15 +221,25 @@ namespace MazeMap
         return std::strtof(valueStart, &valueEnd);
     }
 
-    inline float FindProcessNoiseDiagonal(const SrUkfCore& core, const char* rowName)
+    inline float FindProcessNoiseDiagonal(const Estimator& core, const char* rowName)
     {
         const auto dumpLines = CollectDebugDumpLines(core);
         return ExtractNamedFloat(FindProcessNoiseRowMessage(dumpLines, rowName), rowName);
     }
 
-    inline float FindDebugDumpFloat(const SrUkfCore& core, const char* type, const char* fieldName)
+    inline float FindDebugDumpFloat(const Estimator& core, const char* type, const char* fieldName)
     {
-        return ExtractNamedFloat(FindDebugDumpMessage(CollectDebugDumpLines(core), type), fieldName);
+        const auto dumpLines = CollectDebugDumpLines(core);
+        const std::string token = std::string(fieldName) + "=";
+        for (const auto& line : dumpLines)
+        {
+            if ((line.first == type) && (line.second.find(token) != std::string::npos))
+            {
+                return ExtractNamedFloat(line.second, fieldName);
+            }
+        }
+
+        return std::numeric_limits<float>::quiet_NaN();
     }
 
     inline bool ExtractNamedBool(const std::string& message, const char* fieldName, bool fallback = false)
@@ -253,7 +264,7 @@ namespace MazeMap
     }
 
     inline bool FindDebugDumpBool(
-        const SrUkfCore& core,
+        const Estimator& core,
         const char* type,
         const char* fieldName,
         bool fallback = false)
@@ -261,12 +272,12 @@ namespace MazeMap
         return ExtractNamedBool(FindDebugDumpMessage(CollectDebugDumpLines(core), type), fieldName, fallback);
     }
 
-    inline int FindDebugDumpModeId(const SrUkfCore& core)
+    inline int FindDebugDumpModeId(const Estimator& core)
     {
-        return static_cast<int>(FindDebugDumpFloat(core, "ukf_dump_mode", "mode_id"));
+        return static_cast<int>(FindDebugDumpFloat(core, "estimator_dump_mode", "mode_id"));
     }
 
-    inline float UkfTestNonholonomicSigmaMps(float absForwardSpeedMps) noexcept
+    inline float EstimatorTestNonholonomicSigmaMps(float absForwardSpeedMps) noexcept
     {
         const float resolvedForwardSpeedMps =
             (std::isfinite(absForwardSpeedMps) && (absForwardSpeedMps > 0.0f)) ?
@@ -296,14 +307,16 @@ namespace MazeMap
     }
 
     inline EncoderObs BuildPredictionMatchingEncoderObservation(
-        const VehicleState::StateVector& previousState,
-        const VehicleState::StateVector& predictedState,
+        const Eigen::Matrix<float, VehicleState::kDimension, 1>& previousState,
+        const Eigen::Matrix<float, VehicleState::kDimension, 1>& predictedState,
         float dtSeconds,
         SyntheticEncoderRemainderState& remainderState) noexcept
     {
         EncoderObs encoder{};
-        encoder.omegaLeftRadps = predictedState(6);
-        encoder.omegaRightRadps = predictedState(7);
+        encoder.SetLeftWheelSpeedRadps(Vehicle::WheelSpeedFromLinearVelocity(
+                Vehicle::LeftWheelLinearVelocityFromBody(predictedState(3), predictedState(5))));
+        encoder.SetRightWheelSpeedRadps(Vehicle::WheelSpeedFromLinearVelocity(
+                Vehicle::RightWheelLinearVelocityFromBody(predictedState(3), predictedState(5))));
 
         if (!(std::isfinite(dtSeconds) && (dtSeconds > 0.0f)))
         {
@@ -319,30 +332,32 @@ namespace MazeMap
         const float wheelRadiusM = Vehicle::GetDriveWheelRadiusM();
         const float leftDistanceDeltaM =
             0.5f *
-            (previousState(6) + predictedState(6)) *
+            (Vehicle::WheelSpeedFromLinearVelocity(
+                Vehicle::LeftWheelLinearVelocityFromBody(previousState(3), previousState(5))) +
+             encoder.LeftWheelSpeedRadps()) *
             wheelRadiusM *
             dtSeconds;
         const float rightDistanceDeltaM =
             0.5f *
-            (previousState(7) + predictedState(7)) *
+            (Vehicle::WheelSpeedFromLinearVelocity(
+                Vehicle::RightWheelLinearVelocityFromBody(previousState(3), previousState(5))) +
+             encoder.RightWheelSpeedRadps()) *
             wheelRadiusM *
             dtSeconds;
 
-        encoder.totalLeftCounts =
-            ConsumeWholeEncoderCounts(
+        encoder.SetTotalLeftCounts(ConsumeWholeEncoderCounts(
                 leftDistanceDeltaM / distancePerCountM,
-                remainderState.leftRemainderCounts);
-        encoder.totalRightCounts =
-            ConsumeWholeEncoderCounts(
+                remainderState.leftRemainderCounts));
+        encoder.SetTotalRightCounts(ConsumeWholeEncoderCounts(
                 rightDistanceDeltaM / distancePerCountM,
-                remainderState.rightRemainderCounts);
+                remainderState.rightRemainderCounts));
         return encoder;
     }
 
     inline void ApplyPredictionMatchingEncoderAndYawUpdates(
-        SrUkfCore& core,
-        const VehicleState::StateVector& previousState,
-        const VehicleState::StateVector& predictedState,
+        Estimator& core,
+        const Eigen::Matrix<float, VehicleState::kDimension, 1>& previousState,
+        const Eigen::Matrix<float, VehicleState::kDimension, 1>& predictedState,
         float dtSeconds,
         SyntheticEncoderRemainderState& remainderState)
     {
@@ -352,18 +367,24 @@ namespace MazeMap
                 predictedState,
                 dtSeconds,
                 remainderState);
-        const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, dtSeconds);
-        Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(encoderResult.attempted);
-        Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(encoderResult.accepted);
+        const bool encoderAccepted = core.updateEncoderPair(encoder, dtSeconds, true);
+        Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(
+            FindDebugDumpBool(core, "estimator_dump_update_metrics", "last_update_attempted"));
+        Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(encoderAccepted);
+        Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(
+            FindDebugDumpBool(core, "estimator_dump_update_metrics", "last_update_accepted"));
 
-        const MeasurementUpdateResult yawResult =
+        const bool yawAccepted =
             core.updateYawRate(predictedState(5));
-        Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(yawResult.attempted);
-        Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(yawResult.accepted);
+        Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(
+            FindDebugDumpBool(core, "estimator_dump_update_metrics", "last_update_attempted"));
+        Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(yawAccepted);
+        Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(
+            FindDebugDumpBool(core, "estimator_dump_update_metrics", "last_update_accepted"));
     }
 
     inline void RunPredictionMatchingCycle(
-        SrUkfCore& core,
+        Estimator& core,
         const App::Internal::CommandVector& control,
         float dtSeconds,
         SyntheticEncoderRemainderState& remainderState,
@@ -374,13 +395,34 @@ namespace MazeMap
         (void)commandedLinearMps;
         (void)commandedAngularRadps;
         (void)saturationFlags;
-        const VehicleState::StateVector stateBeforePredict = core.workingState();
+        Eigen::Matrix<float, VehicleState::kDimension, 1> stateBeforePredict;
+        stateBeforePredict <<
+            FindDebugDumpFloat(core, "estimator_dump_state", "px_m"),
+            FindDebugDumpFloat(core, "estimator_dump_state", "py_m"),
+            FindDebugDumpFloat(core, "estimator_dump_state", "heading_rad"),
+            FindDebugDumpFloat(core, "estimator_dump_state", "vf_mps"),
+            FindDebugDumpFloat(core, "estimator_dump_state", "vr_mps"),
+            FindDebugDumpFloat(core, "estimator_dump_state", "yaw_rate_radps"),
+            FindDebugDumpFloat(core, "estimator_dump_state", "delta_af_mps2"),
+            FindDebugDumpFloat(core, "estimator_dump_state", "delta_ar_mps2"),
+            FindDebugDumpFloat(core, "estimator_dump_state", "delta_yaw_accel_radps2");
         Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(
             core.predict(dtSeconds, control));
+        Eigen::Matrix<float, VehicleState::kDimension, 1> stateAfterPredict;
+        stateAfterPredict <<
+            FindDebugDumpFloat(core, "estimator_dump_state", "px_m"),
+            FindDebugDumpFloat(core, "estimator_dump_state", "py_m"),
+            FindDebugDumpFloat(core, "estimator_dump_state", "heading_rad"),
+            FindDebugDumpFloat(core, "estimator_dump_state", "vf_mps"),
+            FindDebugDumpFloat(core, "estimator_dump_state", "vr_mps"),
+            FindDebugDumpFloat(core, "estimator_dump_state", "yaw_rate_radps"),
+            FindDebugDumpFloat(core, "estimator_dump_state", "delta_af_mps2"),
+            FindDebugDumpFloat(core, "estimator_dump_state", "delta_ar_mps2"),
+            FindDebugDumpFloat(core, "estimator_dump_state", "delta_yaw_accel_radps2");
         ApplyPredictionMatchingEncoderAndYawUpdates(
             core,
             stateBeforePredict,
-            core.workingState(),
+            stateAfterPredict,
             dtSeconds,
             remainderState);
     }
@@ -406,12 +448,12 @@ namespace MazeMap
         return dumpLines.size();
     }
 
-    inline SrUkfCore RunUKFCycles(
+    inline Estimator RunEstimatorCycles(
         int numCycles,
         App::Internal::CommandVector control =
             App::Internal::CommandVector(0.0f, 0.0f))
     {
-        VehicleState::StateVector initialState = VehicleState::StateVector::Zero();
+        Eigen::Matrix<float, VehicleState::kDimension, 1> initialState = Eigen::Matrix<float, VehicleState::kDimension, 1>::Zero();
         initialState(0) = 0.0f;
         initialState(1) = 0.0f;
         initialState(2) = (0.0f);
@@ -421,7 +463,7 @@ namespace MazeMap
         initialState(6) = 0.0f;
         initialState(7) = 0.0f;
         initialState(8) = 0.0f;
-        VehicleState::StateMatrix initialCovariance = VehicleState::StateMatrix::Zero();
+        Eigen::Matrix<float, VehicleState::kDimension, VehicleState::kDimension> initialCovariance = Eigen::Matrix<float, VehicleState::kDimension, VehicleState::kDimension>::Zero();
         initialCovariance(0, 0) = 0.001f * 0.001f;
         initialCovariance(1, 1) = 0.001f * 0.001f;
         initialCovariance(2, 2) = 0.01f * 0.01f;
@@ -432,7 +474,7 @@ namespace MazeMap
         initialCovariance(7, 7) = 0.05f * 0.05f;
         initialCovariance(8, 8) = 0.02f * 0.02f;
 
-        SrUkfCore core = MakeDefaultSrUkfCore();
+        Estimator core = MakeDefaultEstimator();
         Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(core.reset(initialState, initialCovariance));
         EncoderObs encoder{};
         constexpr float dt = 0.001f;
@@ -442,21 +484,27 @@ namespace MazeMap
             Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(
                 core.predict(dt, control));
 
-            const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, dt);
-            Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(encoderResult.attempted);
-            Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(encoderResult.accepted);
+            const bool encoderAccepted = core.updateEncoderPair(encoder, dt, true);
+            Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(
+                FindDebugDumpBool(core, "estimator_dump_update_metrics", "last_update_attempted"));
+            Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(encoderAccepted);
+            Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(
+                FindDebugDumpBool(core, "estimator_dump_update_metrics", "last_update_accepted"));
 
-            const MeasurementUpdateResult yawResult = core.updateYawRate(0.0f);
-            Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(yawResult.attempted);
-            Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(yawResult.accepted);
+            const bool yawAccepted = core.updateYawRate(0.0f);
+            Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(
+                FindDebugDumpBool(core, "estimator_dump_update_metrics", "last_update_attempted"));
+            Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(yawAccepted);
+            Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(
+                FindDebugDumpBool(core, "estimator_dump_update_metrics", "last_update_accepted"));
 
-            ImuAccelObs accel{};
-            accel.valid = true;
-            accel.accelBodyXMps2 = 0.0f;
-            accel.accelBodyYMps2 = 0.0f;
-            const MeasurementUpdateResult accelResult = core.updatePlanarAccel(accel);
-            Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(accelResult.attempted);
-            Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(accelResult.accepted);
+            const ImuAccelObs accel(true, 0.0f, 0.0f);
+            const bool accelAccepted = core.updatePlanarAccel(accel);
+            Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(
+                FindDebugDumpBool(core, "estimator_dump_update_metrics", "last_update_attempted"));
+            Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(accelAccepted);
+            Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(
+                FindDebugDumpBool(core, "estimator_dump_update_metrics", "last_update_accepted"));
         }
 
         return core;

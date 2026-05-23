@@ -450,7 +450,7 @@ namespace MazeMap::App::Internal
         , wallBeliefMap()
         , runtimeState()
         , plantModel(vehicle, runtimeState)
-        , estimator(plantModel, runtimeState)
+        , estimator(vehicle, plantModel, runtimeState)
         , driveBase(plantModel, runtimeState, MazeMap::Config::kDriveBasePDCluster)
         , driveService(nominalCommandPeriodSeconds)
         , startupCalibrationService()
@@ -893,7 +893,7 @@ namespace MazeMap::App::Internal
 
         modeFaulted = true;
         vehicle.SetFanDuty(0.0f);
-        (void)controlLoop.ApplyControlAtTickStart(CommandVector::Brake());
+        (void)controlLoop.ApplyControlAtApplicationPoint(CommandVector::Brake());
         (void)WriteTextLogEntry(
             (activeModeFaultSource[0] != '\0') ? activeModeFaultSource : nullptr,
             micros(),

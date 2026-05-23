@@ -1,6 +1,6 @@
 
 #pragma once
-// Declares the vehicle process model and plant-side data types used by the micromouse UKF stack.
+// Declares the vehicle process model and plant-side data types used by the micromouse Estimator.
 
 #include "Defines.h"
 #include "EigenCompat.h"
@@ -18,7 +18,7 @@
 
 namespace MazeMap
 {
-    class SrUkfCore;
+    class Estimator;
     class MotorEncoderDrive;
 
     // Shared vehicle plant owner for runtime dynamics, acceleration feedforward, and plant-side diagnostics.
@@ -26,12 +26,11 @@ namespace MazeMap
     {
     public:
         static constexpr float kDefaultVelocityTargetResponseTimeS = 0.025f;
-        static constexpr float kTractionLimitedReserveScale = 0.90f;
 
         PlantModel(const Vehicle& vehicle, VehicleState& runtimeState) noexcept;
 
         template <typename WriteFloatFn>
-        bool WriteOpenFloorUkfMetadata(WriteFloatFn&& writeFloat) const
+        bool WriteOpenFloorPlantMetadata(WriteFloatFn&& writeFloat) const
         {
             return
                 writeFloat("re_m", Vehicle::GetDriveWheelRadiusM(), 6) &&
@@ -55,24 +54,26 @@ namespace MazeMap
                 _vehicle.GetBatteryVoltage());
         }
 
-        using DebugTextSink = bool (*)(void* context, const char* type, const char* format, std::va_list args) noexcept;
-        bool WriteUkfPlantDebugTextDump(void* context, DebugTextSink sink) const noexcept;
+        bool WritePlantDebugTextDump(
+            void* context,
+            bool (*sink)(void* context, const char* type, const char* format, std::va_list args) noexcept)
+            const noexcept;
 
+        // `control` is the active command for the state interval being integrated.
         void integrate(const App::Internal::CommandVector& control, float dt) noexcept;
 
         App::Internal::CommandVector ComputeFeedforward(
             float desiredAccelMps2,
             float desiredYawAccelRadps2) const noexcept;
-
-        Eigen::Matrix<float, 2, 2> encoderPairCovarianceRadps(
-            float linearSpeedSigmaMps,
-            float yawRateSigmaRadps) const noexcept;
+        static float forwardAccelerationResidualDecayAlpha(float dtS) noexcept;
+        static float rightAccelerationResidualDecayAlpha(float dtS) noexcept;
+        static float yawAccelerationResidualDecayAlpha(float dtS) noexcept;
         Eigen::Matrix<float, 2, 2> encoderPairSqrtNoise(
             const EncoderObs& observation,
             float stationaryLinearSpeedSigmaMps,
             float generalLinearSpeedSigmaMps,
             float generalYawRateSigmaRadps) const noexcept;
-        float stationaryEncoderOmegaSigmaRadps(float stationaryLinearSpeedSigmaMps) const noexcept;
+        float stationaryEncoderWheelSpeedSigmaRadps(float stationaryLinearSpeedSigmaMps) const noexcept;
         float measuredLinearSpeedMps(const EncoderObs& observation) const noexcept;
         float measuredYawRateRadps(const EncoderObs& observation) const noexcept;
         float measuredYawRateVarianceRadps2(
@@ -121,56 +122,89 @@ namespace MazeMap
         float contactPreProjectionUtilization(
             const App::Internal::CommandVector& control,
             uint8_t contactIndex) const noexcept;
-        float contactLateralSlipAngleRad(uint8_t contactIndex) const noexcept;
+        float contactForwardRelativeVelocityMps(uint8_t contactIndex) const noexcept;
+        float contactRightRelativeVelocityMps(uint8_t contactIndex) const noexcept;
         float backLeftImuRightAccelerationMps2(
             const App::Internal::CommandVector& control) const noexcept;
         float backLeftImuForwardAccelerationMps2(
             const App::Internal::CommandVector& control) const noexcept;
 
     private:
-        friend class SrUkfCore;
+        friend class Estimator;
 
-        using StateVector = VehicleState::StateVector;
+        static constexpr float kForwardAccelerationResidualDecayTauS = 0.075f;
+        static constexpr float kRightAccelerationResidualDecayTauS = 0.075f;
+        static constexpr float kYawAccelResidualDecayTauS = 0.075f;
+        static constexpr uint8_t kFrontLeft = 0U;
+        static constexpr uint8_t kFrontRight = 1U;
+        static constexpr uint8_t kRearLeft = 2U;
+        static constexpr uint8_t kRearRight = 3U;
+        static constexpr float kSignEpsilon = 1.0e-6f;
+        static constexpr float kForceEpsilonN = 1.0e-4f;
+        static constexpr float kRollingFrictionTorqueNm = 0.00372f;
+        static constexpr float kReliableLaunchDriveCommand = 0.30f;
+        static constexpr float kStaticFrictionMaxSpeedMps = 0.005f;
+        static constexpr float kViscousFrictionNmPerRadps = 0.0f;
+        static constexpr float kRightVelocityDampingNsPerM = 0.0f;
+        static constexpr float kYawRateDampingNmsPerRad = 0.0f;
+        static constexpr float kFrontLoadFraction = 0.5f;
+        static constexpr float kMuFront = 1.65f;
+        static constexpr float kMuRear = 1.65f;
+        static constexpr float kStopExitYawRateRadps = 0.50f;
 
-        struct ContactKinematics
+        class ContactKinematics
         {
-            float rightVelocityMps = 0.0f;
-            float forwardVelocityMps = 0.0f;
+            friend class PlantModel;
+
+        public:
+            ContactKinematics() noexcept = default;
+
+        private:
+            float _rightRelativeVelocityMps = 0.0f;
+            float _forwardRelativeVelocityMps = 0.0f;
         };
 
-        struct WheelKinematics
+        class WheelKinematics
         {
-            float leftBankForwardVelocityMps = 0.0f;
-            float rightBankForwardVelocityMps = 0.0f;
-            std::array<ContactKinematics, 4> contacts{};
+            friend class PlantModel;
+
+        public:
+            WheelKinematics() noexcept = default;
+
+        private:
+            float _leftBankForwardRelativeVelocityMps = 0.0f;
+            float _rightBankForwardRelativeVelocityMps = 0.0f;
+            std::array<ContactKinematics, 4> _contacts{};
         };
 
-        struct SlipTargets
+        class ContactForce
         {
-            float kappaLeft = 0.0f;
-            float kappaRight = 0.0f;
-            std::array<float, 4> lateralRatio{};
+            friend class PlantModel;
+
+        public:
+            ContactForce() noexcept = default;
+
+        private:
+            float _rightForceN = 0.0f;
+            float _forwardForceN = 0.0f;
+            float _normalForceN = 0.0f;
+            float _saturation = 0.0f;
+            float _preProjectionUtilization = 0.0f;
         };
 
-        struct ContactForce
+        class ContactForces
         {
-            float rightForceN = 0.0f;
-            float forwardForceN = 0.0f;
-            float normalForceN = 0.0f;
-            float saturation = 0.0f;
-            float preProjectionUtilization = 0.0f;
-        };
+            friend class PlantModel;
 
-        struct ContactForces
-        {
-            std::array<ContactForce, 4> contacts{};
+        public:
+            ContactForces() noexcept = default;
 
             float SumRightForceN() const noexcept
             {
                 float sum = 0.0f;
-                for (const ContactForce& contact : contacts)
+                for (const ContactForce& contact : _contacts)
                 {
-                    sum += contact.rightForceN;
+                    sum += contact._rightForceN;
                 }
                 return sum;
             }
@@ -178,110 +212,137 @@ namespace MazeMap
             float SumForwardForceN() const noexcept
             {
                 float sum = 0.0f;
-                for (const ContactForce& contact : contacts)
+                for (const ContactForce& contact : _contacts)
                 {
-                    sum += contact.forwardForceN;
+                    sum += contact._forwardForceN;
                 }
                 return sum;
             }
 
             float LeftBankForwardForceN() const noexcept
             {
-                return contacts[0].forwardForceN + contacts[2].forwardForceN;
+                return _contacts[0]._forwardForceN + _contacts[2]._forwardForceN;
             }
 
             float RightBankForwardForceN() const noexcept
             {
-                return contacts[1].forwardForceN + contacts[3].forwardForceN;
+                return _contacts[1]._forwardForceN + _contacts[3]._forwardForceN;
             }
 
             float LeftBankMaxPreProjectionUtilization() const noexcept
             {
-                return (std::max)(contacts[0].preProjectionUtilization, contacts[2].preProjectionUtilization);
+                return (std::max)(_contacts[0]._preProjectionUtilization, _contacts[2]._preProjectionUtilization);
             }
 
             float RightBankMaxPreProjectionUtilization() const noexcept
             {
-                return (std::max)(contacts[1].preProjectionUtilization, contacts[3].preProjectionUtilization);
+                return (std::max)(_contacts[1]._preProjectionUtilization, _contacts[3]._preProjectionUtilization);
             }
+
+        private:
+            std::array<ContactForce, 4> _contacts{};
         };
 
-        enum class MotionRegime : uint8_t
+        class PlantDerivatives
         {
-            StoppedHold = 0,
-            RollingAdherent = 1,
-            RollingSaturated = 2,
+            friend class PlantModel;
+
+        public:
+            PlantDerivatives() noexcept = default;
+
+        private:
+            Eigen::Matrix<float, VehicleState::kDimension, 1> _stateDot = Eigen::Matrix<float, VehicleState::kDimension, 1>::Zero();
+            ContactForces _contactForces{};
+            WheelKinematics _wheelKinematics{};
+            Eigen::Vector2f _originAccelBodyMps2 = Eigen::Vector2f::Zero();
+            Eigen::Vector2f _imuAccelBodyMps2 = Eigen::Vector2f::Zero();
+            float _forwardAccelMps2 = 0.0f;
+            float _rightAccelMps2 = 0.0f;
+            float _yawAccelRadps2 = 0.0f;
+            float _maxContactUtilization = 0.0f;
         };
 
-        struct PlantDerivatives
-        {
-            StateVector stateDot = StateVector::Zero();
-            ContactForces contactForces{};
-            WheelKinematics wheelKinematics{};
-            SlipTargets slipTargets{};
-            Eigen::Vector2f originAccelBodyMps2 = Eigen::Vector2f::Zero();
-            Eigen::Vector2f imuAccelBodyMps2 = Eigen::Vector2f::Zero();
-            float longitudinalAccelMps2 = 0.0f;
-            float lateralAccelMps2 = 0.0f;
-            float yawAccelRadps2 = 0.0f;
-            MotionRegime regime = MotionRegime::RollingAdherent;
-            float maxContactUtilization = 0.0f;
-        };
-
-        StateVector BuildBoundStateVector() const noexcept;
-        void ApplyStateVectorToBoundState(const StateVector& state) noexcept;
+        Eigen::Matrix<float, VehicleState::kDimension, 1> BuildBoundStateVector() const noexcept;
+        void ApplyStateVectorToBoundState(const Eigen::Matrix<float, VehicleState::kDimension, 1>& state) noexcept;
+        // `control` is the active command for the state interval being predicted.
+        Eigen::Matrix<float, VehicleState::kDimension, 1> predictStateFromCommandReference(
+            const Eigen::Matrix<float, VehicleState::kDimension, 1>& referenceState,
+            const Eigen::Matrix<float, VehicleState::kDimension, 1>& state,
+            const App::Internal::CommandVector& control,
+            float dtS,
+            const EncoderObs* encoderInput) const noexcept;
+        // `control` is the active command for the state interval whose activity is calculated.
+        void plantActivityForState(
+            const Eigen::Matrix<float, VehicleState::kDimension, 1>& state,
+            const App::Internal::CommandVector& control,
+            const EncoderObs* encoderInput,
+            float& forwardAccelMps2,
+            float& rightAccelMps2,
+            float& yawAccelRadps2,
+            float& maxContactRelativeSpeedMps,
+            float& maxContactUtilization,
+            float& maxContactSaturation,
+            float& totalNormalLoadN) const noexcept;
+        Eigen::Vector2f backLeftImuPlanarAccelerationForState(
+            const Eigen::Matrix<float, VehicleState::kDimension, 1>& state,
+            const App::Internal::CommandVector& control,
+            const EncoderObs* encoderInput) const noexcept;
+        Eigen::Matrix<float, 2, 2> encoderPairCovarianceRadps(
+            float linearSpeedSigmaMps,
+            float yawRateSigmaRadps) const noexcept;
         void resolveAppliedBankTorques(
-            const StateVector& currentState,
+            const Eigen::Matrix<float, VehicleState::kDimension, 1>& currentState,
             const App::Internal::CommandVector& control,
             float& leftAppliedBankTorqueNm,
-            float& rightAppliedBankTorqueNm) const noexcept;
-        struct WheelOnlyMeasurementPrediction
-        {
-            float leftWheelSpeedRadps = 0.0f;
-            float rightWheelSpeedRadps = 0.0f;
-            float forwardSpeedMps = 0.0f;
-            float yawRateRadps = 0.0f;
-        };
-
-        WheelOnlyMeasurementPrediction predictWheelOnlyMeasurement(
-            const StateVector& state) const noexcept;
-
+            float& rightAppliedBankTorqueNm,
+            const EncoderObs* encoderInput) const noexcept;
+        static bool WriteDebugTextLine(
+            void* context,
+            bool (*sink)(void* context, const char* type, const char* format, std::va_list args) noexcept,
+            const char* type,
+            const char* format,
+            ...) noexcept;
+        static float SignedDirection(float preferredValue, float fallbackValue) noexcept;
+        static float residualDecayAlpha(float dtS, float tauS) noexcept;
         PlantDerivatives forwardStep(
             const App::Internal::CommandVector& control) const noexcept;
         PlantDerivatives forwardStep(
-            const StateVector& state,
-            const App::Internal::CommandVector& control) const noexcept;
+            const Eigen::Matrix<float, VehicleState::kDimension, 1>& state,
+            const App::Internal::CommandVector& control,
+            const EncoderObs* encoderInput) const noexcept;
         PlantDerivatives forwardStepFromAppliedBankTorques(
-            const StateVector& state,
+            const Eigen::Matrix<float, VehicleState::kDimension, 1>& state,
             float leftAppliedBankTorqueNm,
             float rightAppliedBankTorqueNm) const noexcept;
         PlantDerivatives evaluateAppliedBankTorqueStep(
-            const StateVector& state,
+            const Eigen::Matrix<float, VehicleState::kDimension, 1>& state,
             float leftAppliedBankTorqueNm,
             float rightAppliedBankTorqueNm,
-            float activityNorm) const noexcept;
-        WheelKinematics wheelKinematics(const StateVector& state) const noexcept;
-        SlipTargets slipTargets(const StateVector& state) const noexcept;
-        SlipTargets slipTargets(
-            const StateVector& state,
-            const WheelKinematics& kinematics) const noexcept;
-        ContactForces tireForces(const StateVector& state) const noexcept;
-        ContactForces tireForces(
-            const StateVector& state,
-            const App::Internal::CommandVector& control) const noexcept;
+            const EncoderObs* encoderInput) const noexcept;
+        WheelKinematics wheelKinematics(
+            const Eigen::Matrix<float, VehicleState::kDimension, 1>& state,
+            const EncoderObs* encoderInput) const noexcept;
         Eigen::Vector2f imuPlanarAcceleration(
-            const StateVector& state,
-            const App::Internal::CommandVector& control) const noexcept;
-        StateVector integrateAppliedBankTorques(
-            const StateVector& state,
+            const Eigen::Matrix<float, VehicleState::kDimension, 1>& state,
+            const App::Internal::CommandVector& control,
+            const EncoderObs* encoderInput) const noexcept;
+        Eigen::Matrix<float, VehicleState::kDimension, 1> integrateAppliedBankTorques(
+            const Eigen::Matrix<float, VehicleState::kDimension, 1>& state,
             float leftAppliedBankTorqueNm,
             float rightAppliedBankTorqueNm,
-            float dtS) const noexcept;
-        static StateVector advanceStateFromDerivatives(
-            const StateVector& currentState,
+            float dtS,
+            const EncoderObs* encoderInput) const noexcept;
+        Eigen::Matrix<float, VehicleState::kDimension, 1> predictStateWithAppliedBankTorques(
+            const Eigen::Matrix<float, VehicleState::kDimension, 1>& state,
+            float leftAppliedBankTorqueNm,
+            float rightAppliedBankTorqueNm,
+            float dtS,
+            const EncoderObs* encoderInput) const noexcept;
+        static Eigen::Matrix<float, VehicleState::kDimension, 1> advanceStateFromDerivatives(
+            const Eigen::Matrix<float, VehicleState::kDimension, 1>& currentState,
             const PlantDerivatives& evaluatedStep,
             float dtS) noexcept;
-        Eigen::Vector2f wheelLinearVelocityFromBodyState(const StateVector& state) const noexcept;
+        Eigen::Vector2f wheelLinearVelocityFromBodyState(const Eigen::Matrix<float, VehicleState::kDimension, 1>& state) const noexcept;
 
         const Vehicle& _vehicle;
         VehicleState& _runtimeState;

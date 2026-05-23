@@ -18,7 +18,7 @@ namespace MazeMap::App::Internal
 
         float AverageEncoderDistanceM(const SensorSnapshot& sensors) noexcept
         {
-            return 0.5f * (sensors.leftEncoderDistanceM + sensors.rightEncoderDistanceM);
+            return sensors.AverageEncoderDistanceM();
         }
     }
 
@@ -210,8 +210,8 @@ namespace MazeMap::App::Internal
         _limits.SetMaxSpeedMps(runtime.Vehicle().GetMaxSpeed());
         _limits.SetAccelMps2(runtime.Vehicle().GetMaxForwardAcceleration());
         _limits.SetDecelMps2(runtime.Vehicle().GetMaxForwardAcceleration());
-        _limits.SetMaxAngularSpeedRadps(runtime.Vehicle().GetMaxRotationalVelocity());
-        _limits.SetAngularAccelRadps2(runtime.Vehicle().GetMaxAngularAcceleration());
+        _limits.SetMaxAngularSpeedRadps(runtime.Vehicle().GetMaxYawRate());
+        _limits.SetAngularAccelRadps2(runtime.Vehicle().GetMaxYawAccel());
     }
 
     bool WallTouch::CanStart() const noexcept
@@ -321,8 +321,8 @@ namespace MazeMap::App::Internal
         }
 
         float angularCommandRadps =
-            (Config::kStraightHeadingKp * AngleErrorRad(_state.targetYawRad, state.GetOrientation())) -
-            (Config::kStraightYawD * state.GetRotationalVelocity()) +
+            (Config::kStraightHeadingKp * AngleErrorRad(_state.targetYawRad, state.GetHeading())) -
+            (Config::kStraightYawD * state.GetYawRate()) +
             yawRateBiasRadps;
         if (std::isfinite(_limits.GetMaxAngularSpeedRadps()) && (_limits.GetMaxAngularSpeedRadps() > 0.0f))
         {
@@ -351,9 +351,9 @@ namespace MazeMap::App::Internal
         const float traveledDistanceM = std::fabs(currentDistanceM - _state.startDistanceM);
         const unsigned long elapsedMs = nowMs - _state.touchStartMs;
         const bool frontSignalActive =
-            sensors.frontWall ||
-            sensors.frontLeftWall ||
-            sensors.frontRightWall;
+            sensors.HasFrontWall() ||
+            sensors.HasFrontLeftWall() ||
+            sensors.HasFrontRightWall();
 
         if (traveledDistanceM >= _state.maxApproachTravelM)
         {
@@ -391,8 +391,8 @@ namespace MazeMap::App::Internal
         CommandVector control = CommandVector::Brake();
         const float encoderSpeedMps =
             0.5f * (
-                std::fabs(sensors.encoderObservation.leftVelocityMps) +
-                std::fabs(sensors.encoderObservation.rightVelocityMps));
+                std::fabs(sensors.EncoderObservation().LeftVelocityMps()) +
+                std::fabs(sensors.EncoderObservation().RightVelocityMps()));
         if (!std::isfinite(encoderSpeedMps) || (encoderSpeedMps < Config::kWallTouchMaxApproachEncoderSpeedMps))
         {
             control = ForwardControl(state, approachSpeedMps);
@@ -403,7 +403,7 @@ namespace MazeMap::App::Internal
         {
             ++contactIndicators;
         }
-        if ((std::fabs(state.GetVelocity()) <= Config::kMotionSettleSpeedThresholdMps) &&
+        if ((std::fabs(state.GetForwardVelocity()) <= Config::kMotionSettleSpeedThresholdMps) &&
             ((traveledDistanceM >= Config::kWallTouchMinApproachDistanceM) ||
                 ((elapsedMs >= Config::kWallTouchMinCommandTimeMs) && (traveledDistanceM >= _state.minLatchTravelM))))
         {
@@ -484,9 +484,9 @@ namespace MazeMap::App::Internal
         const unsigned long nowMs = millis();
         const unsigned long phaseElapsedMs = nowMs - _state.phaseStartMs;
         const bool frontSignalActive =
-            sensors.frontWall ||
-            sensors.frontLeftWall ||
-            sensors.frontRightWall;
+            sensors.HasFrontWall() ||
+            sensors.HasFrontLeftWall() ||
+            sensors.HasFrontRightWall();
 
         if (!frontSignalActive)
         {
@@ -513,11 +513,11 @@ namespace MazeMap::App::Internal
             seatSpeedMps = (std::min)(seatSpeedMps, _limits.GetMaxSpeedMps());
         }
 
-        const float headingErrorRad = AngleErrorRad(_state.targetYawRad, state.GetOrientation());
+        const float headingErrorRad = AngleErrorRad(_state.targetYawRad, state.GetHeading());
         const bool squareStable =
             frontSignalActive &&
-            (std::fabs(sensors.frontSkewM) <= Config::kWallTouchSquareFrontSkewThresholdM) &&
-            (std::fabs(state.GetRotationalVelocity()) <= Config::kWallTouchSquareResidualYawRateThresholdRadps) &&
+            (std::fabs(sensors.FrontSkewM()) <= Config::kWallTouchSquareFrontSkewThresholdM) &&
+            (std::fabs(state.GetYawRate()) <= Config::kWallTouchSquareResidualYawRateThresholdRadps) &&
             (std::fabs(headingErrorRad) <= Config::kWallTouchSquareNetYawChangeThresholdRad);
         if (squareStable)
         {
@@ -546,7 +546,7 @@ namespace MazeMap::App::Internal
             return CommandVector::Brake();
         }
 
-        float yawBiasRadps = Config::kFrontSkewGain * sensors.frontSkewM;
+        float yawBiasRadps = Config::kFrontSkewGain * sensors.FrontSkewM();
         yawBiasRadps = (std::clamp)(
             yawBiasRadps,
             -Config::kWallTouchReverseMaxAngularCommandRadps,

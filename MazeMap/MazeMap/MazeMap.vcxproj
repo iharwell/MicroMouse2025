@@ -266,7 +266,6 @@
     <ClInclude Include="PlantModel.h" />
     <ClInclude Include="EncoderObs.h" />
     <ClInclude Include="ImuAccelObs.h" />
-    <ClInclude Include="PlanarAccelLateralUpdate.h" />
     <ClInclude Include="ProportionalDerivative.h" />
     <ClInclude Include="PDCluster.h" />
     <ClInclude Include="RollingAverageWindow.h" />
@@ -281,7 +280,6 @@
     <ClInclude Include="SoftOdometryAid.h" />
     <ClInclude Include="SmoothTurnYawRateController.h" />
     <ClInclude Include="StartupWaitProfile.h" />
-    <ClInclude Include="SrUkfCore.h" />
     <ClInclude Include="SensorMount.h" />
     <ClInclude Include="TeensyLayout.h" />
     <ClInclude Include="TrackWidthEstimate.h" />
@@ -390,12 +388,10 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="PlantModel.cpp" />
-    <ClCompile Include="PlanarAccelLateralUpdate.cpp" />
     <ClCompile Include="ProportionalDerivative.cpp" />
     <ClCompile Include="PDCluster.cpp" />
     <ClCompile Include="SigmaPointSetSimplex.cpp" />
     <ClCompile Include="SoftOdometryAid.cpp" />
-    <ClCompile Include="SrUkfCore.cpp" />
     <ClCompile Include="WallGeometryModel.cpp" />
     <ClCompile Include="WallSensorPreprocessor.cpp" />
     <ClCompile Include="Vehicle.cpp" />

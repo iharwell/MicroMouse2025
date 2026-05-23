@@ -6,32 +6,19 @@
 #include "SensorSnapshot.h"
 #include "WallDistanceCalibration.h"
 #include "WallSensorRuntimeTypes.h"
+
+#include <cstdint>
+
+namespace MazeMap::App::Internal
+{
+    class LoopController;
+}
+
 namespace MazeMap
 {
     class RuntimeSensorSuite final
     {
     public:
-        class CaptureServices final
-        {
-        public:
-            // Advances the in-flight wall-sensor sweep while caller work is running.
-            bool ServiceWallRead() noexcept;
-            // Captures the IMU portion of the active snapshot exactly once.
-            void CaptureImu() noexcept;
-
-        private:
-            friend class RuntimeSensorSuite;
-
-            using ServiceWallReadFn = bool (*)(void* context) noexcept;
-            using CaptureImuFn = void (*)(void* context) noexcept;
-
-            void* _context{};
-            ServiceWallReadFn _serviceWallRead{};
-            CaptureImuFn _captureImu{};
-        };
-
-        using CaptureHandler = void (*)(void* context, SensorSnapshot& snapshot, CaptureServices& services) noexcept;
-
         RuntimeSensorSuite(MazeMap::Vehicle& vehicle, WallDistanceCalibration& wallCalibration);
 
         // Initializes the unified runtime sensor pipeline and calibrates stationary gyro bias for the supplied control period.
@@ -40,17 +27,6 @@ namespace MazeMap
         bool CalibrateGyroBias(unsigned long controlPeriodUs, bool enableAccelRuntime);
         // Clears retained side-wall memory so a new routine starts from fresh lateral wall state.
         void ResetSideWallMemory() noexcept;
-        // Captures the full unified sensor snapshot into caller-owned storage.
-        // When provided, `callback` may interleave estimator work while the wall sweep remains in flight.
-        void Capture(
-            bool stationary,
-            const MazeMap::VehicleState& state,
-            SensorSnapshot& snapshot,
-            CaptureHandler callback = nullptr,
-            void* callbackContext = nullptr,
-            bool captureEncoders = false,
-            float encoderDtSeconds = 0.0f);
-
         // Reports the active IMU gyro scale used by the runtime sensor owner.
         float GetGyroSensitivityMdpsPerLsb() const noexcept;
         // Reports the active IMU accelerometer scale used by the runtime sensor owner.
@@ -59,24 +35,51 @@ namespace MazeMap
         float GetGyroBiasRadps() const noexcept;
         // Indicates whether the runtime accelerometer bias estimate is initialized.
         bool HasAccelBias() const noexcept;
-        // Returns the current body-frame X accelerometer bias estimate in g.
-        float GetAccelBiasXG() const noexcept;
-        // Returns the current body-frame Y accelerometer bias estimate in g.
-        float GetAccelBiasYG() const noexcept;
+        // Returns the current body-right accelerometer bias estimate in g.
+        float GetAccelBiasRightG() const noexcept;
+        // Returns the current body-forward accelerometer bias estimate in g.
+        float GetAccelBiasForwardG() const noexcept;
 
     private:
-        struct FilteredIrChannel final
-        {
-            float filteredDistanceM = 0.20f;
-            bool wall = false;
-            bool initialized = false;
-        };
+        friend class App::Internal::LoopController;
 
         void InitializeWallSensorLedOffState() noexcept;
+        void BeginInterlacedCapture(
+            bool stationary,
+            const MazeMap::VehicleState& state,
+            SensorSnapshot& snapshot,
+            bool captureWalls,
+            bool captureEncoders,
+            float encoderDtSeconds);
+        void CaptureInterlacedInertialSnapshot() noexcept;
+        void FinishInterlacedCapture();
+        void ServiceFrontWallCollection() noexcept;
+        void ServiceLeftWallCollection() noexcept;
+        void ServiceRightWallCollection() noexcept;
+        void ClearInterlacedCaptureState() noexcept;
         MazeMap::EncoderObs CaptureEncoderObservation(float dtSeconds) noexcept;
+        MazeMap::EncoderCountPair CaptureEncoderCountPairForCalibration() noexcept;
+        bool IsEncoderObservationUsableForPrediction(
+            const MazeMap::EncoderObs& observation,
+            float dtSeconds,
+            const char*& degradedReason) const noexcept;
+        void ReportEncoderObservationState(
+            bool validForPrediction,
+            const char* degradedReason,
+            const MazeMap::EncoderObs& observation,
+            float dtSeconds) noexcept;
         void PublishEncoderTotals(SensorSnapshot& snapshot) const noexcept;
         void CaptureEncoderSnapshot(SensorSnapshot& snapshot, float dtSeconds) noexcept;
         void CaptureInertialSnapshot(bool stationary, SensorSnapshot& snapshot);
+        StationaryImuCalibrationResult WaitForBackLeftImuCalibrationSettle(
+            const MazeMap::EncoderCountPair& startCounts,
+            unsigned long settleMs) noexcept;
+        StationaryImuCalibrationResult AverageBackLeftImuSelfTestSample(
+            std::uint16_t sampleCount,
+            const MazeMap::EncoderCountPair& startCounts,
+            AveragedBackLeftImuSample& averagedSample) noexcept;
+        StationaryImuCalibrationResult RunStationaryBackLeftImuSelfTest(unsigned long controlPeriodUs);
+        bool CalibrateStationaryBackLeftGyroBias(unsigned long controlPeriodUs, bool enableAccelRuntime);
         bool TryComputeSideSignalMetrics(
             WallSensorId sensorId,
             float measuredDifferentialLight,
@@ -90,12 +93,6 @@ namespace MazeMap
             float transitionThreshold,
             float& previousSignalRise,
             bool& previousValid) noexcept;
-        static float UpdateChannelFromMeasuredDistance(FilteredIrChannel& channel, float measuredDistanceM);
-        static float UpdateChannelFromMeasuredDistance(
-            FilteredIrChannel& channel,
-            float measuredDistanceM,
-            float onThresholdM,
-            float offThresholdM);
         bool ComputeSideWallObservationHit(
             WallSensorId sensorId,
             float measuredDifferentialLight,
@@ -126,28 +123,29 @@ namespace MazeMap
         MazeMap::Vehicle& _vehicle;
         WallDistanceCalibration& _wallCalibration;
         float _gyroBiasRadps;
-        FilteredIrChannel _frontLeft;
-        FilteredIrChannel _frontRight;
-        FilteredIrChannel _sideLeft;
-        FilteredIrChannel _sideRight;
         float _frontLeftWallSignalFiltered;
         float _frontRightWallSignalFiltered;
         float _sideLeftWallSignalFiltered;
         float _sideRightWallSignalFiltered;
-        float _accelBiasXG;
-        float _accelBiasYG;
+        float _accelBiasRightG;
+        float _accelBiasForwardG;
         std::int64_t _leftEncoderTotalCounts = 0;
         std::int64_t _rightEncoderTotalCounts = 0;
         std::uint32_t _frontLeftLedOffCommandUs = 0UL;
         std::uint32_t _frontRightLedOffCommandUs = 0UL;
         std::uint32_t _sideLeftLedOffCommandUs = 0UL;
         std::uint32_t _sideRightLedOffCommandUs = 0UL;
+        AsyncWallSensorSweepRead _interlacedWallRead{};
+        const MazeMap::VehicleState* _interlacedCaptureState = nullptr;
+        SensorSnapshot* _interlacedCaptureSnapshot = nullptr;
         AveragedWallSensorInputWindow<Config::kWallDetectionAverageWindowCycles> _frontLeftInputAverage;
         AveragedWallSensorInputWindow<Config::kWallDetectionAverageWindowCycles> _frontRightInputAverage;
         AveragedWallSensorInputWindow<Config::kWallDetectionAverageWindowCycles> _sideLeftInputAverage;
         AveragedWallSensorInputWindow<Config::kWallDetectionAverageWindowCycles> _sideRightInputAverage;
         bool _frontLeftWallState;
         bool _frontRightWallState;
+        bool _sideLeftWallState;
+        bool _sideRightWallState;
         bool _frontWallUsesFallbackDetection;
         bool _frontLeftWallSignalInitialized;
         bool _frontRightWallSignalInitialized;
@@ -158,5 +156,10 @@ namespace MazeMap
         bool _sideLeftPreviousSignalRiseValid;
         bool _sideRightPreviousSignalRiseValid;
         bool _accelBiasInitialized;
+        bool _encoderObservationDegraded;
+        bool _interlacedCaptureActive = false;
+        bool _interlacedCaptureWalls = false;
+        bool _interlacedCaptureStationary = false;
+        bool _interlacedCaptureImuCaptured = false;
     };
 }

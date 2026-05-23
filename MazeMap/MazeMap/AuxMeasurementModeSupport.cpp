@@ -518,7 +518,7 @@ namespace MazeMap::App::Internal::AuxMeasurementModeSupport
         const float deltaXM = finalPose.GetPositionX() - startPose.GetPositionX();
         const float deltaYM = finalPose.GetPositionY() - startPose.GetPositionY();
         const float closureErrorM = std::sqrt((deltaXM * deltaXM) + (deltaYM * deltaYM));
-        const float yawErrorDeg = RAD_TO_DEG_F * AngleErrorRad(startPose.GetOrientation(), finalPose.GetOrientation());
+        const float yawErrorDeg = RAD_TO_DEG_F * AngleErrorRad(startPose.GetHeading(), finalPose.GetHeading());
         const SensorSnapshot& startSensors = startPose.GetSensorSnapshot();
         const SensorSnapshot& finalSensors = finalPose.GetSensorSnapshot();
 
@@ -537,10 +537,10 @@ namespace MazeMap::App::Internal::AuxMeasurementModeSupport
             deltaYM,
             closureErrorM,
             yawErrorDeg,
-            finalSensors.leftEncoderDistanceM - startSensors.leftEncoderDistanceM,
-            finalSensors.rightEncoderDistanceM - startSensors.rightEncoderDistanceM,
-            static_cast<long>(finalSensors.leftEncoderTotalCounts - startSensors.leftEncoderTotalCounts),
-            static_cast<long>(finalSensors.rightEncoderTotalCounts - startSensors.rightEncoderTotalCounts));
+            finalSensors.LeftEncoderDistanceM() - startSensors.LeftEncoderDistanceM(),
+            finalSensors.RightEncoderDistanceM() - startSensors.RightEncoderDistanceM(),
+            static_cast<long>(finalSensors.LeftEncoderTotalCounts() - startSensors.LeftEncoderTotalCounts()),
+            static_cast<long>(finalSensors.RightEncoderTotalCounts() - startSensors.RightEncoderTotalCounts()));
 
         if (length <= 0 || length >= static_cast<int>(sizeof(message)))
         {
@@ -568,7 +568,7 @@ namespace MazeMap::App::Internal::AuxMeasurementModeSupport
         const float deltaXM = finalPose.GetPositionX() - startPose.GetPositionX();
         const float deltaYM = finalPose.GetPositionY() - startPose.GetPositionY();
         const float closureErrorM = std::sqrt((deltaXM * deltaXM) + (deltaYM * deltaYM));
-        const float yawErrorDeg = RAD_TO_DEG_F * AngleErrorRad(startPose.GetOrientation(), finalPose.GetOrientation());
+        const float yawErrorDeg = RAD_TO_DEG_F * AngleErrorRad(startPose.GetHeading(), finalPose.GetHeading());
 
         char message[224] = {};
         const int length = std::snprintf(

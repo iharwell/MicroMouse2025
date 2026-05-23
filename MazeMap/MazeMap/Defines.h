@@ -28,24 +28,24 @@ constexpr float GRAVITY_MPS2 = 9.80665f;
 #define ClampMeasuredRange(...) MAZEMAP_BANNED_HELPER_WRAPPER_FUNCTION(ClampMeasuredRange)
 #define Fail(...) MAZEMAP_BANNED_HELPER_WRAPPER_FUNCTION(Fail)
 
-inline float NormalizeAngle(float angleRad) noexcept
+inline float NormalizeAngle(float headingRad) noexcept
 {
-    if (!std::isfinite(angleRad))
-    {
-        return 0.0f;
-    }
+	if (!std::isfinite(headingRad))
+	{
+		return NAN;
+	}
 
-    return angleRad = std::remainder(angleRad, TWO_PI_F);
+	return std::remainder(headingRad, TWO_PI_F);
 }
 
-inline float AngleDifference(float angleFromRad, float angleToRad) noexcept
+inline float AngleDifference(float fromHeadingRad, float toHeadingRad) noexcept
 {
-    if (!std::isfinite(angleFromRad))
-    {
-        return (angleToRad==angleFromRad)? (NAN) : (INFINITY);
-    }
+	if (!std::isfinite(fromHeadingRad))
+	{
+		return (toHeadingRad==fromHeadingRad)? (NAN) : (INFINITY);
+	}
 
-	return NormalizeAngle(angleToRad - angleFromRad+PI_F) - PI_F;
+	return std::remainder(toHeadingRad - fromHeadingRad, TWO_PI_F);
 }
 #if defined(ARDUINO) || defined(CORE_TEENSY) || defined(ARDUINO_TEENSY41)
 #include <arm_math.h>
@@ -55,15 +55,15 @@ inline float AngleDifference(float angleFromRad, float angleToRad) noexcept
 
 /*
 *   void arm_sin_cos_f32(
-  float32_t theta,
+  float32_t headingDeg,
   float32_t * pSinVal,
   float32_t * pCosVal);
 */
 
-inline void sin_cosf(float theta, float& sin, float& cos)
+inline void sin_cosf(float headingRad, float& sin, float& cos)
 {
-	theta = 180.0f * theta / PI_F;
-    arm_sin_cos_f32(theta, &sin, &cos);
+	const float headingDeg = 180.0f * headingRad / PI_F;
+    arm_sin_cos_f32(headingDeg, &sin, &cos);
 }
 
 #ifndef EXPORT
@@ -106,10 +106,10 @@ inline void sin_cosf(float theta, float& sin, float& cos)
 #define IMPORT
 #endif
 
-inline void sin_cosf(float theta, float& sin, float& cos)
+inline void sin_cosf(float headingRad, float& sin, float& cos)
 {
-    sin = std::sinf(theta);
-    cos = std::cosf(theta);
+    sin = std::sinf(headingRad);
+    cos = std::cosf(headingRad);
 }
 // Host builds avoid defining Arduino's boolean alias to prevent Windows RPC type collisions.
 using byte = std::uint8_t;

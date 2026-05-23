@@ -174,8 +174,8 @@ namespace MazeMap
             Vehicle vehicle;
             VehicleState state;
             PlantModel plant(vehicle, state);
-            state.SetVelocity(0.35f);
-            state.SetRotationalVelocity(0.0f);
+            state.SetForwardVelocity(0.35f);
+            state.SetYawRate(0.0f);
             state.SetWheelSpeedLeft(-30.0f);
             state.SetWheelSpeedRight(70.0f);
 
@@ -214,24 +214,25 @@ namespace MazeMap
         {
             Vehicle vehicle;
             VehicleState restState;
-            restState.SetVelocity(0.25f);
+            restState.SetForwardVelocity(0.25f);
 
             // We deliberately set the wheel speeds higher on the slow state to ensure back-emf is not looking at the wheel speeds.
-            float s_left = 0.0f, s_right = 0.0f;
+            float leftWheelSpeedRadps = 0.0f;
+            float rightWheelSpeedRadps = 0.0f;
 
-            vehicle.WheelOmegasFromBodyVelocity(
-                restState.GetVelocity(),
-                restState.GetRotationalVelocity(),
-                s_left,
-                s_right);
-            restState.SetWheelSpeedLeft(s_left);
-            restState.SetWheelSpeedRight(s_right);
+            vehicle.WheelSpeedsFromBodyVelocity(
+                restState.GetForwardVelocity(),
+                restState.GetYawRate(),
+                leftWheelSpeedRadps,
+                rightWheelSpeedRadps);
+            restState.SetWheelSpeedLeft(leftWheelSpeedRadps);
+            restState.SetWheelSpeedRight(rightWheelSpeedRadps);
             PlantModel slowPlant(vehicle, restState);
             const App::Internal::CommandVector slowControl =
                 slowPlant.ComputeFeedforward(4.0f, 0.0f);
 
             VehicleState movingState;
-            movingState.SetVelocity(0.75f);
+            movingState.SetForwardVelocity(0.75f);
             movingState.SetWheelSpeedLeft(0.0f);
             movingState.SetWheelSpeedRight(0.0f);
             PlantModel movingPlant(vehicle, movingState);
@@ -308,15 +309,15 @@ namespace MazeMap
             VehicleState runtimeState;
             PlantModel plant(vehicle, runtimeState);
 
-            runtimeState.SetVelocity(0.20f);
-            runtimeState.SetWheelSpeedLeft(Vehicle::WheelOmegaFromLinearVelocity(runtimeState.GetVelocity()));
-            runtimeState.SetWheelSpeedRight(Vehicle::WheelOmegaFromLinearVelocity(runtimeState.GetVelocity()));
+            runtimeState.SetForwardVelocity(0.20f);
+            runtimeState.SetWheelSpeedLeft(Vehicle::WheelSpeedFromLinearVelocity(runtimeState.GetForwardVelocity()));
+            runtimeState.SetWheelSpeedRight(Vehicle::WheelSpeedFromLinearVelocity(runtimeState.GetForwardVelocity()));
             const App::Internal::CommandVector command =
                 plant.ComputeFeedforward(requestedAccelMps2, 0.0f);
-            const float initialVelocityMps = runtimeState.GetVelocity();
+            const float initialVelocityMps = runtimeState.GetForwardVelocity();
             plant.integrate(command, dtSeconds);
             const float integratedForwardAccelMps2 =
-                IntegratedRateOfChange(initialVelocityMps, runtimeState.GetVelocity(), dtSeconds);
+                IntegratedRateOfChange(initialVelocityMps, runtimeState.GetForwardVelocity(), dtSeconds);
 
             {
                 std::wstringstream message;
@@ -334,9 +335,9 @@ namespace MazeMap
                 message <<
                     L"PlantModelAccelerationFeedforwardForLongitudinalRequestIncreasesForwardVelocity\n"
                     L"field=longitudinal_acceleration_mps2\n"
-                    L"actual=" << runtimeState.GetLongitudinalAcceleration() << L"\n"
+                    L"actual=" << runtimeState.GetForwardAcceleration() << L"\n"
                     L"criterion=actual > 0";
-                Assert::IsTrue(runtimeState.GetLongitudinalAcceleration() > 0.0f, message.str().c_str());
+                Assert::IsTrue(runtimeState.GetForwardAcceleration() > 0.0f, message.str().c_str());
             }
 
             {
@@ -344,13 +345,13 @@ namespace MazeMap
                 message <<
                     L"PlantModelAccelerationFeedforwardForLongitudinalRequestIncreasesForwardVelocity\n"
                     L"field=runtime_longitudinal_acceleration_mps2\n"
-                    L"actual=" << runtimeState.GetLongitudinalAcceleration() << L"\n"
+                    L"actual=" << runtimeState.GetForwardAcceleration() << L"\n"
                     L"expected=" << requestedAccelMps2 << L"\n"
                     L"tolerance=" << kAccelerationToleranceMps2 << L"\n"
                     L"criterion=abs(actual - expected) <= tolerance";
                 Assert::AreEqual(
                     requestedAccelMps2,
-                    runtimeState.GetLongitudinalAcceleration(),
+                    runtimeState.GetForwardAcceleration(),
                     kAccelerationToleranceMps2,
                     message.str().c_str());
             }
@@ -382,10 +383,10 @@ namespace MazeMap
 
             const App::Internal::CommandVector command =
                 plant.ComputeFeedforward(0.0f, requestedYawAccelRadps2);
-            const float initialYawRateRadps = runtimeState.GetRotationalVelocity();
+            const float initialYawRateRadps = runtimeState.GetYawRate();
             plant.integrate(command, dtSeconds);
             const float integratedYawAccelRadps2 =
-                IntegratedRateOfChange(initialYawRateRadps, runtimeState.GetRotationalVelocity(), dtSeconds);
+                IntegratedRateOfChange(initialYawRateRadps, runtimeState.GetYawRate(), dtSeconds);
 
             {
                 std::wstringstream message;
@@ -403,9 +404,9 @@ namespace MazeMap
                 message <<
                     L"PlantModelAccelerationFeedforwardForClockwiseYawRequestIncreasesYawRate\n"
                     L"field=yaw_acceleration_radps2\n"
-                    L"actual=" << runtimeState.GetYawAcceleration() << L"\n"
+                    L"actual=" << runtimeState.GetYawAccel() << L"\n"
                     L"criterion=actual > 0";
-                Assert::IsTrue(runtimeState.GetYawAcceleration() > 0.0f, message.str().c_str());
+                Assert::IsTrue(runtimeState.GetYawAccel() > 0.0f, message.str().c_str());
             }
 
             {
@@ -413,13 +414,13 @@ namespace MazeMap
                 message <<
                     L"PlantModelAccelerationFeedforwardForClockwiseYawRequestIncreasesYawRate\n"
                     L"field=runtime_yaw_acceleration_radps2\n"
-                    L"actual=" << runtimeState.GetYawAcceleration() << L"\n"
+                    L"actual=" << runtimeState.GetYawAccel() << L"\n"
                     L"expected=" << requestedYawAccelRadps2 << L"\n"
                     L"tolerance=" << kYawAccelerationToleranceRadps2 << L"\n"
                     L"criterion=abs(actual - expected) <= tolerance";
                 Assert::AreEqual(
                     requestedYawAccelRadps2,
-                    runtimeState.GetYawAcceleration(),
+                    runtimeState.GetYawAccel(),
                     kYawAccelerationToleranceRadps2,
                     message.str().c_str());
             }
@@ -448,12 +449,12 @@ namespace MazeMap
             PlantModel plant(vehicle, runtimeState);
             constexpr float forwardMps = 1.0f;
             constexpr float yawRateRadps = 2.0f;
-            float leftOmegaRadps = 0.0f;
-            float rightOmegaRadps = 0.0f;
-            vehicle.WheelOmegasFromBodyVelocity(forwardMps, yawRateRadps, leftOmegaRadps, rightOmegaRadps);
+            float leftWheelSpeedRadps = 0.0f;
+            float rightWheelSpeedRadps = 0.0f;
+            vehicle.WheelSpeedsFromBodyVelocity(forwardMps, yawRateRadps, leftWheelSpeedRadps, rightWheelSpeedRadps);
             EncoderObs observation{};
-            observation.omegaLeftRadps = leftOmegaRadps;
-            observation.omegaRightRadps = rightOmegaRadps;
+            observation.SetLeftWheelSpeedRadps(leftWheelSpeedRadps);
+            observation.SetRightWheelSpeedRadps(rightWheelSpeedRadps);
             const float measuredLinearSpeedMps = plant.measuredLinearSpeedMps(observation);
             const float measuredYawRateRadps = plant.measuredYawRateRadps(observation);
 
@@ -485,11 +486,11 @@ namespace MazeMap
                 std::wstringstream message;
                 message <<
                     L"PlantModelWheelProjectionRoundTripsVehicleBodyVelocity\n"
-                    L"field=left_wheel_omega_radps\n"
-                    L"actual=" << leftOmegaRadps << L"\n"
-                    L"right_wheel_omega_radps=" << rightOmegaRadps << L"\n"
-                    L"criterion=actual > right_wheel_omega_radps";
-                Assert::IsTrue(leftOmegaRadps > rightOmegaRadps, message.str().c_str());
+                    L"field=left_wheel_speed_radps\n"
+                    L"actual=" << leftWheelSpeedRadps << L"\n"
+                    L"right_wheel_speed_radps=" << rightWheelSpeedRadps << L"\n"
+                    L"criterion=actual > right_wheel_speed_radps";
+                Assert::IsTrue(leftWheelSpeedRadps > rightWheelSpeedRadps, message.str().c_str());
             }
         }
 

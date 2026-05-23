@@ -281,7 +281,7 @@ def build_trace_from_segment_rows(
                 abs_command=abs_command,
                 logged_command=abs(left_drive_command),
                 measured_linear_speed_mps=sign * float(row["linear_speed_mps"]),
-                average_encoder_omega_radps=(
+                average_encoder_wheel_speed_radps=(
                     (sign * average_encoder_velocity_mps) / wheel_radius_m
                     if wheel_radius_m > 0.0
                     else 0.0

@@ -53,10 +53,10 @@ namespace MazeMap
         {
             VehicleState state;
             state.SetPosition(Eigen::Vector2f(xM, yM));
-            state.SetOrientation(yawRad);
-            state.SetVelocity(forwardVelocityMps);
-            state.SetLateralVelocity(lateralVelocityMps);
-            state.SetRotationalVelocity(yawRateRadps);
+            state.SetHeading(yawRad);
+            state.SetForwardVelocity(forwardVelocityMps);
+            state.SetRightwardVelocity(lateralVelocityMps);
+            state.SetYawRate(yawRateRadps);
             state.SetWheelSpeedLeft(leftWheelSpeedRadps);
             state.SetWheelSpeedRight(rightWheelSpeedRadps);
             return state;
@@ -75,9 +75,9 @@ namespace MazeMap
                 forwardVelocityMps,
                 lateralVelocityMps,
                 yawRateRadps,
-                Vehicle::WheelOmegaFromLinearVelocity(
+                Vehicle::WheelSpeedFromLinearVelocity(
                     Vehicle::LeftWheelLinearVelocityFromBody(forwardVelocityMps, yawRateRadps)),
-                Vehicle::WheelOmegaFromLinearVelocity(
+                Vehicle::WheelSpeedFromLinearVelocity(
                     Vehicle::RightWheelLinearVelocityFromBody(forwardVelocityMps, yawRateRadps)));
         }
 
@@ -111,13 +111,13 @@ namespace MazeMap
                 runtime.runtimeState = state;
                 runtime.plant.integrate(command, kDirectDtSeconds);
                 state = runtime.runtimeState;
-                if (state.GetOrientation() < -PI_F || state.GetOrientation() > PI_F)
+                if (state.GetHeading() < -PI_F || state.GetHeading() > PI_F)
                 {
-                    return state.GetOrientation();
+                    return state.GetHeading();
                 }
             }
 
-            return state.GetOrientation();
+            return state.GetHeading();
         }
 
         App::Internal::CommandVector LongRunForwardFirstNonFiniteOrFinalSolveCommand()
@@ -146,7 +146,7 @@ namespace MazeMap
         {
             TestRuntime runtime;
             VehicleState state = MakeRollingState(0.30f, 0.0f);
-            const float initialForwardMps = state.GetVelocity();
+            const float initialForwardMps = state.GetForwardVelocity();
 
             for (int tick = 0; tick < 500; ++tick)
             {
@@ -157,7 +157,7 @@ namespace MazeMap
                 state = runtime.runtimeState;
             }
 
-            return state.GetVelocity() - initialForwardMps;
+            return state.GetForwardVelocity() - initialForwardMps;
         }
     }
 
@@ -285,12 +285,12 @@ namespace MazeMap
             std::wstringstream message;
             message << L"PM20_AXIS_CONVENTION"
                 << L"\nfield=yaw_rad"
-                << L"\ninitial=" << state.GetOrientation()
-                << L"\nactual=" << integrated.GetOrientation()
+                << L"\ninitial=" << state.GetHeading()
+                << L"\nactual=" << integrated.GetHeading()
                 << L"\ncriterion=actual>initial";
 
             Assert::IsTrue(
-                integrated.GetOrientation() > state.GetOrientation(),
+                integrated.GetHeading() > state.GetHeading(),
                 message.str().c_str());
         }
 
@@ -316,19 +316,23 @@ namespace MazeMap
         {
             TestRuntime runtime;
             EncoderObs observation{};
-            Vehicle::WheelOmegasFromBodyVelocity(
+            float leftWheelSpeedRadps = 0.0f;
+            float rightWheelSpeedRadps = 0.0f;
+            Vehicle::WheelSpeedsFromBodyVelocity(
                 0.40f,
                 2.0f,
-                observation.omegaLeftRadps,
-                observation.omegaRightRadps);
+                leftWheelSpeedRadps,
+                rightWheelSpeedRadps);
+            observation.SetLeftWheelSpeedRadps(leftWheelSpeedRadps);
+            observation.SetRightWheelSpeedRadps(rightWheelSpeedRadps);
             const float actualYawRateRadps = runtime.plant.measuredYawRateRadps(observation);
             std::wstringstream message;
             message << L"PM20_WHEEL_YAW_SIGN"
                 << L"\nfield=measured_yaw_rate_radps"
                 << L"\nactual=" << actualYawRateRadps
                 << L"\ncriterion=actual>0"
-                << L"\nleft_omega_radps=" << observation.omegaLeftRadps
-                << L"\nright_omega_radps=" << observation.omegaRightRadps;
+                << L"\nleft_wheel_speed_radps=" << observation.LeftWheelSpeedRadps()
+                << L"\nright_wheel_speed_radps=" << observation.RightWheelSpeedRadps();
 
             Assert::IsTrue(
                 actualYawRateRadps > 0.0f,
@@ -373,15 +377,15 @@ namespace MazeMap
             std::wstringstream accelMessage;
             accelMessage << L"PM20_WHEEL_YAW_SIGN"
                 << L"\nfield=yaw_rate_after_step_radps"
-                << L"\ninitial=" << state.GetRotationalVelocity()
-                << L"\nactual=" << integrated.GetRotationalVelocity()
+                << L"\ninitial=" << state.GetYawRate()
+                << L"\nactual=" << integrated.GetYawRate()
                 << L"\ncriterion=actual>initial";
 
             Assert::IsTrue(
                 command.Differential() > 0.0f,
                 commandMessage.str().c_str());
             Assert::IsTrue(
-                integrated.GetRotationalVelocity() > state.GetRotationalVelocity(),
+                integrated.GetYawRate() > state.GetYawRate(),
                 accelMessage.str().c_str());
         }
 
@@ -490,12 +494,12 @@ namespace MazeMap
             message << L"PM21_FORCE_SYMMETRY"
                 << L"\nfield=yaw_accel_radps2"
                 << L"\nexpected=0"
-                << L"\nactual=" << integrated.GetYawAcceleration()
+                << L"\nactual=" << integrated.GetYawAccel()
                 << L"\ntolerance=1e-4";
 
             Assert::AreEqual(
                 0.0f,
-                integrated.GetYawAcceleration(),
+                integrated.GetYawAccel(),
                 1.0e-4f,
                 message.str().c_str());
         }
@@ -511,12 +515,12 @@ namespace MazeMap
             message << L"PM21_FORCE_SYMMETRY"
                 << L"\nfield=lateral_accel_mps2"
                 << L"\nexpected=0"
-                << L"\nactual=" << integrated.GetLateralAcceleration()
+                << L"\nactual=" << integrated.GetRightAcceleration()
                 << L"\ntolerance=1e-4";
 
             Assert::AreEqual(
                 0.0f,
-                integrated.GetLateralAcceleration(),
+                integrated.GetRightAcceleration(),
                 1.0e-4f,
                 message.str().c_str());
         }
@@ -626,7 +630,7 @@ namespace MazeMap
             TestRuntime runtime;
             VehicleState state =
                 MakeState(0.02f, 0.03f, 0.10f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
-            const float initial = state.GetOrientation();
+            const float initial = state.GetHeading();
             for (int tick = 0; tick < 100; ++tick)
             {
                 runtime.runtimeState = state;
@@ -637,12 +641,12 @@ namespace MazeMap
             message << L"PM21_STICTION"
                 << L"\nfield=yaw_rad"
                 << L"\nexpected=" << initial
-                << L"\nactual=" << state.GetOrientation()
+                << L"\nactual=" << state.GetHeading()
                 << L"\ntolerance=1e-6";
 
             Assert::AreEqual(
                 initial,
-                state.GetOrientation(),
+                state.GetHeading(),
                 1.0e-6f,
                 message.str().c_str());
         }
@@ -652,7 +656,7 @@ namespace MazeMap
             TestRuntime runtime;
             VehicleState state =
                 MakeState(0.02f, 0.03f, 0.10f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
-            const float initial = state.GetVelocity();
+            const float initial = state.GetForwardVelocity();
             for (int tick = 0; tick < 100; ++tick)
             {
                 runtime.runtimeState = state;
@@ -663,12 +667,12 @@ namespace MazeMap
             message << L"PM21_STICTION"
                 << L"\nfield=forward_velocity_mps"
                 << L"\nexpected=" << initial
-                << L"\nactual=" << state.GetVelocity()
+                << L"\nactual=" << state.GetForwardVelocity()
                 << L"\ntolerance=1e-6";
 
             Assert::AreEqual(
                 initial,
-                state.GetVelocity(),
+                state.GetForwardVelocity(),
                 1.0e-6f,
                 message.str().c_str());
         }
@@ -678,7 +682,7 @@ namespace MazeMap
             TestRuntime runtime;
             VehicleState state =
                 MakeState(0.02f, 0.03f, 0.10f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
-            const float initial = state.GetLateralVelocity();
+            const float initial = state.GetRightwardVelocity();
             for (int tick = 0; tick < 100; ++tick)
             {
                 runtime.runtimeState = state;
@@ -689,12 +693,12 @@ namespace MazeMap
             message << L"PM21_STICTION"
                 << L"\nfield=lateral_velocity_mps"
                 << L"\nexpected=" << initial
-                << L"\nactual=" << state.GetLateralVelocity()
+                << L"\nactual=" << state.GetRightwardVelocity()
                 << L"\ntolerance=1e-6";
 
             Assert::AreEqual(
                 initial,
-                state.GetLateralVelocity(),
+                state.GetRightwardVelocity(),
                 1.0e-6f,
                 message.str().c_str());
         }
@@ -704,7 +708,7 @@ namespace MazeMap
             TestRuntime runtime;
             VehicleState state =
                 MakeState(0.02f, 0.03f, 0.10f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
-            const float initial = state.GetRotationalVelocity();
+            const float initial = state.GetYawRate();
             for (int tick = 0; tick < 100; ++tick)
             {
                 runtime.runtimeState = state;
@@ -715,12 +719,12 @@ namespace MazeMap
             message << L"PM21_STICTION"
                 << L"\nfield=yaw_rate_radps"
                 << L"\nexpected=" << initial
-                << L"\nactual=" << state.GetRotationalVelocity()
+                << L"\nactual=" << state.GetYawRate()
                 << L"\ntolerance=1e-6";
 
             Assert::AreEqual(
                 initial,
-                state.GetRotationalVelocity(),
+                state.GetYawRate(),
                 1.0e-6f,
                 message.str().c_str());
         }
@@ -984,7 +988,7 @@ namespace MazeMap
             runtime.runtimeState = initial;
             runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.0f);
             const VehicleState actual = runtime.runtimeState;
-            const float actualDelta = actual.GetOrientation() - initial.GetOrientation();
+            const float actualDelta = actual.GetHeading() - initial.GetHeading();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=yaw_delta_rad"
@@ -1007,7 +1011,7 @@ namespace MazeMap
             runtime.runtimeState = initial;
             runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.0f);
             const VehicleState actual = runtime.runtimeState;
-            const float actualDelta = actual.GetVelocity() - initial.GetVelocity();
+            const float actualDelta = actual.GetForwardVelocity() - initial.GetForwardVelocity();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=forward_velocity_delta_mps"
@@ -1030,7 +1034,7 @@ namespace MazeMap
             runtime.runtimeState = initial;
             runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.0f);
             const VehicleState actual = runtime.runtimeState;
-            const float actualDelta = actual.GetLateralVelocity() - initial.GetLateralVelocity();
+            const float actualDelta = actual.GetRightwardVelocity() - initial.GetRightwardVelocity();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=lateral_velocity_delta_mps"
@@ -1053,7 +1057,7 @@ namespace MazeMap
             runtime.runtimeState = initial;
             runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.0f);
             const VehicleState actual = runtime.runtimeState;
-            const float actualDelta = actual.GetRotationalVelocity() - initial.GetRotationalVelocity();
+            const float actualDelta = actual.GetYawRate() - initial.GetYawRate();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=yaw_rate_delta_radps"
@@ -1210,17 +1214,17 @@ namespace MazeMap
             runtime.runtimeState = initial;
             runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.004f);
             const VehicleState state = runtime.runtimeState;
-            const float actual = state.GetOrientation();
+            const float actual = state.GetHeading();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=yaw_rad"
-                << L"\ninitial=" << initial.GetOrientation()
+                << L"\ninitial=" << initial.GetHeading()
                 << L"\nactual=" << actual
                 << L"\ncriterion=actual>initial"
                 << L"\ndt_seconds=0.004";
 
             Assert::IsTrue(
-                actual > initial.GetOrientation(),
+                actual > initial.GetHeading(),
                 message.str().c_str());
         }
 
@@ -1231,17 +1235,17 @@ namespace MazeMap
             runtime.runtimeState = initial;
             runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.004f);
             const VehicleState state = runtime.runtimeState;
-            const float actual = state.GetVelocity();
+            const float actual = state.GetForwardVelocity();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=forward_velocity_mps"
-                << L"\ninitial=" << initial.GetVelocity()
+                << L"\ninitial=" << initial.GetForwardVelocity()
                 << L"\nactual=" << actual
                 << L"\ncriterion=actual>initial"
                 << L"\ndt_seconds=0.004";
 
             Assert::IsTrue(
-                actual > initial.GetVelocity(),
+                actual > initial.GetForwardVelocity(),
                 message.str().c_str());
         }
 
@@ -1252,17 +1256,17 @@ namespace MazeMap
             runtime.runtimeState = initial;
             runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.004f);
             const VehicleState state = runtime.runtimeState;
-            const float actual = state.GetLateralVelocity();
+            const float actual = state.GetRightwardVelocity();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=lateral_velocity_mps"
-                << L"\ninitial=" << initial.GetLateralVelocity()
+                << L"\ninitial=" << initial.GetRightwardVelocity()
                 << L"\nactual=" << actual
                 << L"\ncriterion=abs(actual)<abs(initial)"
                 << L"\ndt_seconds=0.004";
 
             Assert::IsTrue(
-                std::fabs(actual) < std::fabs(initial.GetLateralVelocity()),
+                std::fabs(actual) < std::fabs(initial.GetRightwardVelocity()),
                 message.str().c_str());
         }
 
@@ -1273,17 +1277,17 @@ namespace MazeMap
             runtime.runtimeState = initial;
             runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.004f);
             const VehicleState state = runtime.runtimeState;
-            const float actual = state.GetRotationalVelocity();
+            const float actual = state.GetYawRate();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=yaw_rate_radps"
-                << L"\ninitial=" << initial.GetRotationalVelocity()
+                << L"\ninitial=" << initial.GetYawRate()
                 << L"\nactual=" << actual
                 << L"\ncriterion=actual>initial"
                 << L"\ndt_seconds=0.004";
 
             Assert::IsTrue(
-                actual > initial.GetRotationalVelocity(),
+                actual > initial.GetYawRate(),
                 message.str().c_str());
         }
 
@@ -1392,18 +1396,18 @@ namespace MazeMap
                 runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.001f);
                 state = runtime.runtimeState;
             }
-            const float actual = state.GetOrientation();
+            const float actual = state.GetHeading();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=yaw_rad"
-                << L"\ninitial=" << initial.GetOrientation()
+                << L"\ninitial=" << initial.GetHeading()
                 << L"\nactual=" << actual
                 << L"\ncriterion=actual>initial"
                 << L"\nsubsteps=4"
                 << L"\ndt_seconds=0.001";
 
             Assert::IsTrue(
-                actual > initial.GetOrientation(),
+                actual > initial.GetHeading(),
                 message.str().c_str());
         }
 
@@ -1418,18 +1422,18 @@ namespace MazeMap
                 runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.001f);
                 state = runtime.runtimeState;
             }
-            const float actual = state.GetVelocity();
+            const float actual = state.GetForwardVelocity();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=forward_velocity_mps"
-                << L"\ninitial=" << initial.GetVelocity()
+                << L"\ninitial=" << initial.GetForwardVelocity()
                 << L"\nactual=" << actual
                 << L"\ncriterion=actual>initial"
                 << L"\nsubsteps=4"
                 << L"\ndt_seconds=0.001";
 
             Assert::IsTrue(
-                actual > initial.GetVelocity(),
+                actual > initial.GetForwardVelocity(),
                 message.str().c_str());
         }
 
@@ -1444,18 +1448,18 @@ namespace MazeMap
                 runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.001f);
                 state = runtime.runtimeState;
             }
-            const float actual = state.GetLateralVelocity();
+            const float actual = state.GetRightwardVelocity();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=lateral_velocity_mps"
-                << L"\ninitial=" << initial.GetLateralVelocity()
+                << L"\ninitial=" << initial.GetRightwardVelocity()
                 << L"\nactual=" << actual
                 << L"\ncriterion=abs(actual)<abs(initial)"
                 << L"\nsubsteps=4"
                 << L"\ndt_seconds=0.001";
 
             Assert::IsTrue(
-                std::fabs(actual) < std::fabs(initial.GetLateralVelocity()),
+                std::fabs(actual) < std::fabs(initial.GetRightwardVelocity()),
                 message.str().c_str());
         }
 
@@ -1470,18 +1474,18 @@ namespace MazeMap
                 runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.001f);
                 state = runtime.runtimeState;
             }
-            const float actual = state.GetRotationalVelocity();
+            const float actual = state.GetYawRate();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=yaw_rate_radps"
-                << L"\ninitial=" << initial.GetRotationalVelocity()
+                << L"\ninitial=" << initial.GetYawRate()
                 << L"\nactual=" << actual
                 << L"\ncriterion=actual>initial"
                 << L"\nsubsteps=4"
                 << L"\ndt_seconds=0.001";
 
             Assert::IsTrue(
-                actual > initial.GetRotationalVelocity(),
+                actual > initial.GetYawRate(),
                 message.str().c_str());
         }
 
@@ -1606,7 +1610,7 @@ namespace MazeMap
                 runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.001f);
                 substeps = runtime.runtimeState;
             }
-            const float actualDelta = singleStep.GetVelocity() - substeps.GetVelocity();
+            const float actualDelta = singleStep.GetForwardVelocity() - substeps.GetForwardVelocity();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=forward_velocity_single_minus_substeps_mps"
@@ -1635,7 +1639,7 @@ namespace MazeMap
                 substeps = runtime.runtimeState;
             }
             const float actualDelta =
-                singleStep.GetRotationalVelocity() - substeps.GetRotationalVelocity();
+                singleStep.GetYawRate() - substeps.GetYawRate();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=yaw_rate_single_minus_substeps_radps"
@@ -1714,12 +1718,12 @@ namespace MazeMap
                 runtime.runtimeState = state;
                 runtime.plant.integrate(command, kDirectDtSeconds);
                 state = runtime.runtimeState;
-                if (!std::isfinite(state.GetOrientation()))
+                if (!std::isfinite(state.GetHeading()))
                 {
                     break;
                 }
             }
-            const float actual = state.GetOrientation();
+            const float actual = state.GetHeading();
             std::wstringstream message;
             message << L"PM22_NUMERIC_STABILITY"
                 << L"\nfield=yaw_rad"
@@ -1741,12 +1745,12 @@ namespace MazeMap
                 runtime.runtimeState = state;
                 runtime.plant.integrate(command, kDirectDtSeconds);
                 state = runtime.runtimeState;
-                if (!std::isfinite(state.GetVelocity()))
+                if (!std::isfinite(state.GetForwardVelocity()))
                 {
                     break;
                 }
             }
-            const float actual = state.GetVelocity();
+            const float actual = state.GetForwardVelocity();
             std::wstringstream message;
             message << L"PM22_NUMERIC_STABILITY"
                 << L"\nfield=forward_velocity_mps"
@@ -1768,12 +1772,12 @@ namespace MazeMap
                 runtime.runtimeState = state;
                 runtime.plant.integrate(command, kDirectDtSeconds);
                 state = runtime.runtimeState;
-                if (!std::isfinite(state.GetLateralVelocity()))
+                if (!std::isfinite(state.GetRightwardVelocity()))
                 {
                     break;
                 }
             }
-            const float actual = state.GetLateralVelocity();
+            const float actual = state.GetRightwardVelocity();
             std::wstringstream message;
             message << L"PM22_NUMERIC_STABILITY"
                 << L"\nfield=lateral_velocity_mps"
@@ -1795,12 +1799,12 @@ namespace MazeMap
                 runtime.runtimeState = state;
                 runtime.plant.integrate(command, kDirectDtSeconds);
                 state = runtime.runtimeState;
-                if (!std::isfinite(state.GetRotationalVelocity()))
+                if (!std::isfinite(state.GetYawRate()))
                 {
                     break;
                 }
             }
-            const float actual = state.GetRotationalVelocity();
+            const float actual = state.GetYawRate();
             std::wstringstream message;
             message << L"PM22_NUMERIC_STABILITY"
                 << L"\nfield=yaw_rate_radps"
@@ -1893,7 +1897,7 @@ namespace MazeMap
                 runtime.plant.integrate(command, kDirectDtSeconds);
                 state = runtime.runtimeState;
             }
-            const float actual = state.GetVelocity();
+            const float actual = state.GetForwardVelocity();
             std::wstringstream message;
             message << L"PM22_NUMERIC_STABILITY"
                 << L"\nfield=final_forward_velocity_mps"
@@ -1916,7 +1920,7 @@ namespace MazeMap
                 runtime.plant.integrate(command, kDirectDtSeconds);
                 state = runtime.runtimeState;
             }
-            const float actual = state.GetRotationalVelocity();
+            const float actual = state.GetYawRate();
             std::wstringstream message;
             message << L"PM22_NUMERIC_STABILITY"
                 << L"\nfield=final_yaw_rate_radps"
@@ -2162,12 +2166,12 @@ namespace MazeMap
                 runtime.runtimeState = state;
                 runtime.plant.integrate(command, kDirectDtSeconds);
                 state = runtime.runtimeState;
-                if (!std::isfinite(state.GetOrientation()))
+                if (!std::isfinite(state.GetHeading()))
                 {
                     break;
                 }
             }
-            const float actual = state.GetOrientation();
+            const float actual = state.GetHeading();
             std::wstringstream message;
             message << L"PM23_INVERSE_SIGN"
                 << L"\nfield=long_run_yaw_rad"
@@ -2190,12 +2194,12 @@ namespace MazeMap
                 runtime.runtimeState = state;
                 runtime.plant.integrate(command, kDirectDtSeconds);
                 state = runtime.runtimeState;
-                if (!std::isfinite(state.GetVelocity()))
+                if (!std::isfinite(state.GetForwardVelocity()))
                 {
                     break;
                 }
             }
-            const float actual = state.GetVelocity();
+            const float actual = state.GetForwardVelocity();
             std::wstringstream message;
             message << L"PM23_INVERSE_SIGN"
                 << L"\nfield=long_run_forward_velocity_mps"
@@ -2218,12 +2222,12 @@ namespace MazeMap
                 runtime.runtimeState = state;
                 runtime.plant.integrate(command, kDirectDtSeconds);
                 state = runtime.runtimeState;
-                if (!std::isfinite(state.GetLateralVelocity()))
+                if (!std::isfinite(state.GetRightwardVelocity()))
                 {
                     break;
                 }
             }
-            const float actual = state.GetLateralVelocity();
+            const float actual = state.GetRightwardVelocity();
             std::wstringstream message;
             message << L"PM23_INVERSE_SIGN"
                 << L"\nfield=long_run_lateral_velocity_mps"
@@ -2246,12 +2250,12 @@ namespace MazeMap
                 runtime.runtimeState = state;
                 runtime.plant.integrate(command, kDirectDtSeconds);
                 state = runtime.runtimeState;
-                if (!std::isfinite(state.GetRotationalVelocity()))
+                if (!std::isfinite(state.GetYawRate()))
                 {
                     break;
                 }
             }
-            const float actual = state.GetRotationalVelocity();
+            const float actual = state.GetYawRate();
             std::wstringstream message;
             message << L"PM23_INVERSE_SIGN"
                 << L"\nfield=long_run_yaw_rate_radps"

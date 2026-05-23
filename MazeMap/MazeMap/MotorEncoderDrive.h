@@ -25,11 +25,11 @@ namespace MazeMap
         // Measured tire stiffness from solid-rubber contact data:
         // normal per tire = (0.138 kg * 9.80665 m/s^2 + 0.56 N fan downforce) / 4 = 0.4783 N,
         // contact length ~= 2.71 mm, K_tire ~= 164.6 N/m, K_bank ~= 329.2 N/m.
-        // That maps to C_kappa ~= 2.06 N per tire. April 2026 open-floor lateral logs fit
-        // front/rear cornering stiffness at 18/16 N/rad per tire for this drive contact system.
+        // That maps to C_kappa ~= 2.06 N per tire. April 2026 open-floor right-slip logs fit
+        // front/rear right-direction contact-force gains at 18/16 N per (m/s) of rightward contact slip velocity.
         static constexpr float kDefaultLongitudinalTireStiffnessN = 4.12f;
-        static constexpr float kDefaultFrontLateralTireStiffnessNPerRad = 18.0f;
-        static constexpr float kDefaultRearLateralTireStiffnessNPerRad = 16.0f;
+        static constexpr float kDefaultFrontRightContactForceGainNPerMps = 18.0f;
+        static constexpr float kDefaultRearRightContactForceGainNPerMps = 16.0f;
         float _resistance = 1.0f;
         float _voltage = 0.0f;
         float _torqueConstant = 0.0f;
@@ -40,8 +40,8 @@ namespace MazeMap
         float _wheelDiameter = 0.0f;
         float _equivalentWheelInertiaKgM2 = 0.0f;
         float _longitudinalTireStiffnessN = 0.0f;
-        float _frontLateralTireStiffnessNPerRad = 0.0f;
-        float _rearLateralTireStiffnessNPerRad = 0.0f;
+        float _frontRightContactForceGainNPerMps = 0.0f;
+        float _rearRightContactForceGainNPerMps = 0.0f;
         uint16_t _pulsesPerRev = 1U;
         uint8_t _motorOutPinA = Platform::kInvalidPin;
         uint8_t _motorOutPinB = Platform::kInvalidPin;
@@ -128,8 +128,8 @@ namespace MazeMap
             float drivetrainEfficiency = 1.0f,
             float equivalentWheelInertiaKgM2 = kDefaultWheelBankEquivalentInertiaKgM2,
             float longitudinalTireStiffnessN = kDefaultLongitudinalTireStiffnessN,
-            float frontLateralTireStiffnessNPerRad = kDefaultFrontLateralTireStiffnessNPerRad,
-            float rearLateralTireStiffnessNPerRad = kDefaultRearLateralTireStiffnessNPerRad) noexcept
+            float frontRightContactForceGainNPerMps = kDefaultFrontRightContactForceGainNPerMps,
+            float rearRightContactForceGainNPerMps = kDefaultRearRightContactForceGainNPerMps) noexcept
             : _resistance(resistance)
             , _voltage(voltage)
             , _torqueConstant(torqueConstant)
@@ -140,8 +140,8 @@ namespace MazeMap
             , _wheelDiameter(wheelDiameter)
             , _equivalentWheelInertiaKgM2(equivalentWheelInertiaKgM2)
             , _longitudinalTireStiffnessN(longitudinalTireStiffnessN)
-            , _frontLateralTireStiffnessNPerRad(frontLateralTireStiffnessNPerRad)
-            , _rearLateralTireStiffnessNPerRad(rearLateralTireStiffnessNPerRad)
+            , _frontRightContactForceGainNPerMps(frontRightContactForceGainNPerMps)
+            , _rearRightContactForceGainNPerMps(rearRightContactForceGainNPerMps)
             , _pulsesPerRev(pulsesPerRev)
             , _motorOutPinA(motorOutPinA)
             , _motorOutPinB(motorOutPinB)
@@ -200,9 +200,9 @@ namespace MazeMap
 
         float getLongitudinalTireStiffnessN() const noexcept { return _longitudinalTireStiffnessN; }
 
-        float getFrontLateralTireStiffnessNPerRad() const noexcept { return _frontLateralTireStiffnessNPerRad; }
+        float getFrontRightContactForceGainNPerMps() const noexcept { return _frontRightContactForceGainNPerMps; }
 
-        float getRearLateralTireStiffnessNPerRad() const noexcept { return _rearLateralTireStiffnessNPerRad; }
+        float getRearRightContactForceGainNPerMps() const noexcept { return _rearRightContactForceGainNPerMps; }
 
         uint16_t getPulsesPerRev() const noexcept { return _pulsesPerRev; }
 

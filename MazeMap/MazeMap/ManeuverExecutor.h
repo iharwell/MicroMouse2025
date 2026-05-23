@@ -4,6 +4,7 @@
 #include "LoopController.h"
 #include "ManeuverQueue.h"
 #include "MazeMapRuntimeCore.h"
+#include "VehicleState.h"
 
 #include <cstdint>
 
@@ -29,7 +30,11 @@ namespace MazeMap::App::Internal
             const MotionLimits& limits,
             bool snapToExpectedLocation,
             MazeMap::DirectionalLocation& currentLocation,
-            LoopController::ModeWorkCallback continuationCallback,
+            CommandVector (*continuationCallback)(
+                void* context,
+                std::uint32_t loopEndTimeUs,
+                const MazeMap::VehicleState& state,
+                LoopController& loopController),
             void* continuationContext,
             LoopController& loopController);
 
@@ -46,7 +51,11 @@ namespace MazeMap::App::Internal
 
         struct Continuation final
         {
-            LoopController::ModeWorkCallback callback{};
+            CommandVector (*callback)(
+                void* context,
+                std::uint32_t loopEndTimeUs,
+                const MazeMap::VehicleState& state,
+                LoopController& loopController){};
             void* context{};
         };
 
@@ -79,7 +88,11 @@ namespace MazeMap::App::Internal
         bool BeginPhase(
             void* activeState,
             ActivePhaseTickFn activePhaseTick,
-            LoopController::ModeWorkCallback continuationCallback,
+            CommandVector (*continuationCallback)(
+                void* context,
+                std::uint32_t loopEndTimeUs,
+                const MazeMap::VehicleState& state,
+                LoopController& loopController),
             void* continuationContext) noexcept;
         bool InstallRoutineCallback(LoopController& loopController) noexcept;
         void ActivatePhase(void* activeState, ActivePhaseTickFn activePhaseTick) noexcept;

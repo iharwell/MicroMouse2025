@@ -214,11 +214,9 @@ namespace MazeMap
 
 		TEST_METHOD(VehicleDriveFactsExposePhysicalAndEncoderModel)
 		{
-			const auto& vehicleModel = Vehicle::GetPhysicalModel();
-
-			Assert::AreEqual(0.14f, vehicleModel.massKg, 1.0e-6f);
-			Assert::AreEqual(0.084635f, vehicleModel.trackWidthM, 1.0e-6f);
-			Assert::AreEqual(0.000220f, vehicleModel.yawInertiaKgM2, 1.0e-8f);
+			Assert::AreEqual(0.14f, Vehicle::GetPhysicalMassKg(), 1.0e-6f);
+			Assert::AreEqual(0.084635f, Vehicle::GetPhysicalTrackWidthM(), 1.0e-6f);
+			Assert::AreEqual(0.000220f, Vehicle::GetPhysicalYawInertiaKgM2(), 1.0e-8f);
 			Assert::IsTrue(Vehicle::GetDriveWheelRadiusM() > 0.0f);
 			Assert::IsTrue(Vehicle::DriveEncoderDistanceFromCounts(1) > 0.0f);
 
@@ -226,18 +224,18 @@ namespace MazeMap
 			Assert::AreEqual(8.4f, vehicle.GetBatteryVoltage(), 1.0e-6f);
 		}
 
-		TEST_METHOD(ArcTrackWidthInterpolationClampsAndBlendsByRadius)
+		TEST_METHOD(ArcEffectiveTrackWidthClampsAndBlendsByRadius)
 		{
 			Assert::AreEqual(0.13235f, Vehicle::GetArcEffectiveTrackWidth(0.040f), 1.0e-6f);
 			Assert::AreEqual(0.13235f, Vehicle::GetArcEffectiveTrackWidth(0.200f), 1.0e-6f);
 			Assert::AreEqual(0.13235f, Vehicle::GetArcEffectiveTrackWidth(0.108f), 1.0e-6f);
 		}
 
-		TEST_METHOD(ArcTrackWidthInterpolationFallsBackToBaseWidthForStraightAndInPlaceMotion)
+		TEST_METHOD(MotionEffectiveTrackWidthUsesDirectBodyKinematics)
 		{
 			Assert::AreEqual(0.084635f, Vehicle::GetEffectiveTrackWidthForMotion(0.0f, 4.0f), 1.0e-6f);
 			Assert::AreEqual(0.084635f, Vehicle::GetEffectiveTrackWidthForMotion(0.3f, 0.0f), 1.0e-6f);
-			Assert::AreEqual(0.13235f, Vehicle::GetEffectiveTrackWidthForMotion(0.3f, (0.3f / 0.063f)), 1.0e-6f);
+			Assert::AreEqual(0.084635f, Vehicle::GetEffectiveTrackWidthForMotion(0.3f, (0.3f / 0.063f)), 1.0e-6f);
 		}
 
 		TEST_METHOD(TryComputeEffectiveTrackWidthMUsesEncoderDifferentialOverYaw)
@@ -486,7 +484,7 @@ namespace MazeMap
 		TEST_METHOD(VehicleInPlaceTurnTimeUsesAngularAccelerationProfile)
 		{
 			Vehicle vehicle;
-			vehicle.SetMaxAngularAcceleration(45.0f);
+			vehicle.SetMaxYawAccel(45.0f);
 
 			const float quarterTurn = vehicle.GetInPlaceTurnTime(0.25f * PI_F);
 			const float halfTurn = vehicle.GetInPlaceTurnTime(PI_F);
@@ -1562,10 +1560,15 @@ namespace MazeMap
 
 		TEST_METHOD(UiImuAccelLpf2CutoffMatchesConfiguredFraction)
 		{
-			using AccelFilterFreq = MazeMap::Vehicle::ImuBackLeft::ACCEL_FILTER_FREQ;
-			Assert::IsTrue(std::fabs(GetUiAccelLpf2CutoffHzForControlPeriodUs(500UL, AccelFilterFreq::FRAC_1_020) - 100.0f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(GetUiAccelLpf2CutoffHzForControlPeriodUs(500UL, AccelFilterFreq::FRAC_1_400) - 5.0f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(GetUiAccelLpf2CutoffHzForControlPeriodUs(500UL, AccelFilterFreq::FRAC_1_002)) < 1.0e-6f);
+			Assert::IsTrue(std::fabs(GetUiAccelLpf2CutoffHzForControlPeriodUs(
+				500UL,
+				MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::ACCEL_FILTER_FREQ::FRAC_1_020) - 100.0f) < 1.0e-6f);
+			Assert::IsTrue(std::fabs(GetUiAccelLpf2CutoffHzForControlPeriodUs(
+				500UL,
+				MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::ACCEL_FILTER_FREQ::FRAC_1_400) - 5.0f) < 1.0e-6f);
+			Assert::IsTrue(std::fabs(GetUiAccelLpf2CutoffHzForControlPeriodUs(
+				500UL,
+				MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::ACCEL_FILTER_FREQ::FRAC_1_002)) < 1.0e-6f);
 		}
 
 		TEST_METHOD(UiImuGyroCut213ReferenceMatchesDatasheetTables)

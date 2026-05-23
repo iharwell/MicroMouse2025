@@ -67,7 +67,11 @@ namespace MazeMap::App::Internal
     bool ManeuverExecutor::BeginPhase(
         void* const activeState,
         const ActivePhaseTickFn activePhaseTick,
-        const LoopController::ModeWorkCallback continuationCallback,
+        CommandVector (* const continuationCallback)(
+            void*,
+            std::uint32_t,
+            const MazeMap::VehicleState&,
+            LoopController&),
         void* const continuationContext) noexcept
     {
         if (!CanBeginPhase() || (activeState == nullptr) || (activePhaseTick == nullptr))
@@ -157,7 +161,11 @@ namespace MazeMap::App::Internal
         const MotionLimits& limits,
         const bool snapToExpectedLocation,
         MazeMap::DirectionalLocation& currentLocation,
-        const LoopController::ModeWorkCallback continuationCallback,
+        CommandVector (* const continuationCallback)(
+            void*,
+            std::uint32_t,
+            const MazeMap::VehicleState&,
+            LoopController&),
         void* const continuationContext,
         LoopController& loopController)
     {

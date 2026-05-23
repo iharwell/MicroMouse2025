@@ -52,7 +52,11 @@ namespace MazeMap::App::Internal
             }
 
             _phase = Phase::LaunchStartupCalibration;
-            _loopController.StageNextSessionState(BuildLoopOptions());
+            const auto& runtimeState = _runtime.RuntimeState();
+            _loopController.StageNextSessionState(
+                Config::kControlPeriodUs,
+                runtimeState.GetPositionX(),
+                runtimeState.GetPositionY());
         }
 
     private:
@@ -65,16 +69,6 @@ namespace MazeMap::App::Internal
             RunPostStartupHold,
             Complete
         };
-
-        LoopController::SessionOptions BuildLoopOptions() const noexcept
-        {
-            LoopController::SessionOptions options{};
-            const auto& runtimeState = _runtime.RuntimeState();
-            options.controlPeriodUs = Config::kControlPeriodUs;
-            options.SessionStartPointX = runtimeState.GetPositionX();
-            options.SessionStartPointY = runtimeState.GetPositionY();
-            return options;
-        }
 
         void ResetState() noexcept
         {

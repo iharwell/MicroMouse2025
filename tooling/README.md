@@ -57,7 +57,7 @@ python tooling\analyze_open_floor.py --main D:\open_floor_main.csv --control-log
 Typical use:
 
 1. Run the script on a fresh capture.
-2. Compare the suggested sigmas to the canonical owners in `SrUkfCore.h`.
+2. Compare the suggested sigmas to the canonical owners in `MazeMap/MazeMap/Estimator.h`.
 3. Use the recovery-turn summary to check the actual raw-sensor turn angle before trusting any nominal `180 deg` assumption.
 4. Use the per-command launch summary to decide whether a plant feedforward change is actually supported, or whether the run only justifies estimator-noise changes.
 5. Use the launch-floor section when you need a backlash-safe breakaway estimate; if the tool flags nonmonotonic clear motion, treat the reported floor as provisional and prefer another clean card before retuning plant breakaway.
@@ -101,7 +101,7 @@ Method notes:
 
 ## `run_open_floor_ukf_replay.ps1`
 
-Purpose: build and run the standalone open-floor UKF replay tool that replays decoded `open_floor_main.csv` captures through the current C++ UKF implementation, writes a batch report, and also runs the archival competition feedforward check, without rebuilding `MazeMap.dll`.
+Purpose: build and run the standalone open-floor UKF replay tool that replays decoded `open_floor_main.csv` captures through the current C++ `Estimator` implementation, writes a batch report, and also runs the archival competition feedforward check, without rebuilding `MazeMap.dll`.
 
 Default usage:
 
@@ -159,13 +159,14 @@ powershell -ExecutionPolicy Bypass -File tooling\run_open_floor_ukf_replay.ps1 `
 Notes:
 
 - The runner builds only `Tools/OpenFloorUkfReplay/OpenFloorUkfReplay.vcxproj` in `Release|x64`; it links against the existing `MazeMap.lib` and runs against the existing `MazeMap.dll`.
-- Before replay, the runner checks that `MazeMap.dll` and `MazeMap.lib` exist and are not older than the authoritative UKF sources.
+- Before replay, the runner checks that `MazeMap.dll` and `MazeMap.lib` exist and are not older than the authoritative `Estimator` source set, including `PlantModel`, `Vehicle`, and the IMU sensitivity facts used by estimator covariance.
 - If git is available, the MazeMap freshness gate ignores timestamp-only touched files and blocks only on newer files with actual staged or unstaged content changes.
 - The tool binds each decoded CSV to its sibling `open_floor_main.sidecar` and uses the bound `logging.txt` when present.
 - It ignores the highest `section_id` in each run by default so the known failed final section does not contaminate the batch report.
 - The generated report now includes section-phase error association tables and writes `section_phase_summary.csv` so agents can see which canonical `section_id` + `phase_id` buckets concentrate estimator error.
 - `-KnownStationarySeed` seeds replay from the canonical stationary open-floor marker `C` state instead of the first logged UKF state.
-- `-Tuning` loads a simple `key=value` override file and the report writes `aggregate_metrics.json` for machine scoring.
+- `-EncoderPseudoMeasurement` enables the extra post-predict encoder pseudo-measurement update; by default replay matches production and feeds validated encoder data into prediction only.
+- `-Tuning` is no longer supported by the canonical `Estimator`; the report writes `aggregate_metrics.json` for machine scoring.
 - `-SampleCsv` exports one replay-aligned per-sample CSV for the selected `-RunId`.
 - `-FeedforwardSampleCsv` exports the per-sample feedforward-path audit matrix for the selected `-RunId`.
 - `-Metrics` accepts comma-separated metric names or aliases. Current aliases are `context`, `accel_compare`, and `speed_compare`.

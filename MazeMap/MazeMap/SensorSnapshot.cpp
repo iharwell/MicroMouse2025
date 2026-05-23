@@ -4,48 +4,101 @@
 #include "CoreConfig.h"
 #include "WallObservationPipeline.h"
 
+#include <algorithm>
 #include <cmath>
 
-void ClearFrontWallObservationDecision(SensorSnapshot& snapshot)
-{
-    snapshot.frontWall = false;
-    snapshot.frontLeftWall = false;
-    snapshot.frontRightWall = false;
-    snapshot.frontWallObservationValid = false;
-    snapshot.frontWallUsesFallbackDetection = false;
-    snapshot.frontWallUsesCharacterizationDetection = false;
-}
-
-
-namespace
-{
-    bool ObservationVoteWinsMajority(uint8_t votes, uint8_t sampleCount)
+static bool ObservationVoteWinsMajority(uint8_t votes, uint8_t sampleCount)
 {
     return sampleCount > 0U && votes >= static_cast<uint8_t>((sampleCount / 2U) + 1U);
 }
 
-    float AverageFiniteObservationValue(float sum, uint8_t count, float fallbackValue)
+static float AverageFiniteObservationValue(float sum, uint8_t count, float fallbackValue)
 {
     return (count > 0U) ? (sum / static_cast<float>(count)) : fallbackValue;
 }
 
+static void UpdateWallEvidenceScore(
+    const MazeMap::WallSampleClassification classification,
+    const float hitWeight,
+    const float missWeight,
+    const float unknownDecay,
+    float& score) noexcept
+{
+    switch (classification)
+    {
+    case MazeMap::WallSampleClassification::WallHit:
+        if (std::isfinite(hitWeight) && hitWeight > 0.0f)
+        {
+            score += hitWeight;
+        }
+        break;
+    case MazeMap::WallSampleClassification::WallMiss:
+        if (std::isfinite(missWeight) && missWeight > 0.0f)
+        {
+            score -= missWeight;
+        }
+        break;
+    case MazeMap::WallSampleClassification::Unknown:
+    default:
+        if (std::isfinite(unknownDecay) && unknownDecay > 0.0f)
+        {
+            if (score > 0.0f)
+            {
+                score = (std::max)(0.0f, score - unknownDecay);
+            }
+            else if (score < 0.0f)
+            {
+                score = (std::min)(0.0f, score + unknownDecay);
+            }
+        }
+        break;
+    }
 }
 
-bool BuildEvidenceObservationSnapshot(
+static void InjectWallEvidenceMissImpulse(const float missWeight, float& score) noexcept
+{
+    if (std::isfinite(missWeight) && missWeight > 0.0f)
+    {
+        score -= missWeight;
+    }
+}
+
+static MazeMap::WallSampleClassification FinalWallEvidenceClassification(
+    const float score,
+    const float commitThreshold) noexcept
+{
+    if (!(std::isfinite(commitThreshold) && commitThreshold > 0.0f))
+    {
+        return MazeMap::WallSampleClassification::Unknown;
+    }
+
+    if (score >= commitThreshold)
+    {
+        return MazeMap::WallSampleClassification::WallHit;
+    }
+    if (score <= -commitThreshold)
+    {
+        return MazeMap::WallSampleClassification::WallMiss;
+    }
+
+    return MazeMap::WallSampleClassification::Unknown;
+}
+
+bool SensorSnapshot::BuildEvidenceObservationSnapshot(
     const SensorSnapshot* samples,
-    uint8_t sampleCount,
-    SensorSnapshot& combinedSnapshot,
-    RollingObservationVoteSummary& voteSummary)
+    uint8_t sampleCount) noexcept
 {
     if (samples == nullptr || sampleCount == 0U)
     {
         return false;
     }
 
-    voteSummary = RollingObservationVoteSummary{};
-    voteSummary.sampleCount = sampleCount;
+    SensorSnapshot& combinedSnapshot = *this;
     combinedSnapshot = SensorSnapshot{};
 
+    uint8_t frontLeftWallVotes = 0U;
+    uint8_t frontRightWallVotes = 0U;
+    uint8_t frontObservationCount = 0U;
     float frontLeftDistanceSum = 0.0f;
     float frontRightDistanceSum = 0.0f;
     float frontLeftDifferentialLightSum = 0.0f;
@@ -70,206 +123,228 @@ bool BuildEvidenceObservationSnapshot(
     uint8_t frontSkewCount = 0U;
     uint8_t planarAccelCount = 0U;
     uint8_t gyroCount = 0U;
-    MazeMap::WallDecisionAccumulator frontEvidence{};
-    MazeMap::WallDecisionAccumulator leftEvidence{};
-    MazeMap::WallDecisionAccumulator rightEvidence{};
+    float frontEvidenceScore = 0.0f;
+    float leftEvidenceScore = 0.0f;
+    float rightEvidenceScore = 0.0f;
     bool leftTransitionDetected = false;
     bool rightTransitionDetected = false;
     bool encoderObservationValid = false;
     MazeMap::EncoderObs encoderObservation{};
+    MazeMap::WallObs frontLeftWallSensorObservation{};
+    MazeMap::WallObs frontRightWallSensorObservation{};
+    MazeMap::WallObs sideLeftWallSensorObservation{};
+    MazeMap::WallObs sideRightWallSensorObservation{};
 
     for (uint8_t sampleIndex = 0U; sampleIndex < sampleCount; ++sampleIndex)
     {
         const SensorSnapshot& sample = samples[sampleIndex];
-        if (sample.encoderObservationValid)
+        if (sample.EncoderObservationValid())
         {
-            encoderObservation = sample.encoderObservation;
+            encoderObservation = sample.EncoderObservation();
             encoderObservationValid = true;
         }
 
-        if (sample.frontWall)
-        {
-            ++voteSummary.frontWallVotes;
-        }
-        if (sample.frontLeftWall)
-        {
-            ++voteSummary.frontLeftWallVotes;
-        }
-        if (sample.frontRightWall)
-        {
-            ++voteSummary.frontRightWallVotes;
-        }
-        if (sample.frontWallUsesFallbackDetection)
-        {
-            ++voteSummary.frontFallbackVotes;
-        }
-        if (sample.leftWallObservation)
-        {
-            ++voteSummary.leftWallVotes;
-        }
-        if (sample.rightWallObservation)
-        {
-            ++voteSummary.rightWallVotes;
-        }
-        if (sample.leftWallObservationWindowValid)
-        {
-            ++voteSummary.leftWindowValidVotes;
-        }
-        if (sample.rightWallObservationWindowValid)
-        {
-            ++voteSummary.rightWindowValidVotes;
-        }
-
-        frontEvidence.Update(
-            sample.frontWall ?
+        const bool frontObservationValid = sample.FrontWallObservationValid();
+        const MazeMap::WallSampleClassification frontClassification =
+            frontObservationValid ?
+            (sample.HasFrontWall() ?
                 MazeMap::WallSampleClassification::WallHit :
-                MazeMap::WallSampleClassification::WallMiss,
+                MazeMap::WallSampleClassification::WallMiss) :
+            MazeMap::WallSampleClassification::Unknown;
+        if (frontObservationValid)
+        {
+            ++frontObservationCount;
+            if (sample.HasFrontLeftWall())
+            {
+                ++frontLeftWallVotes;
+            }
+            if (sample.HasFrontRightWall())
+            {
+                ++frontRightWallVotes;
+            }
+        }
+        UpdateWallEvidenceScore(
+            frontClassification,
             MazeMap::Config::kWallMapEvidenceHitWeight,
             MazeMap::Config::kWallMapEvidenceMissWeight,
-            MazeMap::Config::kWallMapEvidenceUnknownDecay);
+            MazeMap::Config::kWallMapEvidenceUnknownDecay,
+            frontEvidenceScore);
 
-        leftEvidence.Update(
-            sample.leftWallObservationWindowValid ?
-                (sample.leftWallObservation ?
+        UpdateWallEvidenceScore(
+            sample.LeftWallObservationWindowValid() ?
+                (sample.HasLeftWallObservation() ?
                     MazeMap::WallSampleClassification::WallHit :
                     MazeMap::WallSampleClassification::WallMiss) :
                 MazeMap::WallSampleClassification::Unknown,
             MazeMap::Config::kWallMapEvidenceHitWeight,
             MazeMap::Config::kWallMapEvidenceMissWeight,
-            MazeMap::Config::kWallMapEvidenceUnknownDecay);
-        if (sample.leftTransitionDetected)
+            MazeMap::Config::kWallMapEvidenceUnknownDecay,
+            leftEvidenceScore);
+        if (sample.LeftTransitionDetected())
         {
             leftTransitionDetected = true;
-            leftEvidence.InjectMissImpulse(MazeMap::Config::kWallMapEvidenceTransitionMissWeight);
+            InjectWallEvidenceMissImpulse(
+                MazeMap::Config::kWallMapEvidenceTransitionMissWeight,
+                leftEvidenceScore);
         }
 
-        rightEvidence.Update(
-            sample.rightWallObservationWindowValid ?
-                (sample.rightWallObservation ?
+        UpdateWallEvidenceScore(
+            sample.RightWallObservationWindowValid() ?
+                (sample.HasRightWallObservation() ?
                     MazeMap::WallSampleClassification::WallHit :
                     MazeMap::WallSampleClassification::WallMiss) :
                 MazeMap::WallSampleClassification::Unknown,
             MazeMap::Config::kWallMapEvidenceHitWeight,
             MazeMap::Config::kWallMapEvidenceMissWeight,
-            MazeMap::Config::kWallMapEvidenceUnknownDecay);
-        if (sample.rightTransitionDetected)
+            MazeMap::Config::kWallMapEvidenceUnknownDecay,
+            rightEvidenceScore);
+        if (sample.RightTransitionDetected())
         {
             rightTransitionDetected = true;
-            rightEvidence.InjectMissImpulse(MazeMap::Config::kWallMapEvidenceTransitionMissWeight);
+            InjectWallEvidenceMissImpulse(
+                MazeMap::Config::kWallMapEvidenceTransitionMissWeight,
+                rightEvidenceScore);
         }
 
-        if (std::isfinite(sample.frontLeftDistanceM))
+        if (std::isfinite(sample.FrontLeftDistanceM()))
         {
-            frontLeftDistanceSum += sample.frontLeftDistanceM;
+            frontLeftDistanceSum += sample.FrontLeftDistanceM();
             ++frontLeftDistanceCount;
         }
-        if (std::isfinite(sample.frontRightDistanceM))
+        if (std::isfinite(sample.FrontRightDistanceM()))
         {
-            frontRightDistanceSum += sample.frontRightDistanceM;
+            frontRightDistanceSum += sample.FrontRightDistanceM();
             ++frontRightDistanceCount;
         }
-        if (std::isfinite(sample.frontLeftDifferentialLight))
+        if (std::isfinite(sample.FrontLeftDifferentialLight()))
         {
-            frontLeftDifferentialLightSum += sample.frontLeftDifferentialLight;
+            frontLeftDifferentialLightSum += sample.FrontLeftDifferentialLight();
             ++frontLeftDifferentialLightCount;
         }
-        if (std::isfinite(sample.frontRightDifferentialLight))
+        if (std::isfinite(sample.FrontRightDifferentialLight()))
         {
-            frontRightDifferentialLightSum += sample.frontRightDifferentialLight;
+            frontRightDifferentialLightSum += sample.FrontRightDifferentialLight();
             ++frontRightDifferentialLightCount;
         }
-        if (std::isfinite(sample.sideLeftDistanceM))
+        if (std::isfinite(sample.SideLeftDistanceM()))
         {
-            sideLeftDistanceSum += sample.sideLeftDistanceM;
+            sideLeftDistanceSum += sample.SideLeftDistanceM();
             ++sideLeftDistanceCount;
         }
-        if (std::isfinite(sample.sideRightDistanceM))
+        if (std::isfinite(sample.SideRightDistanceM()))
         {
-            sideRightDistanceSum += sample.sideRightDistanceM;
+            sideRightDistanceSum += sample.SideRightDistanceM();
             ++sideRightDistanceCount;
         }
-        if (std::isfinite(sample.sideLeftDifferentialLight))
+        if (std::isfinite(sample.SideLeftDifferentialLight()))
         {
-            sideLeftDifferentialLightSum += sample.sideLeftDifferentialLight;
+            sideLeftDifferentialLightSum += sample.SideLeftDifferentialLight();
             ++sideLeftDifferentialLightCount;
         }
-        if (std::isfinite(sample.sideRightDifferentialLight))
+        if (std::isfinite(sample.SideRightDifferentialLight()))
         {
-            sideRightDifferentialLightSum += sample.sideRightDifferentialLight;
+            sideRightDifferentialLightSum += sample.SideRightDifferentialLight();
             ++sideRightDifferentialLightCount;
         }
-        if (std::isfinite(sample.corridorErrorM))
+        if (std::isfinite(sample.CorridorErrorM()))
         {
-            corridorErrorSum += sample.corridorErrorM;
+            corridorErrorSum += sample.CorridorErrorM();
             ++corridorErrorCount;
         }
-        if (std::isfinite(sample.frontSkewM))
+        if (std::isfinite(sample.FrontSkewM()))
         {
-            frontSkewSum += sample.frontSkewM;
+            frontSkewSum += sample.FrontSkewM();
             ++frontSkewCount;
         }
-        if (std::isfinite(sample.planarAccelMps2))
+        if (std::isfinite(sample.PlanarAccelerationMps2()))
         {
-            planarAccelSum += sample.planarAccelMps2;
+            planarAccelSum += sample.PlanarAccelerationMps2();
             ++planarAccelCount;
         }
-        if (std::isfinite(sample.gyroRadps))
+        if (std::isfinite(sample.YawRateRadps()))
         {
-            gyroSum += sample.gyroRadps;
+            gyroSum += sample.YawRateRadps();
             ++gyroCount;
+        }
+        if (frontObservationValid && sample.FrontLeftWallSensorObservation().IsValid())
+        {
+            frontLeftWallSensorObservation = sample.FrontLeftWallSensorObservation();
+        }
+        if (frontObservationValid && sample.FrontRightWallSensorObservation().IsValid())
+        {
+            frontRightWallSensorObservation = sample.FrontRightWallSensorObservation();
+        }
+        if (sample.SideLeftWallSensorObservation().IsValid())
+        {
+            sideLeftWallSensorObservation = sample.SideLeftWallSensorObservation();
+        }
+        if (sample.SideRightWallSensorObservation().IsValid())
+        {
+            sideRightWallSensorObservation = sample.SideRightWallSensorObservation();
         }
     }
 
     const SensorSnapshot& lastSample = samples[sampleCount - 1U];
-    combinedSnapshot.leftEncoderTotalCounts = lastSample.leftEncoderTotalCounts;
-    combinedSnapshot.rightEncoderTotalCounts = lastSample.rightEncoderTotalCounts;
-    combinedSnapshot.leftEncoderDistanceM = lastSample.leftEncoderDistanceM;
-    combinedSnapshot.rightEncoderDistanceM = lastSample.rightEncoderDistanceM;
-    combinedSnapshot.frontLeftDistanceM =
-        AverageFiniteObservationValue(frontLeftDistanceSum, frontLeftDistanceCount, lastSample.frontLeftDistanceM);
-    combinedSnapshot.frontRightDistanceM =
-        AverageFiniteObservationValue(frontRightDistanceSum, frontRightDistanceCount, lastSample.frontRightDistanceM);
-    combinedSnapshot.frontLeftDifferentialLight =
-        AverageFiniteObservationValue(frontLeftDifferentialLightSum, frontLeftDifferentialLightCount, lastSample.frontLeftDifferentialLight);
-    combinedSnapshot.frontRightDifferentialLight =
-        AverageFiniteObservationValue(frontRightDifferentialLightSum, frontRightDifferentialLightCount, lastSample.frontRightDifferentialLight);
-    combinedSnapshot.sideLeftDistanceM =
-        AverageFiniteObservationValue(sideLeftDistanceSum, sideLeftDistanceCount, lastSample.sideLeftDistanceM);
-    combinedSnapshot.sideRightDistanceM =
-        AverageFiniteObservationValue(sideRightDistanceSum, sideRightDistanceCount, lastSample.sideRightDistanceM);
-    combinedSnapshot.sideLeftDifferentialLight =
-        AverageFiniteObservationValue(sideLeftDifferentialLightSum, sideLeftDifferentialLightCount, lastSample.sideLeftDifferentialLight);
-    combinedSnapshot.sideRightDifferentialLight =
-        AverageFiniteObservationValue(sideRightDifferentialLightSum, sideRightDifferentialLightCount, lastSample.sideRightDifferentialLight);
-    combinedSnapshot.corridorErrorM =
-        AverageFiniteObservationValue(corridorErrorSum, corridorErrorCount, lastSample.corridorErrorM);
-    combinedSnapshot.frontSkewM =
-        AverageFiniteObservationValue(frontSkewSum, frontSkewCount, lastSample.frontSkewM);
-    combinedSnapshot.planarAccelMps2 =
-        AverageFiniteObservationValue(planarAccelSum, planarAccelCount, lastSample.planarAccelMps2);
-    combinedSnapshot.gyroRadps =
-        AverageFiniteObservationValue(gyroSum, gyroCount, lastSample.gyroRadps);
+    combinedSnapshot.SetEncoderTotals(
+        lastSample.LeftEncoderTotalCounts(),
+        lastSample.RightEncoderTotalCounts());
+    combinedSnapshot.SetEncoderDistancesM(
+        lastSample.LeftEncoderDistanceM(),
+        lastSample.RightEncoderDistanceM());
+    combinedSnapshot.SetFrontLeftDistanceM(
+        AverageFiniteObservationValue(frontLeftDistanceSum, frontLeftDistanceCount, lastSample.FrontLeftDistanceM()));
+    combinedSnapshot.SetFrontRightDistanceM(
+        AverageFiniteObservationValue(frontRightDistanceSum, frontRightDistanceCount, lastSample.FrontRightDistanceM()));
+    combinedSnapshot.SetFrontLeftDifferentialLight(
+        AverageFiniteObservationValue(frontLeftDifferentialLightSum, frontLeftDifferentialLightCount, lastSample.FrontLeftDifferentialLight()));
+    combinedSnapshot.SetFrontRightDifferentialLight(
+        AverageFiniteObservationValue(frontRightDifferentialLightSum, frontRightDifferentialLightCount, lastSample.FrontRightDifferentialLight()));
+    combinedSnapshot.SetSideLeftDistanceM(
+        AverageFiniteObservationValue(sideLeftDistanceSum, sideLeftDistanceCount, lastSample.SideLeftDistanceM()));
+    combinedSnapshot.SetSideRightDistanceM(
+        AverageFiniteObservationValue(sideRightDistanceSum, sideRightDistanceCount, lastSample.SideRightDistanceM()));
+    combinedSnapshot.SetSideLeftDifferentialLight(
+        AverageFiniteObservationValue(sideLeftDifferentialLightSum, sideLeftDifferentialLightCount, lastSample.SideLeftDifferentialLight()));
+    combinedSnapshot.SetSideRightDifferentialLight(
+        AverageFiniteObservationValue(sideRightDifferentialLightSum, sideRightDifferentialLightCount, lastSample.SideRightDifferentialLight()));
+    combinedSnapshot.SetCorridorErrorM(
+        AverageFiniteObservationValue(corridorErrorSum, corridorErrorCount, lastSample.CorridorErrorM()));
+    combinedSnapshot.SetFrontSkewM(
+        AverageFiniteObservationValue(frontSkewSum, frontSkewCount, lastSample.FrontSkewM()));
+    combinedSnapshot.SetPlanarAccelerationMps2(
+        AverageFiniteObservationValue(planarAccelSum, planarAccelCount, lastSample.PlanarAccelerationMps2()));
+    combinedSnapshot.SetYawRateRadps(
+        AverageFiniteObservationValue(gyroSum, gyroCount, lastSample.YawRateRadps()));
     const MazeMap::WallSampleClassification frontDecision =
-        frontEvidence.FinalClassification(MazeMap::Config::kWallMapEvidenceCommitThreshold);
+        FinalWallEvidenceClassification(
+            frontEvidenceScore,
+            MazeMap::Config::kWallMapEvidenceCommitThreshold);
     const MazeMap::WallSampleClassification leftDecision =
-        leftEvidence.FinalClassification(MazeMap::Config::kWallMapEvidenceCommitThreshold);
+        FinalWallEvidenceClassification(
+            leftEvidenceScore,
+            MazeMap::Config::kWallMapEvidenceCommitThreshold);
     const MazeMap::WallSampleClassification rightDecision =
-        rightEvidence.FinalClassification(MazeMap::Config::kWallMapEvidenceCommitThreshold);
-    combinedSnapshot.frontWall = frontDecision == MazeMap::WallSampleClassification::WallHit;
-    combinedSnapshot.frontLeftWall = ObservationVoteWinsMajority(voteSummary.frontLeftWallVotes, sampleCount);
-    combinedSnapshot.frontRightWall = ObservationVoteWinsMajority(voteSummary.frontRightWallVotes, sampleCount);
-    combinedSnapshot.frontWallObservationValid = frontDecision != MazeMap::WallSampleClassification::Unknown;
-    combinedSnapshot.frontWallUsesFallbackDetection = combinedSnapshot.frontWallObservationValid;
-    combinedSnapshot.frontWallUsesCharacterizationDetection = false;
-    combinedSnapshot.leftWallObservation = leftDecision == MazeMap::WallSampleClassification::WallHit;
-    combinedSnapshot.rightWallObservation = rightDecision == MazeMap::WallSampleClassification::WallHit;
-    combinedSnapshot.leftWall = combinedSnapshot.leftWallObservation;
-    combinedSnapshot.rightWall = combinedSnapshot.rightWallObservation;
-    combinedSnapshot.leftWallObservationWindowValid = leftDecision != MazeMap::WallSampleClassification::Unknown;
-    combinedSnapshot.rightWallObservationWindowValid = rightDecision != MazeMap::WallSampleClassification::Unknown;
-    combinedSnapshot.leftTransitionDetected = leftTransitionDetected;
-    combinedSnapshot.rightTransitionDetected = rightTransitionDetected;
-    combinedSnapshot.encoderObservation = encoderObservation;
-    combinedSnapshot.encoderObservationValid = encoderObservationValid;
+        FinalWallEvidenceClassification(
+            rightEvidenceScore,
+            MazeMap::Config::kWallMapEvidenceCommitThreshold);
+    combinedSnapshot.SetFrontWall(frontDecision == MazeMap::WallSampleClassification::WallHit);
+    combinedSnapshot.SetFrontLeftWall(ObservationVoteWinsMajority(frontLeftWallVotes, frontObservationCount));
+    combinedSnapshot.SetFrontRightWall(ObservationVoteWinsMajority(frontRightWallVotes, frontObservationCount));
+    combinedSnapshot.SetFrontWallObservationValid(frontDecision != MazeMap::WallSampleClassification::Unknown);
+    combinedSnapshot.SetFrontWallUsesFallbackDetection(combinedSnapshot.FrontWallObservationValid());
+    combinedSnapshot.SetFrontWallUsesCharacterizationDetection(false);
+    combinedSnapshot.SetLeftWallObservation(leftDecision == MazeMap::WallSampleClassification::WallHit);
+    combinedSnapshot.SetRightWallObservation(rightDecision == MazeMap::WallSampleClassification::WallHit);
+    combinedSnapshot.SetLeftWall(combinedSnapshot.HasLeftWallObservation());
+    combinedSnapshot.SetRightWall(combinedSnapshot.HasRightWallObservation());
+    combinedSnapshot.SetLeftWallObservationWindowValid(leftDecision != MazeMap::WallSampleClassification::Unknown);
+    combinedSnapshot.SetRightWallObservationWindowValid(rightDecision != MazeMap::WallSampleClassification::Unknown);
+    combinedSnapshot.SetLeftTransitionDetected(leftTransitionDetected);
+    combinedSnapshot.SetRightTransitionDetected(rightTransitionDetected);
+    combinedSnapshot.SetEncoderObservation(encoderObservation, encoderObservationValid);
+    combinedSnapshot.SetFrontLeftWallSensorObservation(frontLeftWallSensorObservation);
+    combinedSnapshot.SetFrontRightWallSensorObservation(frontRightWallSensorObservation);
+    combinedSnapshot.SetSideLeftWallSensorObservation(sideLeftWallSensorObservation);
+    combinedSnapshot.SetSideRightWallSensorObservation(sideRightWallSensorObservation);
     return true;
 }

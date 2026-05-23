@@ -24,11 +24,11 @@ namespace MazeMap::App::Internal
     X(std::uint32_t, stationary)                 \
     X(float,         pose_x_m)                   \
     X(float,         pose_y_m)                   \
-    X(float,         yaw_rad)                    \
+    X(float,         heading_rad)                \
     X(float,         linear_speed_mps)           \
-    X(float,         angular_speed_radps)        \
+    X(float,         yaw_rate_radps)             \
     X(float,         cmd_linear_mps)             \
-    X(float,         cmd_angular_radps)          \
+    X(float,         cmd_yaw_rate_radps)         \
     X(float,         left_drive_cmd)             \
     X(float,         right_drive_cmd)            \
     X(std::int32_t,  left_encoder_count)         \
@@ -112,8 +112,8 @@ namespace MazeMap::App::Internal::Runtime
             value,
             sizeof(value),
             "x=%.3f;y=%.3f",
-            sensors.GetAccelBiasXG() * 1000.0f,
-            sensors.GetAccelBiasYG() * 1000.0f);
+            sensors.GetAccelBiasRightG() * 1000.0f,
+            sensors.GetAccelBiasForwardG() * 1000.0f);
         return
             length > 0 &&
             length < static_cast<int>(sizeof(value)) &&
@@ -123,7 +123,6 @@ namespace MazeMap::App::Internal::Runtime
     template <typename WriteEventFn>
     inline bool WriteDiagnosticTuningEvents(const MazeMap::PlantModel& plantModel, WriteEventFn&& writeEvent)
     {
-        const auto& vehicleModel = MazeMap::Vehicle::GetPhysicalModel();
         char message[256] = {};
         auto writeConfig = [&writeEvent, &message](const char* format, auto... args) -> bool
         {
@@ -139,10 +138,10 @@ namespace MazeMap::App::Internal::Runtime
             writeConfig(
                 "drive_geometry:track_width_m=%.6f;tight_r_m=%.6f;tight_w_m=%.6f;wide_r_m=%.6f;wide_w_m=%.6f",
                 Config::kTrackWidthM,
-                vehicleModel.arcTrackWidthInterpolation.tightRadiusM,
-                vehicleModel.arcTrackWidthInterpolation.tightTrackWidthM,
-                vehicleModel.arcTrackWidthInterpolation.wideRadiusM,
-                vehicleModel.arcTrackWidthInterpolation.wideTrackWidthM) &&
+                MazeMap::Vehicle::GetArcTrackWidthTightRadiusM(),
+                MazeMap::Vehicle::GetArcTrackWidthTightTrackWidthM(),
+                MazeMap::Vehicle::GetArcTrackWidthWideRadiusM(),
+                MazeMap::Vehicle::GetArcTrackWidthWideTrackWidthM()) &&
             plantModel.WriteDriveModelDiagnosticConfig(writeConfig) &&
             writeConfig(
                 "wheel_control:static_ff=%.6f;vel_kp=%.6f;vel_kd=%.6f",
@@ -189,7 +188,7 @@ namespace MazeMap::App::Internal::Runtime
                 static_cast<unsigned>(DiagnosticConfig::kSmoothRepeatsPerPrimitiveSpeed),
                 static_cast<unsigned>(DiagnosticConfig::kLoopRepeats)) &&
             writeConfig(
-                "open_floor_bins:launch_cmd_start=%.3f;launch_cmd_end=%.3f;launch_cmd_step=%.3f;launch_cmd_count=%u;straight_v=%.3f,%.3f,%.3f;yaw_w=%.3f,%.3f,%.3f",
+                "open_floor_bins:launch_cmd_start=%.3f;launch_cmd_end=%.3f;launch_cmd_step=%.3f;launch_cmd_count=%u;straight_v=%.3f,%.3f,%.3f;yaw_rate_radps=%.3f,%.3f,%.3f",
                 MazeMap::kOpenFloorLaunchDriveMagnitudeStart,
                 MazeMap::kOpenFloorLaunchDriveMagnitudeEnd,
                 MazeMap::kOpenFloorLaunchDriveMagnitudeStep,
@@ -197,17 +196,17 @@ namespace MazeMap::App::Internal::Runtime
                 MazeMap::kOpenFloorStraightSpeedBinsMps[0],
                 MazeMap::kOpenFloorStraightSpeedBinsMps[1],
                 MazeMap::kOpenFloorStraightSpeedBinsMps[2],
-                MazeMap::kOpenFloorYawOmegaBinsRadps[0],
-                MazeMap::kOpenFloorYawOmegaBinsRadps[1],
-                MazeMap::kOpenFloorYawOmegaBinsRadps[2]) &&
+                MazeMap::kOpenFloorYawRateBinsRadps[0],
+                MazeMap::kOpenFloorYawRateBinsRadps[1],
+                MazeMap::kOpenFloorYawRateBinsRadps[2]) &&
             writeConfig(
-                "open_floor_motion:smooth_v=%.3f,%.3f,%.3f;straight_a=%.3f;straight_d=%.3f;turn_max_w=%.3f;turn_a=%.3f;launch_ms=%lu;post_segment_hold_ms=%lu",
+                "open_floor_motion:smooth_v=%.3f,%.3f,%.3f;straight_a=%.3f;straight_d=%.3f;turn_max_yaw_rate_radps=%.3f;turn_a=%.3f;launch_ms=%lu;post_segment_hold_ms=%lu",
                 MazeMap::kOpenFloorSmoothSpeedBinsMps[0],
                 MazeMap::kOpenFloorSmoothSpeedBinsMps[1],
                 MazeMap::kOpenFloorSmoothSpeedBinsMps[2],
                 DiagnosticConfig::kStraightAccelMps2,
                 DiagnosticConfig::kStraightDecelMps2,
-                DiagnosticConfig::kTurnMaxOmegaRadps,
+                DiagnosticConfig::kTurnMaxYawRateRadps,
                 DiagnosticConfig::kTurnAccelRadps2,
                 static_cast<unsigned long>(MazeMap::kOpenFloorLaunchPulseMs),
                 static_cast<unsigned long>(MazeMap::kOpenFloorPostSegmentHoldMs));
@@ -305,12 +304,12 @@ inline const char* AuxMeasurementRoutineName(AuxMeasurementConfig::Routine routi
     X(std::uint32_t, fan_enabled)                \
     X(float,         pose_x_m)                   \
     X(float,         pose_y_m)                   \
-    X(float,         yaw_rad)                    \
+    X(float,         heading_rad)                \
     X(float,         linear_speed_mps)           \
-    X(float,         angular_speed_radps)        \
+    X(float,         yaw_rate_radps)             \
     X(float,         planar_accel_mps2)          \
     X(float,         cmd_linear_mps)             \
-    X(float,         cmd_angular_radps)          \
+    X(float,         cmd_yaw_rate_radps)         \
     X(float,         left_drive_cmd)             \
     X(float,         right_drive_cmd)            \
     X(std::int32_t,  left_encoder_count)         \

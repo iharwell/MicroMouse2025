@@ -36,7 +36,9 @@ namespace MazeMap::App::Internal
     // - On later ticks, the mode may call GetNextControls(bool& done) when it wants
     //   Drive's current proposal.
     // - The mode may return Drive's proposal, override it, ignore it, or stop querying
-    //   Drive without transferring lifecycle ownership to Drive.
+    //   Drive without transferring lifecycle ownership to Drive. Once the caller applies
+    //   the returned CommandVector, that command is active for the state interval being
+    //   calculated.
     //
     // Public state model:
     // - Set... members install retained live Drive configuration. These settings are
@@ -323,7 +325,8 @@ namespace MazeMap::App::Internal
         //   latest latched instruction
         //   + current live Drive configuration
         //   + current runtime state
-        // to produce the best coherent CommandVector Drive can infer for the present tick.
+        // to produce the best coherent CommandVector Drive can infer for the state interval
+        // the caller is about to calculate.
         //
         // Unexpected or non-finite inputs are handled by semantic recovery rather than by a
         // separate fault path. That recovery should converge onto one retained instruction rather
@@ -353,9 +356,9 @@ namespace MazeMap::App::Internal
         // or forget the installed instruction.
         //
         // Return value:
-        // Proposed control vector for the present tick. The mode may return it directly to
-        // LoopController, replace it, or ignore it. Drive does not inject an independent fault or
-        // independent fallback behavior into this command path.
+        // Proposed active command for the state interval the caller is about to calculate. The
+        // mode may return it directly to LoopController, replace it, or ignore it. Drive does not
+        // inject an independent fault or independent fallback behavior into this command path.
         CommandVector GetNextControls(bool& done);
 
     private:

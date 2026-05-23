@@ -32,8 +32,8 @@ namespace
         limits.SetMaxSpeedMps(vehicle.GetMaxSpeed());
         limits.SetAccelMps2(kTopSpeedMeasurementAccelMps2);
         limits.SetDecelMps2(kTopSpeedMeasurementDecelMps2);
-        limits.SetMaxAngularSpeedRadps(vehicle.GetMaxRotationalVelocity());
-        limits.SetAngularAccelRadps2(vehicle.GetMaxAngularAcceleration());
+        limits.SetMaxAngularSpeedRadps(vehicle.GetMaxYawRate());
+        limits.SetAngularAccelRadps2(vehicle.GetMaxYawAccel());
         return limits;
     }
 }
@@ -86,7 +86,16 @@ namespace MazeMap::App::Internal
             }
 
             _phase = Phase::LaunchPrelaunchHold;
-            _loopController.StageNextSessionState(BuildLoopOptions());
+            const auto& runtimeState = _runtime.RuntimeState();
+            _loopController.StageNextSessionState(
+                DiagnosticConfig::kControlPeriodUs,
+                runtimeState.GetPositionX(),
+                runtimeState.GetPositionY(),
+                LoopController::WallMask::All,
+                true,
+                true,
+                true,
+                false);
         }
 
     private:
@@ -115,17 +124,6 @@ namespace MazeMap::App::Internal
             self->_phase = Phase::Idle;
             self->_startupCalibration.Cancel();
             self->_drive.ClearCommandEvidence();
-        }
-
-        LoopController::SessionOptions BuildLoopOptions() const noexcept
-        {
-            LoopController::SessionOptions options{};
-            const auto& runtimeState = _runtime.RuntimeState();
-            options.controlPeriodUs = DiagnosticConfig::kControlPeriodUs;
-            options.workPlan.SetUseWallUpdates(false);
-            options.SessionStartPointX = runtimeState.GetPositionX();
-            options.SessionStartPointY = runtimeState.GetPositionY();
-            return options;
         }
 
         void ResetState() noexcept
@@ -200,15 +198,15 @@ namespace MazeMap::App::Internal
 
         void UpdatePeaks(const MazeMap::VehicleState& state) noexcept
         {
-            if (std::isfinite(state.GetVelocity()))
+            if (std::isfinite(state.GetForwardVelocity()))
             {
                 _peakMeasuredSpeedMps =
-                    (std::max)(_peakMeasuredSpeedMps, std::fabs(state.GetVelocity()));
+                    (std::max)(_peakMeasuredSpeedMps, std::fabs(state.GetForwardVelocity()));
             }
-            if (std::isfinite(state.GetSensorSnapshot().planarAccelMps2))
+            if (std::isfinite(state.GetSensorSnapshot().PlanarAccelerationMps2()))
             {
                 _peakPlanarAccelMps2 =
-                    (std::max)(_peakPlanarAccelMps2, std::fabs(state.GetSensorSnapshot().planarAccelMps2));
+                    (std::max)(_peakPlanarAccelMps2, std::fabs(state.GetSensorSnapshot().PlanarAccelerationMps2()));
             }
         }
 
@@ -288,7 +286,7 @@ namespace MazeMap::App::Internal
             {
                 (void)_runtime.AppendTextLogFormatted(
                     "Top speed complete: ticks=%lu peak_speed_mps=%.3f peak_planar_accel_mps2=%.3f vbat0=%.3f",
-                    static_cast<unsigned long>(_loopController.LastDiagnostics().sequence),
+                    static_cast<unsigned long>(_loopController.LastTimingSequence()),
                     _peakMeasuredSpeedMps,
                     _peakPlanarAccelMps2,
                     _batteryVoltageStart);

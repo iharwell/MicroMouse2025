@@ -104,10 +104,10 @@ namespace MazeMap::App
             const float yawRad) noexcept
         {
             VehicleState state;
-            state.SetOrientation(yawRad);
-            state.SetVelocity(forwardMps);
-            state.SetWheelSpeedLeft(Vehicle::WheelOmegaFromLinearVelocity(forwardMps));
-            state.SetWheelSpeedRight(Vehicle::WheelOmegaFromLinearVelocity(forwardMps));
+            state.SetHeading(yawRad);
+            state.SetForwardVelocity(forwardMps);
+            state.SetWheelSpeedLeft(Vehicle::WheelSpeedFromLinearVelocity(forwardMps));
+            state.SetWheelSpeedRight(Vehicle::WheelSpeedFromLinearVelocity(forwardMps));
             return state;
         }
 
@@ -116,10 +116,10 @@ namespace MazeMap::App
             return
                 std::isfinite(state.GetPositionX()) &&
                 std::isfinite(state.GetPositionY()) &&
-                std::isfinite(state.GetOrientation()) &&
-                std::isfinite(state.GetVelocity()) &&
-                std::isfinite(state.GetLateralVelocity()) &&
-                std::isfinite(state.GetRotationalVelocity()) &&
+                std::isfinite(state.GetHeading()) &&
+                std::isfinite(state.GetForwardVelocity()) &&
+                std::isfinite(state.GetRightwardVelocity()) &&
+                std::isfinite(state.GetYawRate()) &&
                 std::isfinite(state.GetWheelSpeedLeft()) &&
                 std::isfinite(state.GetWheelSpeedRight()) &&
                 std::isfinite(state.GetGyroBiasZ());
@@ -133,26 +133,24 @@ namespace MazeMap::App
             const float rightDistanceDeltaM)
         {
             SensorSnapshot snapshot{};
-            snapshot.gyroRawRadps = truth.GetRotationalVelocity();
-            snapshot.gyroRadps = truth.GetRotationalVelocity();
-            snapshot.encoderObservationValid = true;
-            snapshot.leftEncoderDistanceM = wheels.leftDistanceM;
-            snapshot.rightEncoderDistanceM = wheels.rightDistanceM;
-            snapshot.encoderObservation.leftDistanceDeltaM = leftDistanceDeltaM;
-            snapshot.encoderObservation.rightDistanceDeltaM = rightDistanceDeltaM;
-            snapshot.encoderObservation.leftVelocityMps =
-                Vehicle::WheelLinearVelocityFromOmega(truth.GetWheelSpeedLeft());
-            snapshot.encoderObservation.rightVelocityMps =
-                Vehicle::WheelLinearVelocityFromOmega(truth.GetWheelSpeedRight());
-            snapshot.encoderObservation.omegaLeftRadps = truth.GetWheelSpeedLeft();
-            snapshot.encoderObservation.omegaRightRadps = truth.GetWheelSpeedRight();
+            snapshot.SetRawYawRateRadps(truth.GetYawRate());
+            snapshot.SetYawRateRadps(truth.GetYawRate());
+            snapshot.SetEncoderDistancesM(wheels.leftDistanceM, wheels.rightDistanceM);
+            MazeMap::EncoderObs encoderObservation{};
+            encoderObservation.SetLeftDistanceDeltaM(leftDistanceDeltaM);
+            encoderObservation.SetRightDistanceDeltaM(rightDistanceDeltaM);
+            encoderObservation.SetLeftVelocityMps(Vehicle::WheelLinearVelocityFromWheelSpeed(truth.GetWheelSpeedLeft()));
+            encoderObservation.SetRightVelocityMps(Vehicle::WheelLinearVelocityFromWheelSpeed(truth.GetWheelSpeedRight()));
+            encoderObservation.SetLeftWheelSpeedRadps(truth.GetWheelSpeedLeft());
+            encoderObservation.SetRightWheelSpeedRadps(truth.GetWheelSpeedRight());
+            snapshot.SetEncoderObservation(encoderObservation, true);
 
             VehicleState& state = runtime.RuntimeState();
             state.SetPosition(truth.GetPosition());
-            state.SetOrientation(truth.GetOrientation());
-            state.SetVelocity(truth.GetVelocity());
-            state.SetLateralVelocity(truth.GetLateralVelocity());
-            state.SetRotationalVelocity(truth.GetRotationalVelocity());
+            state.SetHeading(truth.GetHeading());
+            state.SetForwardVelocity(truth.GetForwardVelocity());
+            state.SetRightwardVelocity(truth.GetRightwardVelocity());
+            state.SetYawRate(truth.GetYawRate());
             state.SetWheelSpeedLeft(truth.GetWheelSpeedLeft());
             state.SetWheelSpeedRight(truth.GetWheelSpeedRight());
             state.SetGyroBiasZ(truth.GetGyroBiasZ());
@@ -166,8 +164,8 @@ namespace MazeMap::App
             trace.maxX = (std::max)(trace.maxX, trace.truth.GetPositionX());
             trace.minY = (std::min)(trace.minY, trace.truth.GetPositionY());
             trace.maxY = (std::max)(trace.maxY, trace.truth.GetPositionY());
-            trace.minYawRad = (std::min)(trace.minYawRad, trace.truth.GetOrientation());
-            trace.maxYawRad = (std::max)(trace.maxYawRad, trace.truth.GetOrientation());
+            trace.minYawRad = (std::min)(trace.minYawRad, trace.truth.GetHeading());
+            trace.maxYawRad = (std::max)(trace.maxYawRad, trace.truth.GetHeading());
         }
 
         void RecordTelemetry(
@@ -343,7 +341,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -379,7 +377,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -415,7 +413,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -451,7 +449,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -487,7 +485,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -523,7 +521,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -558,7 +556,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -594,7 +592,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -632,7 +630,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -670,7 +668,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -686,7 +684,7 @@ namespace MazeMap::App
             const PrimitiveTrace trace = RunStartStraight();
             Assert::AreEqual(
                 0.0f,
-                trace.truth.GetOrientation(),
+                trace.truth.GetHeading(),
                 0.080f,
                 ([&]()
                 {
@@ -696,7 +694,7 @@ namespace MazeMap::App
                         << L"\nprimitive=" << L"StartStraight"
                         << L"\nfield=" << L"final_yaw_rad"
                         << L"\nexpected=" << 0.0f
-                        << L"\nactual=" << trace.truth.GetOrientation()
+                        << L"\nactual=" << trace.truth.GetHeading()
                         << L"\nlimit=" << 0.080f
                         << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
                         << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
@@ -708,7 +706,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -744,7 +742,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -780,7 +778,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -816,7 +814,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -852,7 +850,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -888,7 +886,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -924,7 +922,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -960,7 +958,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -996,7 +994,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1010,7 +1008,7 @@ namespace MazeMap::App
         TEST_METHOD(StartTurn_FinalHeadingMatchesRequest)
         {
             const PrimitiveTrace trace = RunStartTurn();
-            const float headingErrorRad = std::fabs(AngleDifference(HALF_PI_F, trace.truth.GetOrientation()));
+            const float headingErrorRad = std::fabs(AngleDifference(HALF_PI_F, trace.truth.GetHeading()));
             Assert::AreEqual(
                 0.0f,
                 headingErrorRad,
@@ -1035,7 +1033,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1074,7 +1072,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1110,7 +1108,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1146,7 +1144,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1182,7 +1180,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1218,7 +1216,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1254,7 +1252,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1290,7 +1288,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1326,7 +1324,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1362,7 +1360,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1400,7 +1398,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1416,7 +1414,7 @@ namespace MazeMap::App
             const PrimitiveTrace trace = RunStartTurnTransition();
             const float expectedYawRad =
                 0.5f * kTransitionCurvatureRatePerM * kTransitionDistanceM * kTransitionDistanceM;
-            const float headingErrorRad = std::fabs(AngleDifference(expectedYawRad, trace.truth.GetOrientation()));
+            const float headingErrorRad = std::fabs(AngleDifference(expectedYawRad, trace.truth.GetHeading()));
             Assert::AreEqual(
                 0.0f,
                 headingErrorRad,
@@ -1441,7 +1439,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1477,7 +1475,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1513,7 +1511,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1549,7 +1547,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1585,7 +1583,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1621,7 +1619,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1657,7 +1655,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1693,7 +1691,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1729,7 +1727,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1765,7 +1763,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1803,7 +1801,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1818,7 +1816,7 @@ namespace MazeMap::App
         {
             const PrimitiveTrace trace = RunStartArc();
             const float expectedYawRad = kArcDistanceM * kArcCurvaturePerM;
-            const float headingErrorRad = std::fabs(AngleDifference(expectedYawRad, trace.truth.GetOrientation()));
+            const float headingErrorRad = std::fabs(AngleDifference(expectedYawRad, trace.truth.GetHeading()));
             Assert::AreEqual(
                 0.0f,
                 headingErrorRad,
@@ -1843,7 +1841,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1879,7 +1877,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1915,7 +1913,7 @@ namespace MazeMap::App
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth.GetPositionX()
                         << L"\ny_m=" << trace.truth.GetPositionY()
-                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
+                        << L"\nyaw_deg=" << (trace.truth.GetHeading() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad

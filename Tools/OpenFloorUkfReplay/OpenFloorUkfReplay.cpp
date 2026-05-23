@@ -22,10 +22,6 @@
 #include <utility>
 #include <vector>
 
-namespace fs = std::filesystem;
-
-namespace
-{
     constexpr const char* kCsvFileName = "open_floor_main.csv";
     constexpr const char* kSidecarFileName = "open_floor_main.sidecar";
     constexpr const char* kReportFileName = "report.md";
@@ -37,20 +33,23 @@ namespace
     constexpr float kWheelVelocitySensorBoundMps = 0.06f;
     constexpr float kYawRateSensorBoundRadps = 0.03f;
 
-    struct ReplayOptions
+    class ReplayOptions
     {
-        fs::path rootPath;
-        fs::path outputPath;
+    public:
+        std::filesystem::path rootPath;
+        std::filesystem::path outputPath;
         std::string runIdFilter;
-        fs::path sampleCsvPath;
-        fs::path feedforwardSampleCsvPath;
+        std::filesystem::path sampleCsvPath;
+        std::filesystem::path feedforwardSampleCsvPath;
         std::vector<std::string> sampleMetrics;
         bool useKnownStationarySeed = false;
+        bool useEncoderPseudoMeasurement = false;
     };
 
-    struct SidecarInfo
+    class SidecarInfo
     {
-        fs::path path;
+    public:
+        std::filesystem::path path;
         std::unordered_map<std::string, std::string> metadata;
         std::vector<std::string> fieldNames;
         std::string runId;
@@ -59,24 +58,27 @@ namespace
         std::string controlLogFile;
     };
 
-    struct RunCandidate
+    class RunCandidate
     {
-        fs::path csvPath;
+    public:
+        std::filesystem::path csvPath;
         SidecarInfo sidecar;
-        fs::path controlLogPath;
+        std::filesystem::path controlLogPath;
         float batteryVoltageV = std::numeric_limits<float>::quiet_NaN();
         std::string batterySource = "plant_default";
     };
 
-    struct DuplicateRunInfo
+    class DuplicateRunInfo
     {
+    public:
         std::string runId;
-        fs::path keptPath;
-        fs::path skippedPath;
+        std::filesystem::path keptPath;
+        std::filesystem::path skippedPath;
     };
 
-    struct LoggedRow
+    class LoggedRow
     {
+    public:
         std::uint32_t masterTimeUs = 0U;
         std::uint32_t controlTickSequence = 0U;
         std::uint32_t dtUs = 0U;
@@ -87,30 +89,31 @@ namespace
         std::uint16_t saturationFlags = 0U;
         MazeMap::VehicleState loggedState;
         float measuredLinearSpeedMps = 0.0f;
-        float measuredAngularSpeedRadps = 0.0f;
+        float measuredYawRateRadps = 0.0f;
         float commandedLinearMps = 0.0f;
-        float commandedAngularRadps = 0.0f;
+        float commandedYawRateRadps = 0.0f;
         float leftDriveCommand = 0.0f;
         float rightDriveCommand = 0.0f;
         float leftPlantCommand = 0.0f;
         float rightPlantCommand = 0.0f;
         std::int32_t leftEncoderCount = 0;
         std::int32_t rightEncoderCount = 0;
-        float leftEncoderOmegaRadps = 0.0f;
-        float rightEncoderOmegaRadps = 0.0f;
+        float leftEncoderWheelSpeedRadps = 0.0f;
+        float rightEncoderWheelSpeedRadps = 0.0f;
         float leftEncoderVelocityMps = 0.0f;
         float rightEncoderVelocityMps = 0.0f;
         bool accelBiasValid = false;
         float gyroRawRadps = std::numeric_limits<float>::quiet_NaN();
         float gyroCorrectedRadps = std::numeric_limits<float>::quiet_NaN();
-        float accelBodyXMps2 = std::numeric_limits<float>::quiet_NaN();
-        float accelBodyYMps2 = std::numeric_limits<float>::quiet_NaN();
+        float accelBodyRightMps2 = std::numeric_limits<float>::quiet_NaN();
+        float accelBodyForwardMps2 = std::numeric_limits<float>::quiet_NaN();
         float planarAccelMps2 = std::numeric_limits<float>::quiet_NaN();
         float fanDutyCycle = 0.0f;
     };
 
-    struct SampleExportRow
+    class SampleExportRow
     {
+    public:
         std::uint32_t masterTimeUs = 0U;
         std::uint32_t controlTickSequence = 0U;
         std::uint32_t dtUs = 0U;
@@ -122,10 +125,10 @@ namespace
         std::string sectionName;
         std::string primitiveName;
         std::string phaseName;
-        float predictedAccelBodyXMps2 = std::numeric_limits<float>::quiet_NaN();
-        float actualAccelBodyXMps2 = std::numeric_limits<float>::quiet_NaN();
-        float predictedAccelBodyYMps2 = std::numeric_limits<float>::quiet_NaN();
-        float actualAccelBodyYMps2 = std::numeric_limits<float>::quiet_NaN();
+        float predictedAccelBodyRightMps2 = std::numeric_limits<float>::quiet_NaN();
+        float actualAccelBodyRightMps2 = std::numeric_limits<float>::quiet_NaN();
+        float predictedAccelBodyForwardMps2 = std::numeric_limits<float>::quiet_NaN();
+        float actualAccelBodyForwardMps2 = std::numeric_limits<float>::quiet_NaN();
         float predictedPlanarAccelMps2 = std::numeric_limits<float>::quiet_NaN();
         float actualPlanarAccelMps2 = std::numeric_limits<float>::quiet_NaN();
         float predictedLinearSpeedMps = std::numeric_limits<float>::quiet_NaN();
@@ -136,8 +139,9 @@ namespace
         float actualRawGyroRadps = std::numeric_limits<float>::quiet_NaN();
     };
 
-    struct FeedforwardSampleExportRow
+    class FeedforwardSampleExportRow
     {
+    public:
         std::uint32_t masterTimeUs = 0U;
         std::uint32_t nextMasterTimeUs = 0U;
         std::uint32_t controlTickSequence = 0U;
@@ -194,8 +198,9 @@ namespace
         float predictedYawTargetErrorRadps = std::numeric_limits<float>::quiet_NaN();
     };
 
-    struct ErrorStats
+    class ErrorStats
     {
+    public:
         std::uint64_t count = 0U;
         double sum = 0.0;
         double sumSquares = 0.0;
@@ -242,8 +247,9 @@ namespace
         }
     };
 
-    struct HitRateStats
+    class HitRateStats
     {
+    public:
         std::uint64_t total = 0U;
         std::uint64_t hits = 0U;
 
@@ -268,36 +274,38 @@ namespace
         }
     };
 
-    struct PredictionMetrics
+    class PredictionMetrics
     {
-        ErrorStats encoderLeftOmegaRadps;
-        ErrorStats encoderRightOmegaRadps;
+    public:
+        ErrorStats leftEncoderWheelSpeedRadps;
+        ErrorStats rightEncoderWheelSpeedRadps;
         ErrorStats encoderLinearSpeedMps;
         ErrorStats encoderYawRateRadps;
         ErrorStats bodyForwardSpeedMps;
         ErrorStats bodyYawRateRadps;
         ErrorStats rawGyroRadps;
-        ErrorStats accelBodyXMps2;
-        ErrorStats accelBodyYMps2;
+        ErrorStats accelBodyRightMps2;
+        ErrorStats accelBodyForwardMps2;
         ErrorStats planarAccelMps2;
 
         void merge(const PredictionMetrics& other) noexcept
         {
-            encoderLeftOmegaRadps.merge(other.encoderLeftOmegaRadps);
-            encoderRightOmegaRadps.merge(other.encoderRightOmegaRadps);
+            leftEncoderWheelSpeedRadps.merge(other.leftEncoderWheelSpeedRadps);
+            rightEncoderWheelSpeedRadps.merge(other.rightEncoderWheelSpeedRadps);
             encoderLinearSpeedMps.merge(other.encoderLinearSpeedMps);
             encoderYawRateRadps.merge(other.encoderYawRateRadps);
             bodyForwardSpeedMps.merge(other.bodyForwardSpeedMps);
             bodyYawRateRadps.merge(other.bodyYawRateRadps);
             rawGyroRadps.merge(other.rawGyroRadps);
-            accelBodyXMps2.merge(other.accelBodyXMps2);
-            accelBodyYMps2.merge(other.accelBodyYMps2);
+            accelBodyRightMps2.merge(other.accelBodyRightMps2);
+            accelBodyForwardMps2.merge(other.accelBodyForwardMps2);
             planarAccelMps2.merge(other.planarAccelMps2);
         }
     };
 
-    struct FeedforwardMetrics
+    class FeedforwardMetrics
     {
+    public:
         ErrorStats leftDriveCommand;
         ErrorStats rightDriveCommand;
         ErrorStats averageDriveCommand;
@@ -328,8 +336,9 @@ namespace
         }
     };
 
-    struct FeedforwardEnvelope
+    class FeedforwardEnvelope
     {
+    public:
         float leftMin = (std::numeric_limits<float>::infinity)();
         float leftMax = -(std::numeric_limits<float>::infinity)();
         float rightMin = (std::numeric_limits<float>::infinity)();
@@ -337,8 +346,9 @@ namespace
         bool valid = false;
     };
 
-    struct FeedforwardPathSummary
+    class FeedforwardPathSummary
     {
+    public:
         std::string pathId;
         std::string label;
         std::string category;
@@ -354,15 +364,16 @@ namespace
         }
     };
 
-    struct ConsistencyMetrics
+    class ConsistencyMetrics
     {
+    public:
         ErrorStats positionMm;
         ErrorStats headingDeg;
         ErrorStats forwardSpeedMps;
-        ErrorStats lateralSpeedMps;
+        ErrorStats rightwardSpeedMps;
         ErrorStats yawRateRadps;
-        ErrorStats leftWheelOmegaRadps;
-        ErrorStats rightWheelOmegaRadps;
+        ErrorStats leftWheelSpeedRadps;
+        ErrorStats rightWheelSpeedRadps;
         ErrorStats gyroBiasRadps;
 
         void merge(const ConsistencyMetrics& other) noexcept
@@ -370,16 +381,17 @@ namespace
             positionMm.merge(other.positionMm);
             headingDeg.merge(other.headingDeg);
             forwardSpeedMps.merge(other.forwardSpeedMps);
-            lateralSpeedMps.merge(other.lateralSpeedMps);
+            rightwardSpeedMps.merge(other.rightwardSpeedMps);
             yawRateRadps.merge(other.yawRateRadps);
-            leftWheelOmegaRadps.merge(other.leftWheelOmegaRadps);
-            rightWheelOmegaRadps.merge(other.rightWheelOmegaRadps);
+            leftWheelSpeedRadps.merge(other.leftWheelSpeedRadps);
+            rightWheelSpeedRadps.merge(other.rightWheelSpeedRadps);
             gyroBiasRadps.merge(other.gyroBiasRadps);
         }
     };
 
-    struct SectionPhaseKey
+    class SectionPhaseKey
     {
+    public:
         std::uint8_t sectionId = 0U;
         std::uint8_t phaseId = 0U;
 
@@ -389,8 +401,9 @@ namespace
         }
     };
 
-    struct SectionPhaseKeyHash
+    class SectionPhaseKeyHash
     {
+    public:
         std::size_t operator()(const SectionPhaseKey& key) const noexcept
         {
             return (static_cast<std::size_t>(key.sectionId) << 8U) ^
@@ -398,8 +411,9 @@ namespace
         }
     };
 
-    struct SectionPhaseReport
+    class SectionPhaseReport
     {
+    public:
         std::uint8_t sectionId = 0U;
         std::uint8_t phaseId = 0U;
         std::string sectionName;
@@ -416,8 +430,9 @@ namespace
         }
     };
 
-    struct PhaseAssociationSummary
+    class PhaseAssociationSummary
     {
+    public:
         std::uint64_t totalSamples = 0U;
         std::size_t bucketCount = 0U;
         double etaSquaredAbs = 0.0;
@@ -428,11 +443,12 @@ namespace
         double worstBucketMaeRatio = 0.0;
     };
 
-    struct RunReport
+    class RunReport
     {
+    public:
         std::string runId;
         std::string formatVersion;
-        fs::path csvPath;
+        std::filesystem::path csvPath;
         std::string batterySource;
         float batteryVoltageV = std::numeric_limits<float>::quiet_NaN();
         std::uint64_t totalRows = 0U;
@@ -452,8 +468,9 @@ namespace
         std::vector<FeedforwardSampleExportRow> feedforwardSampleExportRows;
     };
 
-    struct CorpusReport
+    class CorpusReport
     {
+    public:
         std::vector<RunReport> runs;
         std::vector<DuplicateRunInfo> duplicates;
         std::uint64_t candidateCsvCount = 0U;
@@ -467,7 +484,7 @@ namespace
     constexpr const char* kAccelerationFeedforwardPathLabel = "PlantModel acceleration feedforward";
     constexpr const char* kAccelerationFeedforwardPathCategory = "plant_model";
 
-    std::vector<FeedforwardPathSummary> BuildDefaultFeedforwardPathSummaries()
+    static std::vector<FeedforwardPathSummary> BuildDefaultFeedforwardPathSummaries()
     {
         std::vector<FeedforwardPathSummary> summaries;
         summaries.reserve(1U);
@@ -479,7 +496,7 @@ namespace
         return summaries;
     }
 
-    std::string Trim(const std::string& value)
+    static std::string Trim(const std::string& value)
     {
         const std::size_t first = value.find_first_not_of(" \t\r\n");
         if (first == std::string::npos)
@@ -491,17 +508,16 @@ namespace
         return value.substr(first, last - first + 1U);
     }
 
-    std::string ToLower(std::string value)
+    static std::string ToLower(std::string value)
     {
-        std::transform(
-            value.begin(),
-            value.end(),
-            value.begin(),
-            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        for (char& c : value)
+        {
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
         return value;
     }
 
-    std::vector<std::string> SplitCommaSeparated(const std::string& line)
+    static std::vector<std::string> SplitCommaSeparated(const std::string& line)
     {
         std::vector<std::string> result;
         std::stringstream stream(line);
@@ -513,7 +529,7 @@ namespace
         return result;
     }
 
-    bool ParseUnsigned32(const std::string& text, std::uint32_t& value) noexcept
+    static bool ParseUnsigned32(const std::string& text, std::uint32_t& value) noexcept
     {
         char* end = nullptr;
         const unsigned long parsed = std::strtoul(text.c_str(), &end, 10);
@@ -526,7 +542,7 @@ namespace
         return true;
     }
 
-    bool ParseUnsigned16(const std::string& text, std::uint16_t& value) noexcept
+    static bool ParseUnsigned16(const std::string& text, std::uint16_t& value) noexcept
     {
         std::uint32_t parsed = 0U;
         if (!ParseUnsigned32(text, parsed) || (parsed > 0xFFFFU))
@@ -538,7 +554,7 @@ namespace
         return true;
     }
 
-    bool ParseUnsigned8(const std::string& text, std::uint8_t& value) noexcept
+    static bool ParseUnsigned8(const std::string& text, std::uint8_t& value) noexcept
     {
         std::uint32_t parsed = 0U;
         if (!ParseUnsigned32(text, parsed) || (parsed > 0xFFU))
@@ -550,7 +566,7 @@ namespace
         return true;
     }
 
-    bool ParseInt32(const std::string& text, std::int32_t& value) noexcept
+    static bool ParseInt32(const std::string& text, std::int32_t& value) noexcept
     {
         char* end = nullptr;
         const long parsed = std::strtol(text.c_str(), &end, 10);
@@ -563,20 +579,20 @@ namespace
         return true;
     }
 
-    bool ParseFloat(const std::string& text, float& value) noexcept
+    static bool ParseFloat(const std::string& text, float& value) noexcept
     {
         char* end = nullptr;
         value = std::strtof(text.c_str(), &end);
         return !(end == text.c_str() || *end != '\0');
     }
 
-    MazeMap::VehicleState BuildKnownStationaryOpenFloorInitialState() noexcept
+    static MazeMap::VehicleState BuildKnownStationaryOpenFloorInitialState() noexcept
     {
         MazeMap::VehicleState state{};
         return state;
     }
 
-    bool GetToken(
+    static bool GetToken(
         const std::vector<std::string>& tokens,
         const std::unordered_map<std::string, std::size_t>& indices,
         const char* fieldName,
@@ -593,7 +609,7 @@ namespace
     }
 
     template <typename T, typename Parser>
-    bool ParseField(
+    static bool ParseField(
         const std::vector<std::string>& tokens,
         const std::unordered_map<std::string, std::size_t>& indices,
         const char* fieldName,
@@ -617,7 +633,7 @@ namespace
         return true;
     }
 
-    bool ParseSidecar(const fs::path& path, SidecarInfo& info, std::string& error)
+    static bool ParseSidecar(const std::filesystem::path& path, SidecarInfo& info, std::string& error)
     {
         std::ifstream stream(path);
         if (!stream)
@@ -699,27 +715,27 @@ namespace
         return true;
     }
 
-    fs::path ResolveControlLogPath(const RunCandidate& candidate)
+    static std::filesystem::path ResolveControlLogPath(const RunCandidate& candidate)
     {
         if (!candidate.sidecar.controlLogFile.empty())
         {
-            const fs::path candidatePath = candidate.sidecar.path.parent_path() / candidate.sidecar.controlLogFile;
-            if (fs::exists(candidatePath))
+            const std::filesystem::path candidatePath = candidate.sidecar.path.parent_path() / candidate.sidecar.controlLogFile;
+            if (std::filesystem::exists(candidatePath))
             {
                 return candidatePath;
             }
         }
 
-        const fs::path loggingPath = candidate.csvPath.parent_path() / "logging.txt";
-        if (fs::exists(loggingPath))
+        const std::filesystem::path loggingPath = candidate.csvPath.parent_path() / "logging.txt";
+        if (std::filesystem::exists(loggingPath))
         {
             return loggingPath;
         }
 
-        return fs::path();
+        return std::filesystem::path();
     }
 
-    bool ReadBatteryVoltageStart(const fs::path& loggingPath, float& batteryVoltageV)
+    static bool ReadBatteryVoltageStart(const std::filesystem::path& loggingPath, float& batteryVoltageV)
     {
         if (loggingPath.empty())
         {
@@ -759,13 +775,13 @@ namespace
         return false;
     }
 
-    bool PathLooksPrimaryDecode(const fs::path& path)
+    static bool PathLooksPrimaryDecode(const std::filesystem::path& path)
     {
         const std::string lower = ToLower(path.string());
         return lower.find("mmlog_decode_") != std::string::npos;
     }
 
-    bool PreferCandidate(const RunCandidate& lhs, const RunCandidate& rhs)
+    static bool PreferCandidate(const RunCandidate& lhs, const RunCandidate& rhs)
     {
         const bool lhsPrimary = PathLooksPrimaryDecode(lhs.csvPath);
         const bool rhsPrimary = PathLooksPrimaryDecode(rhs.csvPath);
@@ -776,8 +792,8 @@ namespace
 
         std::error_code lhsEc;
         std::error_code rhsEc;
-        const fs::file_time_type lhsTime = fs::last_write_time(lhs.csvPath, lhsEc);
-        const fs::file_time_type rhsTime = fs::last_write_time(rhs.csvPath, rhsEc);
+        const std::filesystem::file_time_type lhsTime = std::filesystem::last_write_time(lhs.csvPath, lhsEc);
+        const std::filesystem::file_time_type rhsTime = std::filesystem::last_write_time(rhs.csvPath, rhsEc);
         if (!lhsEc && !rhsEc && lhsTime != rhsTime)
         {
             return lhsTime > rhsTime;
@@ -786,12 +802,17 @@ namespace
         return lhs.csvPath.string() < rhs.csvPath.string();
     }
 
-    bool ResolveSampleMetricSelection(
+    static bool RunCandidateRunIdLess(const RunCandidate& lhs, const RunCandidate& rhs) noexcept
+    {
+        return lhs.sidecar.runId < rhs.sidecar.runId;
+    }
+
+    static bool ResolveSampleMetricSelection(
         const std::string& text,
         std::vector<std::string>& metrics,
         std::string& error);
 
-    bool ParseArgs(int argc, char* argv[], ReplayOptions& options, std::string& error)
+    static bool ParseArgs(int argc, char* argv[], ReplayOptions& options, std::string& error)
     {
         options = {};
         std::string metricSelectionText;
@@ -806,7 +827,7 @@ namespace
                     return false;
                 }
 
-                options.rootPath = fs::path(argv[++index]);
+                options.rootPath = std::filesystem::path(argv[++index]);
             }
             else if (argument == "--output")
             {
@@ -816,7 +837,7 @@ namespace
                     return false;
                 }
 
-                options.outputPath = fs::path(argv[++index]);
+                options.outputPath = std::filesystem::path(argv[++index]);
             }
             else if (argument == "--run-id")
             {
@@ -836,7 +857,7 @@ namespace
                     return false;
                 }
 
-                options.sampleCsvPath = fs::path(argv[++index]);
+                options.sampleCsvPath = std::filesystem::path(argv[++index]);
             }
             else if (argument == "--feedforward-sample-csv")
             {
@@ -846,7 +867,7 @@ namespace
                     return false;
                 }
 
-                options.feedforwardSampleCsvPath = fs::path(argv[++index]);
+                options.feedforwardSampleCsvPath = std::filesystem::path(argv[++index]);
             }
             else if (argument == "--metrics")
             {
@@ -860,12 +881,16 @@ namespace
             }
             else if (argument == "--tuning")
             {
-                error = "--tuning is no longer supported by the canonical SR-UKF configuration";
+                error = "--tuning is no longer supported by the canonical Estimator configuration";
                 return false;
             }
             else if (argument == "--known-stationary-seed")
             {
                 options.useKnownStationarySeed = true;
+            }
+            else if (argument == "--encoder-pseudo-measurement")
+            {
+                options.useEncoderPseudoMeasurement = true;
             }
             else if (argument == "--help" || argument == "-h")
             {
@@ -874,6 +899,7 @@ namespace
                     << "  --root <path>    Root directory to scan for open_floor_main.csv captures.\n"
                     << "  --output <path>  Output directory for the generated report.\n"
                     << "  --known-stationary-seed  Seed from the canonical open-floor start pose instead of the logged UKF state.\n"
+                    << "  --encoder-pseudo-measurement  Also run the post-predict encoder pseudo-measurement update.\n"
                     << "  --run-id <id>    Optional single-run filter.\n"
                     << "  --sample-csv <path>  Optional per-sample CSV export for the selected run.\n"
                     << "  --feedforward-sample-csv <path>  Optional per-sample feedforward-path audit CSV export for the selected run.\n"
@@ -889,8 +915,8 @@ namespace
 
         if (options.rootPath.empty())
         {
-            const fs::path cwd = fs::current_path();
-            options.rootPath = fs::exists(cwd / "TestResults") ? (cwd / "TestResults") : cwd;
+            const std::filesystem::path cwd = std::filesystem::current_path();
+            options.rootPath = std::filesystem::exists(cwd / "TestResults") ? (cwd / "TestResults") : cwd;
         }
 
         if (!options.sampleCsvPath.empty() && options.runIdFilter.empty())
@@ -920,7 +946,7 @@ namespace
         return true;
     }
 
-    std::string MakeTimestampString()
+    static std::string MakeTimestampString()
     {
         const std::time_t now = std::time(nullptr);
         std::tm localTime{};
@@ -934,7 +960,7 @@ namespace
         return stream.str();
     }
 
-    std::string SectionName(std::uint8_t sectionId)
+    static std::string SectionName(std::uint8_t sectionId)
     {
         switch (sectionId)
         {
@@ -959,7 +985,7 @@ namespace
         }
     }
 
-    std::string PhaseName(std::uint8_t phaseId)
+    static std::string PhaseName(std::uint8_t phaseId)
     {
         switch (phaseId)
         {
@@ -984,7 +1010,7 @@ namespace
         }
     }
 
-    std::string PrimitiveName(std::uint8_t primitiveId)
+    static std::string PrimitiveName(std::uint8_t primitiveId)
     {
         if (primitiveId == static_cast<std::uint8_t>(MazeMap::MC_NONE))
         {
@@ -996,7 +1022,7 @@ namespace
         return codeName;
     }
 
-    const std::vector<std::string>& DefaultSampleMetricSelection()
+    static const std::vector<std::string>& DefaultSampleMetricSelection()
     {
         static const std::vector<std::string> kDefaultMetrics = {
             "master_time_us",
@@ -1010,17 +1036,17 @@ namespace
             "phase_name",
             "repeat_index",
             "accel_bias_valid",
-            "predicted_accel_body_x_mps2",
-            "actual_accel_body_x_mps2",
-            "predicted_accel_body_y_mps2",
-            "actual_accel_body_y_mps2",
+            "predicted_accel_body_right_mps2",
+            "actual_accel_body_right_mps2",
+            "predicted_accel_body_forward_mps2",
+            "actual_accel_body_forward_mps2",
             "predicted_planar_accel_mps2",
             "actual_planar_accel_mps2",
         };
         return kDefaultMetrics;
     }
 
-    bool IsRecognizedSampleMetric(const std::string& metric) noexcept
+    static bool IsRecognizedSampleMetric(const std::string& metric) noexcept
     {
         static const std::vector<std::string> kRecognizedMetrics = {
             "master_time_us",
@@ -1034,10 +1060,10 @@ namespace
             "phase_name",
             "repeat_index",
             "accel_bias_valid",
-            "predicted_accel_body_x_mps2",
-            "actual_accel_body_x_mps2",
-            "predicted_accel_body_y_mps2",
-            "actual_accel_body_y_mps2",
+            "predicted_accel_body_right_mps2",
+            "actual_accel_body_right_mps2",
+            "predicted_accel_body_forward_mps2",
+            "actual_accel_body_forward_mps2",
             "predicted_planar_accel_mps2",
             "actual_planar_accel_mps2",
             "predicted_linear_speed_mps",
@@ -1050,7 +1076,7 @@ namespace
         return std::find(kRecognizedMetrics.begin(), kRecognizedMetrics.end(), metric) != kRecognizedMetrics.end();
     }
 
-    bool AppendSampleMetricSelection(
+    static bool AppendSampleMetricSelection(
         const std::string& token,
         std::vector<std::string>& metrics,
         std::string& error)
@@ -1079,10 +1105,10 @@ namespace
         if (normalized == "accel_compare")
         {
             static const std::vector<std::string> kAccelCompareMetrics = {
-                "predicted_accel_body_x_mps2",
-                "actual_accel_body_x_mps2",
-                "predicted_accel_body_y_mps2",
-                "actual_accel_body_y_mps2",
+                "predicted_accel_body_right_mps2",
+                "actual_accel_body_right_mps2",
+                "predicted_accel_body_forward_mps2",
+                "actual_accel_body_forward_mps2",
                 "predicted_planar_accel_mps2",
                 "actual_planar_accel_mps2",
             };
@@ -1129,7 +1155,7 @@ namespace
         return true;
     }
 
-    bool ResolveSampleMetricSelection(
+    static bool ResolveSampleMetricSelection(
         const std::string& text,
         std::vector<std::string>& metrics,
         std::string& error)
@@ -1157,15 +1183,13 @@ namespace
         return true;
     }
 
-    std::string SectionPhaseLabel(const SectionPhaseReport& bucket)
+    static std::string SectionPhaseLabel(const SectionPhaseReport& bucket)
     {
         return bucket.sectionName + " / " + bucket.phaseName;
     }
 
-    using SectionPhaseReportMap = std::unordered_map<SectionPhaseKey, SectionPhaseReport, SectionPhaseKeyHash>;
-
-    SectionPhaseReport& GetOrCreateSectionPhaseReport(
-        SectionPhaseReportMap& reports,
+    static SectionPhaseReport& GetOrCreateSectionPhaseReport(
+        std::unordered_map<SectionPhaseKey, SectionPhaseReport, SectionPhaseKeyHash>& reports,
         std::uint8_t sectionId,
         std::uint8_t phaseId)
     {
@@ -1183,7 +1207,18 @@ namespace
         return report;
     }
 
-    std::vector<SectionPhaseReport> ToSortedSectionPhaseReports(const SectionPhaseReportMap& reports)
+    static bool SectionPhaseReportLess(const SectionPhaseReport& lhs, const SectionPhaseReport& rhs) noexcept
+    {
+        if (lhs.sectionId != rhs.sectionId)
+        {
+            return lhs.sectionId < rhs.sectionId;
+        }
+
+        return lhs.phaseId < rhs.phaseId;
+    }
+
+    static std::vector<SectionPhaseReport> ToSortedSectionPhaseReports(
+        const std::unordered_map<SectionPhaseKey, SectionPhaseReport, SectionPhaseKeyHash>& reports)
     {
         std::vector<SectionPhaseReport> sorted;
         sorted.reserve(reports.size());
@@ -1192,32 +1227,48 @@ namespace
             sorted.push_back(item.second);
         }
 
-        std::sort(
-            sorted.begin(),
-            sorted.end(),
-            [](const SectionPhaseReport& lhs, const SectionPhaseReport& rhs)
-            {
-                if (lhs.sectionId != rhs.sectionId)
-                {
-                    return lhs.sectionId < rhs.sectionId;
-                }
-
-                return lhs.phaseId < rhs.phaseId;
-            });
+        std::sort(sorted.begin(), sorted.end(), SectionPhaseReportLess);
         return sorted;
     }
 
-    template <typename Accessor>
-    PhaseAssociationSummary ComputePhaseAssociationSummary(
+    static const ErrorStats& SectionPhaseMetricStats(
+        const SectionPhaseReport& bucket,
+        const char* metricName) noexcept
+    {
+        if (std::string(metricName) == "encoder_linear")
+        {
+            return bucket.prediction.encoderLinearSpeedMps;
+        }
+        if (std::string(metricName) == "raw_gyro")
+        {
+            return bucket.prediction.rawGyroRadps;
+        }
+        if (std::string(metricName) == "accel_right")
+        {
+            return bucket.prediction.accelBodyRightMps2;
+        }
+        if (std::string(metricName) == "accel_forward")
+        {
+            return bucket.prediction.accelBodyForwardMps2;
+        }
+        if (std::string(metricName) == "post_position")
+        {
+            return bucket.consistency.positionMm;
+        }
+
+        return bucket.consistency.headingDeg;
+    }
+
+    static PhaseAssociationSummary ComputePhaseAssociationSummary(
         const std::vector<SectionPhaseReport>& buckets,
-        Accessor&& accessor)
+        const char* metricName)
     {
         PhaseAssociationSummary summary{};
         double totalSumAbs = 0.0;
         double totalSumSquares = 0.0;
         for (const SectionPhaseReport& bucket : buckets)
         {
-            const ErrorStats& stats = accessor(bucket);
+            const ErrorStats& stats = SectionPhaseMetricStats(bucket, metricName);
             if (stats.count == 0U)
             {
                 continue;
@@ -1242,7 +1293,7 @@ namespace
         double betweenSs = 0.0;
         for (const SectionPhaseReport& bucket : buckets)
         {
-            const ErrorStats& stats = accessor(bucket);
+            const ErrorStats& stats = SectionPhaseMetricStats(bucket, metricName);
             if (stats.count == 0U)
             {
                 continue;
@@ -1268,14 +1319,14 @@ namespace
         return summary;
     }
 
-    bool DiscoverRuns(
+    static bool DiscoverRuns(
         const ReplayOptions& options,
         std::vector<RunCandidate>& runs,
         std::vector<DuplicateRunInfo>& duplicates,
         std::uint64_t& candidateCsvCount,
         std::string& error)
     {
-        if (!fs::exists(options.rootPath))
+        if (!std::filesystem::exists(options.rootPath))
         {
             error = "Replay root does not exist: " + options.rootPath.string();
             return false;
@@ -1284,8 +1335,8 @@ namespace
         std::unordered_map<std::string, RunCandidate> selectedRuns;
         candidateCsvCount = 0U;
 
-        const fs::directory_options iteratorOptions = fs::directory_options::skip_permission_denied;
-        for (const fs::directory_entry& entry : fs::recursive_directory_iterator(options.rootPath, iteratorOptions))
+        const std::filesystem::directory_options iteratorOptions = std::filesystem::directory_options::skip_permission_denied;
+        for (const std::filesystem::directory_entry& entry : std::filesystem::recursive_directory_iterator(options.rootPath, iteratorOptions))
         {
             if (!entry.is_regular_file() || entry.path().filename() != kCsvFileName)
             {
@@ -1294,8 +1345,8 @@ namespace
 
             ++candidateCsvCount;
 
-            const fs::path sidecarPath = entry.path().parent_path() / kSidecarFileName;
-            if (!fs::exists(sidecarPath))
+            const std::filesystem::path sidecarPath = entry.path().parent_path() / kSidecarFileName;
+            if (!std::filesystem::exists(sidecarPath))
             {
                 continue;
             }
@@ -1349,17 +1400,11 @@ namespace
             runs.push_back(item.second);
         }
 
-        std::sort(
-            runs.begin(),
-            runs.end(),
-            [](const RunCandidate& lhs, const RunCandidate& rhs)
-            {
-                return lhs.sidecar.runId < rhs.sidecar.runId;
-            });
+        std::sort(runs.begin(), runs.end(), RunCandidateRunIdLess);
         return true;
     }
 
-    bool ValidateCsvHeader(
+    static bool ValidateCsvHeader(
         const std::vector<std::string>& headerFields,
         const SidecarInfo& sidecar,
         std::string& error)
@@ -1382,7 +1427,7 @@ namespace
         return true;
     }
 
-    bool LoadRows(const RunCandidate& candidate, std::vector<LoggedRow>& rows, std::string& error)
+    static bool LoadRows(const RunCandidate& candidate, std::vector<LoggedRow>& rows, std::string& error)
     {
         std::ifstream stream(candidate.csvPath);
         if (!stream)
@@ -1438,12 +1483,13 @@ namespace
             LoggedRow row{};
             float loggedPxM = 0.0f;
             float loggedPyM = 0.0f;
-            float loggedPsiRad = 0.0f;
+            float loggedHeadingRad = 0.0f;
             float loggedForwardMps = 0.0f;
-            float loggedLateralMps = 0.0f;
+            float loggedRightwardMps = 0.0f;
             float loggedYawRateRadps = 0.0f;
-            float loggedLeftOmegaRadps = 0.0f;
-            float loggedRightOmegaRadps = 0.0f;
+            float loggedForwardAccelResidualMps2 = 0.0f;
+            float loggedRightwardAccelResidualMps2 = 0.0f;
+            float loggedYawAccelResidualRadps2 = 0.0f;
             float loggedGyroBiasRadps = 0.0f;
             if (!ParseField(tokens, indices, "master_time_us", row.masterTimeUs, ParseUnsigned32, error) ||
                 !ParseField(tokens, indices, "control_tick_sequence", row.controlTickSequence, ParseUnsigned32, error) ||
@@ -1455,31 +1501,32 @@ namespace
                 !ParseField(tokens, indices, "saturation_flags", row.saturationFlags, ParseUnsigned16, error) ||
                 !ParseField(tokens, indices, "ukf_state_px_m", loggedPxM, ParseFloat, error) ||
                 !ParseField(tokens, indices, "ukf_state_py_m", loggedPyM, ParseFloat, error) ||
-                !ParseField(tokens, indices, "ukf_state_psi_rad", loggedPsiRad, ParseFloat, error) ||
-                !ParseField(tokens, indices, "ukf_state_u_mps", loggedForwardMps, ParseFloat, error) ||
-                !ParseField(tokens, indices, "ukf_state_v_mps", loggedLateralMps, ParseFloat, error) ||
-                !ParseField(tokens, indices, "ukf_state_r_radps", loggedYawRateRadps, ParseFloat, error) ||
-                !ParseField(tokens, indices, "ukf_state_omega_l_radps", loggedLeftOmegaRadps, ParseFloat, error) ||
-                !ParseField(tokens, indices, "ukf_state_omega_r_radps", loggedRightOmegaRadps, ParseFloat, error) ||
-                !ParseField(tokens, indices, "ukf_state_bgz_radps", loggedGyroBiasRadps, ParseFloat, error) ||
+                !ParseField(tokens, indices, "ukf_state_heading_rad", loggedHeadingRad, ParseFloat, error) ||
+                !ParseField(tokens, indices, "ukf_state_vf_mps", loggedForwardMps, ParseFloat, error) ||
+                !ParseField(tokens, indices, "ukf_state_vr_mps", loggedRightwardMps, ParseFloat, error) ||
+                !ParseField(tokens, indices, "ukf_state_yaw_rate_radps", loggedYawRateRadps, ParseFloat, error) ||
+                !ParseField(tokens, indices, "ukf_state_delta_af_mps2", loggedForwardAccelResidualMps2, ParseFloat, error) ||
+                !ParseField(tokens, indices, "ukf_state_delta_ar_mps2", loggedRightwardAccelResidualMps2, ParseFloat, error) ||
+                !ParseField(tokens, indices, "ukf_state_delta_yaw_accel_radps2", loggedYawAccelResidualRadps2, ParseFloat, error) ||
+                !ParseField(tokens, indices, "ukf_state_gyro_bias_z_radps", loggedGyroBiasRadps, ParseFloat, error) ||
                 !ParseField(tokens, indices, "measured_linear_speed_mps", row.measuredLinearSpeedMps, ParseFloat, error) ||
-                !ParseField(tokens, indices, "measured_angular_speed_radps", row.measuredAngularSpeedRadps, ParseFloat, error) ||
+                !ParseField(tokens, indices, "measured_yaw_rate_radps", row.measuredYawRateRadps, ParseFloat, error) ||
                 !ParseField(tokens, indices, "cmd_linear_mps", row.commandedLinearMps, ParseFloat, error) ||
-                !ParseField(tokens, indices, "cmd_angular_radps", row.commandedAngularRadps, ParseFloat, error) ||
+                !ParseField(tokens, indices, "cmd_yaw_rate_radps", row.commandedYawRateRadps, ParseFloat, error) ||
                 !ParseField(tokens, indices, "left_drive_command", row.leftDriveCommand, ParseFloat, error) ||
                 !ParseField(tokens, indices, "right_drive_command", row.rightDriveCommand, ParseFloat, error) ||
                 !ParseField(tokens, indices, "left_plant_command", row.leftPlantCommand, ParseFloat, error) ||
                 !ParseField(tokens, indices, "right_plant_command", row.rightPlantCommand, ParseFloat, error) ||
                 !ParseField(tokens, indices, "left_encoder_count", row.leftEncoderCount, ParseInt32, error) ||
                 !ParseField(tokens, indices, "right_encoder_count", row.rightEncoderCount, ParseInt32, error) ||
-                !ParseField(tokens, indices, "left_encoder_omega_radps", row.leftEncoderOmegaRadps, ParseFloat, error) ||
-                !ParseField(tokens, indices, "right_encoder_omega_radps", row.rightEncoderOmegaRadps, ParseFloat, error) ||
+                !ParseField(tokens, indices, "left_encoder_wheel_speed_radps", row.leftEncoderWheelSpeedRadps, ParseFloat, error) ||
+                !ParseField(tokens, indices, "right_encoder_wheel_speed_radps", row.rightEncoderWheelSpeedRadps, ParseFloat, error) ||
                 !ParseField(tokens, indices, "left_encoder_velocity_mps", row.leftEncoderVelocityMps, ParseFloat, error) ||
                 !ParseField(tokens, indices, "right_encoder_velocity_mps", row.rightEncoderVelocityMps, ParseFloat, error) ||
                 !ParseField(tokens, indices, "gyro_raw_radps", row.gyroRawRadps, ParseFloat, error) ||
                 !ParseField(tokens, indices, "gyro_radps", row.gyroCorrectedRadps, ParseFloat, error) ||
-                !ParseField(tokens, indices, "accel_body_x_mps2", row.accelBodyXMps2, ParseFloat, error) ||
-                !ParseField(tokens, indices, "accel_body_y_mps2", row.accelBodyYMps2, ParseFloat, error) ||
+                !ParseField(tokens, indices, "accel_body_right_mps2", row.accelBodyRightMps2, ParseFloat, error) ||
+                !ParseField(tokens, indices, "accel_body_forward_mps2", row.accelBodyForwardMps2, ParseFloat, error) ||
                 !ParseField(tokens, indices, "planar_accel_mps2", row.planarAccelMps2, ParseFloat, error))
             {
                 return false;
@@ -1494,13 +1541,18 @@ namespace
             row.accelBiasValid = (accelBiasValid != 0U);
             row.fanDutyCycle = loggedFanDutyCycle;
             row.loggedState.SetPosition(Eigen::Vector2f(loggedPxM, loggedPyM));
-            row.loggedState.SetOrientation(loggedPsiRad);
-            row.loggedState.SetVelocity(loggedForwardMps);
-            row.loggedState.SetLateralVelocity(loggedLateralMps);
-            row.loggedState.SetRotationalVelocity(loggedYawRateRadps);
-            row.loggedState.SetWheelSpeedLeft(loggedLeftOmegaRadps);
-            row.loggedState.SetWheelSpeedRight(loggedRightOmegaRadps);
+            row.loggedState.SetHeading(loggedHeadingRad);
+            row.loggedState.SetForwardVelocity(loggedForwardMps);
+            row.loggedState.SetRightwardVelocity(loggedRightwardMps);
+            row.loggedState.SetYawRate(loggedYawRateRadps);
+            row.loggedState.SetForwardAccelerationResidual(loggedForwardAccelResidualMps2);
+            row.loggedState.SetRightwardAccelerationResidual(loggedRightwardAccelResidualMps2);
+            row.loggedState.SetYawAccelResidual(loggedYawAccelResidualRadps2);
+            row.loggedState.SetWheelSpeedLeft(row.leftEncoderWheelSpeedRadps);
+            row.loggedState.SetWheelSpeedRight(row.rightEncoderWheelSpeedRadps);
             row.loggedState.SetGyroBiasZ(loggedGyroBiasRadps);
+            row.loggedState.SetCurrentCommand(
+                MazeMap::App::Internal::CommandVector(row.leftDriveCommand, row.rightDriveCommand));
             rows.push_back(row);
         }
 
@@ -1513,32 +1565,31 @@ namespace
         return true;
     }
 
-    MazeMap::EncoderObs BuildEncoderObservation(const LoggedRow& row) noexcept
+    static MazeMap::EncoderObs BuildEncoderObservation(const LoggedRow& row) noexcept
     {
         MazeMap::EncoderObs observation{};
-        observation.totalLeftCounts = row.leftEncoderCount;
-        observation.totalRightCounts = row.rightEncoderCount;
-        observation.omegaLeftRadps = row.leftEncoderOmegaRadps;
-        observation.omegaRightRadps = row.rightEncoderOmegaRadps;
+        observation.SetCounts(row.leftEncoderCount, row.rightEncoderCount);
+        observation.SetWheelLinearVelocityMps(row.leftEncoderVelocityMps, row.rightEncoderVelocityMps);
+        observation.SetWheelSpeedRadps(row.leftEncoderWheelSpeedRadps, row.rightEncoderWheelSpeedRadps);
         return observation;
     }
 
-    float SensorForwardVelocityMps(const LoggedRow& row) noexcept
+    static float SensorForwardVelocityMps(const LoggedRow& row) noexcept
     {
         return 0.5f * (row.leftEncoderVelocityMps + row.rightEncoderVelocityMps);
     }
 
-    float CommandAverage(float leftCommand, float rightCommand) noexcept
+    static float CommandAverage(float leftCommand, float rightCommand) noexcept
     {
         return 0.5f * (leftCommand + rightCommand);
     }
 
-    float CommandDelta(float leftCommand, float rightCommand) noexcept
+    static float CommandDelta(float leftCommand, float rightCommand) noexcept
     {
         return 0.5f * (rightCommand - leftCommand);
     }
 
-    bool IsSensorComparableTransition(const LoggedRow& currentRow, const LoggedRow& nextRow) noexcept
+    static bool IsSensorComparableTransition(const LoggedRow& currentRow, const LoggedRow& nextRow) noexcept
     {
         return
             (currentRow.sectionId == nextRow.sectionId) &&
@@ -1546,7 +1597,7 @@ namespace
             (currentRow.repeatIndex == nextRow.repeatIndex);
     }
 
-    void ScoreFeedforward(
+    static void ScoreFeedforward(
         const FeedforwardSampleExportRow& row,
         FeedforwardMetrics& metrics) noexcept
     {
@@ -1570,7 +1621,93 @@ namespace
         }
     }
 
-    bool BuildFeedforwardSampleExportRow(
+    static bool TryComputeFeedforwardCommand(
+        MazeMap::PlantModel& plantModel,
+        MazeMap::Vehicle& vehicle,
+        const LoggedRow& sourceRow,
+        const LoggedRow& targetRow,
+        MazeMap::App::Internal::CommandVector& solvedCommand) noexcept
+    {
+        if (!IsSensorComparableTransition(sourceRow, targetRow))
+        {
+            return false;
+        }
+
+        const float responseTimeS = static_cast<float>(targetRow.dtUs) * 1.0e-6f;
+        const float currentForwardVelocityMps = SensorForwardVelocityMps(sourceRow);
+        const float currentYawRateRadps = sourceRow.gyroCorrectedRadps;
+        const float targetForwardVelocityMps = SensorForwardVelocityMps(targetRow);
+        const float targetYawRateRadps = targetRow.gyroCorrectedRadps;
+        if (!(std::isfinite(responseTimeS) &&
+            (responseTimeS > 0.0f) &&
+            std::isfinite(sourceRow.leftEncoderVelocityMps) &&
+            std::isfinite(sourceRow.rightEncoderVelocityMps) &&
+            std::isfinite(currentForwardVelocityMps) &&
+            std::isfinite(currentYawRateRadps) &&
+            std::isfinite(targetForwardVelocityMps) &&
+            std::isfinite(targetYawRateRadps) &&
+            (MazeMap::Vehicle::GetDriveWheelRadiusM() > 0.0f)))
+        {
+            return false;
+        }
+
+        vehicle.SetFanDuty(sourceRow.fanDutyCycle);
+        float maxLongitudinalAccelMps2 = 0.0f;
+        float maxYawAccelRadps2 = 0.0f;
+        plantModel.velocityTargetTechnicalLimits(
+            currentForwardVelocityMps,
+            currentYawRateRadps,
+            maxLongitudinalAccelMps2,
+            maxYawAccelRadps2);
+
+        const float longitudinalAccelLimitMps2 =
+            (std::isfinite(maxLongitudinalAccelMps2) && (maxLongitudinalAccelMps2 > 0.0f)) ?
+            maxLongitudinalAccelMps2 :
+            0.0f;
+        const float yawAccelLimitRadps2 =
+            (std::isfinite(maxYawAccelRadps2) && (maxYawAccelRadps2 > 0.0f)) ?
+            maxYawAccelRadps2 :
+            0.0f;
+        float desiredLongitudinalAccelMps2 =
+            (longitudinalAccelLimitMps2 > 0.0f) ?
+            ((targetForwardVelocityMps - currentForwardVelocityMps) / responseTimeS) :
+            0.0f;
+        float desiredYawAccelRadps2 =
+            (yawAccelLimitRadps2 > 0.0f) ?
+            ((targetYawRateRadps - currentYawRateRadps) / responseTimeS) :
+            0.0f;
+        const float longitudinalDemand =
+            (longitudinalAccelLimitMps2 > 0.0f) ?
+            (std::fabs(desiredLongitudinalAccelMps2) / longitudinalAccelLimitMps2) :
+            0.0f;
+        const float yawDemand =
+            (yawAccelLimitRadps2 > 0.0f) ?
+            (std::fabs(desiredYawAccelRadps2) / yawAccelLimitRadps2) :
+            0.0f;
+        const float balanceScale = (std::max)(1.0f, (std::max)(longitudinalDemand, yawDemand));
+        desiredLongitudinalAccelMps2 =
+            (std::clamp)(
+                desiredLongitudinalAccelMps2 / balanceScale,
+                -longitudinalAccelLimitMps2,
+                longitudinalAccelLimitMps2);
+        desiredYawAccelRadps2 =
+            (std::clamp)(
+                desiredYawAccelRadps2 / balanceScale,
+                -yawAccelLimitRadps2,
+                yawAccelLimitRadps2);
+
+        if (!(std::isfinite(desiredLongitudinalAccelMps2) && std::isfinite(desiredYawAccelRadps2)))
+        {
+            return false;
+        }
+
+        solvedCommand = plantModel.ComputeFeedforward(
+            desiredLongitudinalAccelMps2,
+            desiredYawAccelRadps2);
+        return solvedCommand.IsFinite();
+    }
+
+    static bool BuildFeedforwardSampleExportRow(
         MazeMap::PlantModel& plantModel,
         MazeMap::Vehicle& vehicle,
         MazeMap::VehicleState& runtimeState,
@@ -1578,93 +1715,8 @@ namespace
         const LoggedRow& nextRow,
         FeedforwardSampleExportRow& exportRow) noexcept
     {
-        const auto tryComputeFeedforwardCommand =
-            [&plantModel, &vehicle](
-                const LoggedRow& sourceRow,
-                const LoggedRow& targetRow,
-                MazeMap::App::Internal::CommandVector& solvedCommand) noexcept -> bool
-        {
-            if (!IsSensorComparableTransition(sourceRow, targetRow))
-            {
-                return false;
-            }
-
-            const float responseTimeS = static_cast<float>(targetRow.dtUs) * 1.0e-6f;
-            const float currentForwardVelocityMps = SensorForwardVelocityMps(sourceRow);
-            const float currentYawRateRadps = sourceRow.gyroCorrectedRadps;
-            const float targetForwardVelocityMps = SensorForwardVelocityMps(targetRow);
-            const float targetYawRateRadps = targetRow.gyroCorrectedRadps;
-            if (!(std::isfinite(responseTimeS) &&
-                (responseTimeS > 0.0f) &&
-                std::isfinite(sourceRow.leftEncoderVelocityMps) &&
-                std::isfinite(sourceRow.rightEncoderVelocityMps) &&
-                std::isfinite(currentForwardVelocityMps) &&
-                std::isfinite(currentYawRateRadps) &&
-                std::isfinite(targetForwardVelocityMps) &&
-                std::isfinite(targetYawRateRadps) &&
-                (MazeMap::Vehicle::GetDriveWheelRadiusM() > 0.0f)))
-            {
-                return false;
-            }
-
-            vehicle.SetFanDuty(sourceRow.fanDutyCycle);
-            float maxLongitudinalAccelMps2 = 0.0f;
-            float maxYawAccelRadps2 = 0.0f;
-            plantModel.velocityTargetTechnicalLimits(
-                currentForwardVelocityMps,
-                currentYawRateRadps,
-                maxLongitudinalAccelMps2,
-                maxYawAccelRadps2);
-
-            const float longitudinalAccelLimitMps2 =
-                (std::isfinite(maxLongitudinalAccelMps2) && (maxLongitudinalAccelMps2 > 0.0f)) ?
-                maxLongitudinalAccelMps2 :
-                0.0f;
-            const float yawAccelLimitRadps2 =
-                (std::isfinite(maxYawAccelRadps2) && (maxYawAccelRadps2 > 0.0f)) ?
-                maxYawAccelRadps2 :
-                0.0f;
-            float desiredLongitudinalAccelMps2 =
-                (longitudinalAccelLimitMps2 > 0.0f) ?
-                ((targetForwardVelocityMps - currentForwardVelocityMps) / responseTimeS) :
-                0.0f;
-            float desiredYawAccelRadps2 =
-                (yawAccelLimitRadps2 > 0.0f) ?
-                ((targetYawRateRadps - currentYawRateRadps) / responseTimeS) :
-                0.0f;
-            const float longitudinalDemand =
-                (longitudinalAccelLimitMps2 > 0.0f) ?
-                (std::fabs(desiredLongitudinalAccelMps2) / longitudinalAccelLimitMps2) :
-                0.0f;
-            const float yawDemand =
-                (yawAccelLimitRadps2 > 0.0f) ?
-                (std::fabs(desiredYawAccelRadps2) / yawAccelLimitRadps2) :
-                0.0f;
-            const float balanceScale = (std::max)(1.0f, (std::max)(longitudinalDemand, yawDemand));
-            desiredLongitudinalAccelMps2 =
-                (std::clamp)(
-                    desiredLongitudinalAccelMps2 / balanceScale,
-                    -longitudinalAccelLimitMps2,
-                    longitudinalAccelLimitMps2);
-            desiredYawAccelRadps2 =
-                (std::clamp)(
-                    desiredYawAccelRadps2 / balanceScale,
-                    -yawAccelLimitRadps2,
-                    yawAccelLimitRadps2);
-
-            if (!(std::isfinite(desiredLongitudinalAccelMps2) && std::isfinite(desiredYawAccelRadps2)))
-            {
-                return false;
-            }
-
-            solvedCommand = plantModel.ComputeFeedforward(
-                desiredLongitudinalAccelMps2,
-                desiredYawAccelRadps2);
-            return solvedCommand.IsFinite();
-        };
-
         MazeMap::App::Internal::CommandVector command{};
-        if (!tryComputeFeedforwardCommand(currentRow, nextRow, command))
+        if (!TryComputeFeedforwardCommand(plantModel, vehicle, currentRow, nextRow, command))
         {
             return false;
         }
@@ -1698,7 +1750,12 @@ namespace
                                     static_cast<float>(nextYawSign) * kYawRateSensorBoundRadps;
 
                                 MazeMap::App::Internal::CommandVector perturbedCommand{};
-                                if (!tryComputeFeedforwardCommand(perturbedCurrent, perturbedNext, perturbedCommand))
+                                if (!TryComputeFeedforwardCommand(
+                                    plantModel,
+                                    vehicle,
+                                    perturbedCurrent,
+                                    perturbedNext,
+                                    perturbedCommand))
                                 {
                                     continue;
                                 }
@@ -1718,12 +1775,12 @@ namespace
         const float responseTimeS = static_cast<float>(nextRow.dtUs) * 1.0e-6f;
         vehicle.SetFanDuty(currentRow.fanDutyCycle);
         runtimeState.SetPosition(Eigen::Vector2f::Zero());
-        runtimeState.SetOrientation(0.0f);
-        runtimeState.SetVelocity(SensorForwardVelocityMps(currentRow));
-        runtimeState.SetLateralVelocity(0.0f);
-        runtimeState.SetRotationalVelocity(currentRow.gyroCorrectedRadps);
-        runtimeState.SetWheelSpeedLeft(MazeMap::Vehicle::WheelOmegaFromLinearVelocity(currentRow.leftEncoderVelocityMps));
-        runtimeState.SetWheelSpeedRight(MazeMap::Vehicle::WheelOmegaFromLinearVelocity(currentRow.rightEncoderVelocityMps));
+        runtimeState.SetHeading(0.0f);
+        runtimeState.SetForwardVelocity(SensorForwardVelocityMps(currentRow));
+        runtimeState.SetRightwardVelocity(0.0f);
+        runtimeState.SetYawRate(currentRow.gyroCorrectedRadps);
+        runtimeState.SetWheelSpeedLeft(MazeMap::Vehicle::WheelSpeedFromLinearVelocity(currentRow.leftEncoderVelocityMps));
+        runtimeState.SetWheelSpeedRight(MazeMap::Vehicle::WheelSpeedFromLinearVelocity(currentRow.rightEncoderVelocityMps));
         runtimeState.SetGyroBiasZ(0.0f);
         plantModel.integrate(command, responseTimeS);
 
@@ -1782,8 +1839,8 @@ namespace
             exportRow.nominalAverageCommand - exportRow.loggedAveragePlantCommand;
         exportRow.deltaPlantCommandError =
             exportRow.nominalDeltaCommand - exportRow.loggedDeltaPlantCommand;
-        exportRow.predictedNextForwardMps = runtimeState.GetVelocity();
-        exportRow.predictedNextYawRateRadps = runtimeState.GetRotationalVelocity();
+        exportRow.predictedNextForwardMps = runtimeState.GetForwardVelocity();
+        exportRow.predictedNextYawRateRadps = runtimeState.GetYawRate();
         exportRow.predictedForwardTargetErrorMps =
             exportRow.predictedNextForwardMps - exportRow.targetForwardSensorMps;
         exportRow.predictedYawTargetErrorRadps =
@@ -1825,75 +1882,75 @@ namespace
         exportRow.sectionName = SectionName(row.sectionId);
         exportRow.primitiveName = PrimitiveName(row.primitiveId);
         exportRow.phaseName = PhaseName(row.phaseId);
-        exportRow.predictedAccelBodyXMps2 = predictedAccelBodyMps2.x();
-        exportRow.actualAccelBodyXMps2 = row.accelBodyXMps2;
-        exportRow.predictedAccelBodyYMps2 = predictedAccelBodyMps2.y();
-        exportRow.actualAccelBodyYMps2 = row.accelBodyYMps2;
+        exportRow.predictedAccelBodyRightMps2 = predictedAccelBodyMps2.x();
+        exportRow.actualAccelBodyRightMps2 = row.accelBodyRightMps2;
+        exportRow.predictedAccelBodyForwardMps2 = predictedAccelBodyMps2.y();
+        exportRow.actualAccelBodyForwardMps2 = row.accelBodyForwardMps2;
         exportRow.predictedPlanarAccelMps2 = predictedAccelBodyMps2.norm();
         exportRow.actualPlanarAccelMps2 = row.planarAccelMps2;
-        exportRow.predictedLinearSpeedMps = predictedState.GetVelocity();
+        exportRow.predictedLinearSpeedMps = predictedState.GetForwardVelocity();
         exportRow.actualLinearSpeedMps = row.measuredLinearSpeedMps;
-        exportRow.predictedYawRateRadps = predictedState.GetRotationalVelocity();
+        exportRow.predictedYawRateRadps = predictedState.GetYawRate();
         exportRow.actualYawRateRadps = row.gyroCorrectedRadps;
         exportRow.predictedRawGyroRadps =
-            predictedState.GetRotationalVelocity() + predictedState.GetGyroBiasZ();
+            predictedState.GetYawRate() + predictedState.GetGyroBiasZ();
         exportRow.actualRawGyroRadps = row.gyroRawRadps;
         return exportRow;
     }
 
-    void ScorePrediction(
+    static void ScorePrediction(
         const LoggedRow& row,
         const MazeMap::VehicleState& predictedState,
         const Eigen::Vector2f& predictedAccelBodyMps2,
         PredictionMetrics& metrics)
     {
-        metrics.encoderLeftOmegaRadps.add(
+        metrics.leftEncoderWheelSpeedRadps.add(
             static_cast<double>(predictedState.GetWheelSpeedLeft()) -
-            static_cast<double>(row.leftEncoderOmegaRadps));
-        metrics.encoderRightOmegaRadps.add(
+            static_cast<double>(row.leftEncoderWheelSpeedRadps));
+        metrics.rightEncoderWheelSpeedRadps.add(
             static_cast<double>(predictedState.GetWheelSpeedRight()) -
-            static_cast<double>(row.rightEncoderOmegaRadps));
+            static_cast<double>(row.rightEncoderWheelSpeedRadps));
 
         const double predictedEncoderLinearMps =
             static_cast<double>(MazeMap::Vehicle::BodyForwardVelocityFromWheelLinear(
-                MazeMap::Vehicle::WheelLinearVelocityFromOmega(predictedState.GetWheelSpeedLeft()),
-                MazeMap::Vehicle::WheelLinearVelocityFromOmega(predictedState.GetWheelSpeedRight())));
+                MazeMap::Vehicle::WheelLinearVelocityFromWheelSpeed(predictedState.GetWheelSpeedLeft()),
+                MazeMap::Vehicle::WheelLinearVelocityFromWheelSpeed(predictedState.GetWheelSpeedRight())));
         metrics.encoderLinearSpeedMps.add(predictedEncoderLinearMps - static_cast<double>(row.measuredLinearSpeedMps));
 
         const double predictedEncoderYawRadps =
             static_cast<double>(MazeMap::Vehicle::BodyYawRateFromWheelLinear(
-                MazeMap::Vehicle::WheelLinearVelocityFromOmega(predictedState.GetWheelSpeedLeft()),
-                MazeMap::Vehicle::WheelLinearVelocityFromOmega(predictedState.GetWheelSpeedRight())));
-        metrics.encoderYawRateRadps.add(predictedEncoderYawRadps - static_cast<double>(row.measuredAngularSpeedRadps));
+                MazeMap::Vehicle::WheelLinearVelocityFromWheelSpeed(predictedState.GetWheelSpeedLeft()),
+                MazeMap::Vehicle::WheelLinearVelocityFromWheelSpeed(predictedState.GetWheelSpeedRight())));
+        metrics.encoderYawRateRadps.add(predictedEncoderYawRadps - static_cast<double>(row.measuredYawRateRadps));
 
         metrics.bodyForwardSpeedMps.add(
-            static_cast<double>(predictedState.GetVelocity()) -
+            static_cast<double>(predictedState.GetForwardVelocity()) -
             static_cast<double>(row.measuredLinearSpeedMps));
         metrics.bodyYawRateRadps.add(
-            static_cast<double>(predictedState.GetRotationalVelocity()) -
+            static_cast<double>(predictedState.GetYawRate()) -
             static_cast<double>(row.gyroCorrectedRadps));
 
         if (std::isfinite(row.gyroRawRadps))
         {
             const double predictedRawGyroRadps =
-                static_cast<double>(predictedState.GetRotationalVelocity()) +
+                static_cast<double>(predictedState.GetYawRate()) +
                 static_cast<double>(predictedState.GetGyroBiasZ());
             metrics.rawGyroRadps.add(predictedRawGyroRadps - static_cast<double>(row.gyroRawRadps));
         }
 
         if (row.accelBiasValid)
         {
-            metrics.accelBodyXMps2.add(
-                static_cast<double>(predictedAccelBodyMps2.x()) - static_cast<double>(row.accelBodyXMps2));
-            metrics.accelBodyYMps2.add(
-                static_cast<double>(predictedAccelBodyMps2.y()) - static_cast<double>(row.accelBodyYMps2));
+            metrics.accelBodyRightMps2.add(
+                static_cast<double>(predictedAccelBodyMps2.x()) - static_cast<double>(row.accelBodyRightMps2));
+            metrics.accelBodyForwardMps2.add(
+                static_cast<double>(predictedAccelBodyMps2.y()) - static_cast<double>(row.accelBodyForwardMps2));
             metrics.planarAccelMps2.add(
                 std::hypot(static_cast<double>(predictedAccelBodyMps2.x()), static_cast<double>(predictedAccelBodyMps2.y())) -
                 static_cast<double>(row.planarAccelMps2));
         }
     }
 
-    void ScoreConsistency(
+    static void ScoreConsistency(
         const LoggedRow& row,
         const MazeMap::VehicleState& replayedState,
         ConsistencyMetrics& metrics)
@@ -1903,23 +1960,22 @@ namespace
         metrics.positionMm.add(1000.0 * std::hypot(dxM, dyM));
         metrics.headingDeg.add(
             static_cast<double>(kRadiansToDegrees) *
-            static_cast<double>(MazeMap::VehicleState::NormalizeAngle(
-                replayedState.GetOrientation() - row.loggedState.GetOrientation())));
+            static_cast<double>(NormalizeAngle(replayedState.GetHeading() - row.loggedState.GetHeading())));
         metrics.forwardSpeedMps.add(
-            static_cast<double>(replayedState.GetVelocity() - row.loggedState.GetVelocity()));
-        metrics.lateralSpeedMps.add(
-            static_cast<double>(replayedState.GetLateralVelocity() - row.loggedState.GetLateralVelocity()));
+            static_cast<double>(replayedState.GetForwardVelocity() - row.loggedState.GetForwardVelocity()));
+        metrics.rightwardSpeedMps.add(
+            static_cast<double>(replayedState.GetRightwardVelocity() - row.loggedState.GetRightwardVelocity()));
         metrics.yawRateRadps.add(
-            static_cast<double>(replayedState.GetRotationalVelocity() - row.loggedState.GetRotationalVelocity()));
-        metrics.leftWheelOmegaRadps.add(
+            static_cast<double>(replayedState.GetYawRate() - row.loggedState.GetYawRate()));
+        metrics.leftWheelSpeedRadps.add(
             static_cast<double>(replayedState.GetWheelSpeedLeft() - row.loggedState.GetWheelSpeedLeft()));
-        metrics.rightWheelOmegaRadps.add(
+        metrics.rightWheelSpeedRadps.add(
             static_cast<double>(replayedState.GetWheelSpeedRight() - row.loggedState.GetWheelSpeedRight()));
         metrics.gyroBiasRadps.add(
             static_cast<double>(replayedState.GetGyroBiasZ() - row.loggedState.GetGyroBiasZ()));
     }
 
-    RunReport ReplayRun(const RunCandidate& candidate, const ReplayOptions& options)
+    static RunReport ReplayRun(const RunCandidate& candidate, const ReplayOptions& options)
     {
         RunReport report{};
         report.runId = candidate.sidecar.runId;
@@ -1972,7 +2028,7 @@ namespace
         MazeMap::VehicleState runtimeState = initialState;
         MazeMap::PlantModel plantModel(vehicle, runtimeState);
 
-        SectionPhaseReportMap sectionPhaseBuckets;
+        std::unordered_map<SectionPhaseKey, SectionPhaseReport, SectionPhaseKeyHash> sectionPhaseBuckets;
         const bool exportSampleRows =
             !options.sampleCsvPath.empty() &&
             (options.runIdFilter == candidate.sidecar.runId);
@@ -2021,36 +2077,44 @@ namespace
         }
 
         runtimeState = initialState;
-        MazeMap::Estimator estimator(plantModel, runtimeState);
+        MazeMap::Estimator estimator(vehicle, plantModel, runtimeState);
 
         for (std::size_t index = 1; index < keptRows.size(); ++index)
         {
+            const LoggedRow& previousRow = keptRows[index - 1U];
             const LoggedRow& row = keptRows[index];
             ++report.scoredTransitions;
 
             const float dtSeconds = static_cast<float>(row.dtUs) * 1.0e-6f;
-            const MazeMap::App::Internal::CommandVector control(row.leftDriveCommand, row.rightDriveCommand);
+            const MazeMap::App::Internal::CommandVector control(
+                previousRow.leftDriveCommand,
+                previousRow.rightDriveCommand);
             const MazeMap::EncoderObs encoderObservation = BuildEncoderObservation(row);
-            vehicle.SetFanDuty(row.fanDutyCycle);
+            const bool encoderObservationValid =
+                std::isfinite(dtSeconds) &&
+                (dtSeconds > 0.0f) &&
+                std::isfinite(row.leftEncoderWheelSpeedRadps) &&
+                std::isfinite(row.rightEncoderWheelSpeedRadps) &&
+                std::isfinite(row.leftEncoderVelocityMps) &&
+                std::isfinite(row.rightEncoderVelocityMps);
+            vehicle.SetFanDuty(previousRow.fanDutyCycle);
             runtimeState.SetCurrentCommand(control);
             SensorSnapshot snapshot{};
-            snapshot.encoderObservationValid = true;
-            snapshot.encoderObservation = encoderObservation;
-            snapshot.leftEncoderTotalCounts = row.leftEncoderCount;
-            snapshot.rightEncoderTotalCounts = row.rightEncoderCount;
-            snapshot.gyroRawRadps = std::isfinite(row.gyroRawRadps) ? row.gyroRawRadps : 0.0f;
-            snapshot.gyroRadps = std::isfinite(row.gyroCorrectedRadps) ? row.gyroCorrectedRadps : 0.0f;
-            snapshot.gyroBiasRadps = runtimeState.GetGyroBiasZ();
-            snapshot.accelBiasValid = row.accelBiasValid;
-            snapshot.accelBodyXMps2 = row.accelBodyXMps2;
-            snapshot.accelBodyYMps2 = row.accelBodyYMps2;
-            snapshot.planarAccelMps2 = row.planarAccelMps2;
+            snapshot.SetEncoderObservation(encoderObservation, encoderObservationValid);
+            snapshot.SetEncoderTotals(row.leftEncoderCount, row.rightEncoderCount);
+            snapshot.SetRawYawRateRadps(std::isfinite(row.gyroRawRadps) ? row.gyroRawRadps : 0.0f);
+            snapshot.SetYawRateRadps(std::isfinite(row.gyroCorrectedRadps) ? row.gyroCorrectedRadps : 0.0f);
+            snapshot.SetYawRateBiasRadps(runtimeState.GetGyroBiasZ());
+            snapshot.SetAccelerationBiasValid(row.accelBiasValid);
+            snapshot.SetBodyRightAccelerationMps2(row.accelBodyRightMps2);
+            snapshot.SetBodyForwardAccelerationMps2(row.accelBodyForwardMps2);
+            snapshot.SetPlanarAccelerationMps2(row.planarAccelMps2);
             runtimeState.SetSensorSnapshot(snapshot);
             if (std::isfinite(dtSeconds) && (dtSeconds > 0.0f))
             {
                 runtimeState.SetTime(runtimeState.GetTime() + dtSeconds);
             }
-            if (!estimator.predict(dtSeconds, control))
+            if (!estimator.predict(dtSeconds, control, encoderObservation, encoderObservationValid))
             {
                 ++report.predictFailures;
                 report.completed = false;
@@ -2084,11 +2148,13 @@ namespace
                     predictedAccelBodyMps2));
             }
 
-            (void)estimator.updateEncoderPair(encoderObservation, dtSeconds);
+            if (options.useEncoderPseudoMeasurement && encoderObservationValid)
+            {
+                (void)estimator.updateEncoderPair(encoderObservation, dtSeconds, true);
+            }
             if (std::isfinite(row.gyroRawRadps))
             {
-                const MazeMap::MeasurementUpdateResult yawUpdate = estimator.updateYawRate(row.gyroRawRadps);
-                if (!yawUpdate.accepted)
+                if (!estimator.updateYawRate(row.gyroRawRadps))
                 {
                     ++report.yawRejects;
                     report.completed = false;
@@ -2101,11 +2167,12 @@ namespace
             if (row.accelBiasValid)
             {
                 MazeMap::ImuAccelObs accelObservation{};
-                accelObservation.valid =
-                    std::isfinite(row.accelBodyXMps2) &&
-                    std::isfinite(row.accelBodyYMps2);
-                accelObservation.accelBodyXMps2 = row.accelBodyXMps2;
-                accelObservation.accelBodyYMps2 = row.accelBodyYMps2;
+                accelObservation.SetValid(
+                    std::isfinite(row.accelBodyRightMps2) &&
+                    std::isfinite(row.accelBodyForwardMps2));
+                accelObservation.SetBodyForwardRightMps2(
+                    row.accelBodyForwardMps2,
+                    row.accelBodyRightMps2);
                 (void)estimator.updatePlanarAccel(accelObservation);
             }
 
@@ -2117,14 +2184,14 @@ namespace
         return report;
     }
 
-    std::string FormatDouble(double value, int precision = 6)
+    static std::string FormatDouble(double value, int precision = 6)
     {
         std::ostringstream stream;
         stream << std::fixed << std::setprecision(precision) << value;
         return stream.str();
     }
 
-    void WriteMetricRow(
+    static void WriteMetricRow(
         std::ostream& stream,
         const char* label,
         const char* unit,
@@ -2141,7 +2208,7 @@ namespace
             << " |\n";
     }
 
-    void WriteHitRateRow(
+    static void WriteHitRateRow(
         std::ostream& stream,
         const char* label,
         const HitRateStats& stats)
@@ -2154,7 +2221,7 @@ namespace
             << " |\n";
     }
 
-    std::uint64_t TotalFeedforwardValidSolutions(const std::vector<FeedforwardPathSummary>& summaries) noexcept
+    static std::uint64_t TotalFeedforwardValidSolutions(const std::vector<FeedforwardPathSummary>& summaries) noexcept
     {
         std::uint64_t total = 0U;
         for (const FeedforwardPathSummary& summary : summaries)
@@ -2164,7 +2231,7 @@ namespace
         return total;
     }
 
-    void WritePhaseAssociationRow(
+    static void WritePhaseAssociationRow(
         std::ostream& stream,
         const char* label,
         const PhaseAssociationSummary& summary)
@@ -2182,7 +2249,7 @@ namespace
             << " |\n";
     }
 
-    std::string SampleMetricValue(const std::string& metric, const SampleExportRow& row)
+    static std::string SampleMetricValue(const std::string& metric, const SampleExportRow& row)
     {
         if (metric == "master_time_us")
         {
@@ -2228,21 +2295,21 @@ namespace
         {
             return row.accelBiasValid ? "true" : "false";
         }
-        if (metric == "predicted_accel_body_x_mps2")
+        if (metric == "predicted_accel_body_right_mps2")
         {
-            return FormatDouble(row.predictedAccelBodyXMps2);
+            return FormatDouble(row.predictedAccelBodyRightMps2);
         }
-        if (metric == "actual_accel_body_x_mps2")
+        if (metric == "actual_accel_body_right_mps2")
         {
-            return FormatDouble(row.actualAccelBodyXMps2);
+            return FormatDouble(row.actualAccelBodyRightMps2);
         }
-        if (metric == "predicted_accel_body_y_mps2")
+        if (metric == "predicted_accel_body_forward_mps2")
         {
-            return FormatDouble(row.predictedAccelBodyYMps2);
+            return FormatDouble(row.predictedAccelBodyForwardMps2);
         }
-        if (metric == "actual_accel_body_y_mps2")
+        if (metric == "actual_accel_body_forward_mps2")
         {
-            return FormatDouble(row.actualAccelBodyYMps2);
+            return FormatDouble(row.actualAccelBodyForwardMps2);
         }
         if (metric == "predicted_planar_accel_mps2")
         {
@@ -2280,17 +2347,21 @@ namespace
         return std::string();
     }
 
-    bool WriteSampleExportCsv(const CorpusReport& corpus, const ReplayOptions& options, std::string& error)
+    static bool WriteSampleExportCsv(const CorpusReport& corpus, const ReplayOptions& options, std::string& error)
     {
         if (options.sampleCsvPath.empty())
         {
             return true;
         }
 
-        const auto runIt = std::find_if(
-            corpus.runs.begin(),
-            corpus.runs.end(),
-            [&options](const RunReport& run) { return run.runId == options.runIdFilter; });
+        auto runIt = corpus.runs.begin();
+        for (; runIt != corpus.runs.end(); ++runIt)
+        {
+            if (runIt->runId == options.runIdFilter)
+            {
+                break;
+            }
+        }
         if (runIt == corpus.runs.end())
         {
             error = "Requested sample export run was not replayed: " + options.runIdFilter;
@@ -2303,11 +2374,11 @@ namespace
             return false;
         }
 
-        const fs::path parentPath = options.sampleCsvPath.parent_path();
+        const std::filesystem::path parentPath = options.sampleCsvPath.parent_path();
         if (!parentPath.empty())
         {
             std::error_code createEc;
-            fs::create_directories(parentPath, createEc);
+            std::filesystem::create_directories(parentPath, createEc);
             if (createEc)
             {
                 error = "Failed to create sample CSV directory: " + parentPath.string();
@@ -2351,17 +2422,21 @@ namespace
         return true;
     }
 
-    bool WriteFeedforwardSampleExportCsv(const CorpusReport& corpus, const ReplayOptions& options, std::string& error)
+    static bool WriteFeedforwardSampleExportCsv(const CorpusReport& corpus, const ReplayOptions& options, std::string& error)
     {
         if (options.feedforwardSampleCsvPath.empty())
         {
             return true;
         }
 
-        const auto runIt = std::find_if(
-            corpus.runs.begin(),
-            corpus.runs.end(),
-            [&options](const RunReport& run) { return run.runId == options.runIdFilter; });
+        auto runIt = corpus.runs.begin();
+        for (; runIt != corpus.runs.end(); ++runIt)
+        {
+            if (runIt->runId == options.runIdFilter)
+            {
+                break;
+            }
+        }
         if (runIt == corpus.runs.end())
         {
             error = "Requested feedforward sample export run was not replayed: " + options.runIdFilter;
@@ -2376,11 +2451,11 @@ namespace
             return false;
         }
 
-        const fs::path parentPath = options.feedforwardSampleCsvPath.parent_path();
+        const std::filesystem::path parentPath = options.feedforwardSampleCsvPath.parent_path();
         if (!parentPath.empty())
         {
             std::error_code createEc;
-            fs::create_directories(parentPath, createEc);
+            std::filesystem::create_directories(parentPath, createEc);
             if (createEc)
             {
                 error =
@@ -2500,27 +2575,27 @@ namespace
         return true;
     }
 
-    bool WriteReportFiles(const CorpusReport& corpus, const ReplayOptions& options, std::string& error)
+    static bool WriteReportFiles(const CorpusReport& corpus, const ReplayOptions& options, std::string& error)
     {
-        fs::path outputPath = options.outputPath;
+        std::filesystem::path outputPath = options.outputPath;
         if (outputPath.empty())
         {
             outputPath = options.rootPath / ("open_floor_ukf_replay_" + MakeTimestampString());
         }
 
         std::error_code createEc;
-        fs::create_directories(outputPath, createEc);
+        std::filesystem::create_directories(outputPath, createEc);
         if (createEc)
         {
             error = "Failed to create output directory: " + outputPath.string();
             return false;
         }
 
-        const fs::path markdownPath = outputPath / kReportFileName;
-        const fs::path csvPath = outputPath / kRunSummaryFileName;
-        const fs::path sectionPhaseCsvPath = outputPath / kSectionPhaseSummaryFileName;
-        const fs::path aggregateJsonPath = outputPath / kAggregateMetricsFileName;
-        const fs::path feedforwardPathCsvPath = outputPath / kFeedforwardPathSummaryFileName;
+        const std::filesystem::path markdownPath = outputPath / kReportFileName;
+        const std::filesystem::path csvPath = outputPath / kRunSummaryFileName;
+        const std::filesystem::path sectionPhaseCsvPath = outputPath / kSectionPhaseSummaryFileName;
+        const std::filesystem::path aggregateJsonPath = outputPath / kAggregateMetricsFileName;
+        const std::filesystem::path feedforwardPathCsvPath = outputPath / kFeedforwardPathSummaryFileName;
 
         std::ofstream markdown(markdownPath);
         if (!markdown)
@@ -2529,55 +2604,38 @@ namespace
             return false;
         }
 
-        const std::size_t completedRuns = static_cast<std::size_t>(std::count_if(
-            corpus.runs.begin(),
-            corpus.runs.end(),
-            [](const RunReport& run) { return run.completed; }));
-        const std::size_t noRetainedRowsRuns = static_cast<std::size_t>(std::count_if(
-            corpus.runs.begin(),
-            corpus.runs.end(),
-            [](const RunReport& run)
+        std::size_t completedRuns = 0U;
+        std::size_t noRetainedRowsRuns = 0U;
+        for (const RunReport& run : corpus.runs)
+        {
+            if (run.completed)
             {
-                return !run.completed &&
-                    run.failureReason == "Not enough rows after final-section exclusion";
-            }));
+                ++completedRuns;
+            }
+            else if (run.failureReason == "Not enough rows after final-section exclusion")
+            {
+                ++noRetainedRowsRuns;
+            }
+        }
         const std::size_t replayFaultRuns = corpus.runs.size() - completedRuns - noRetainedRowsRuns;
         const PhaseAssociationSummary encoderLinearPhaseAssociation = ComputePhaseAssociationSummary(
             corpus.sectionPhaseBuckets,
-            [](const SectionPhaseReport& bucket) -> const ErrorStats&
-            {
-                return bucket.prediction.encoderLinearSpeedMps;
-            });
+            "encoder_linear");
         const PhaseAssociationSummary rawGyroPhaseAssociation = ComputePhaseAssociationSummary(
             corpus.sectionPhaseBuckets,
-            [](const SectionPhaseReport& bucket) -> const ErrorStats&
-            {
-                return bucket.prediction.rawGyroRadps;
-            });
-        const PhaseAssociationSummary accelXPhaseAssociation = ComputePhaseAssociationSummary(
+            "raw_gyro");
+        const PhaseAssociationSummary accelRightPhaseAssociation = ComputePhaseAssociationSummary(
             corpus.sectionPhaseBuckets,
-            [](const SectionPhaseReport& bucket) -> const ErrorStats&
-            {
-                return bucket.prediction.accelBodyXMps2;
-            });
-        const PhaseAssociationSummary accelYPhaseAssociation = ComputePhaseAssociationSummary(
+            "accel_right");
+        const PhaseAssociationSummary accelForwardPhaseAssociation = ComputePhaseAssociationSummary(
             corpus.sectionPhaseBuckets,
-            [](const SectionPhaseReport& bucket) -> const ErrorStats&
-            {
-                return bucket.prediction.accelBodyYMps2;
-            });
+            "accel_forward");
         const PhaseAssociationSummary postPositionPhaseAssociation = ComputePhaseAssociationSummary(
             corpus.sectionPhaseBuckets,
-            [](const SectionPhaseReport& bucket) -> const ErrorStats&
-            {
-                return bucket.consistency.positionMm;
-            });
+            "post_position");
         const PhaseAssociationSummary postHeadingPhaseAssociation = ComputePhaseAssociationSummary(
             corpus.sectionPhaseBuckets,
-            [](const SectionPhaseReport& bucket) -> const ErrorStats&
-            {
-                return bucket.consistency.headingDeg;
-            });
+            "post_heading");
         const std::uint64_t totalFeedforwardEvaluations = TotalFeedforwardValidSolutions(corpus.feedforwardPaths);
 
         markdown
@@ -2595,7 +2653,7 @@ namespace
                 "canonical open-floor marker `C` stationary state using `VehicleState` semantic defaults.\n" :
                 "first kept logged state using `VehicleState` semantic defaults.\n")
             << "- Battery policy: captured `battery_voltage_start` is reported; replay dynamics use `Vehicle::GetBatteryVoltage()` because no canonical logged-voltage override owner is exposed.\n"
-            << "- Runtime-context gap: captured command targets, saturation flags, and acceleration context are parsed but not injected because no public `Estimator`/`VehicleState` owner path replaces the removed direct SR-UKF context hook.\n"
+            << "- Runtime-context gap: captured command targets, saturation flags, and acceleration context are parsed but not injected because no public `Estimator`/`VehicleState` owner path replaces the removed direct Estimator context hook.\n"
             << "- Plant diagnostic gap: body-acceleration prediction metrics remain non-finite until a canonical bound-state IMU-acceleration diagnostic is exposed.\n"
             << "- Prediction metrics compare the pre-update UKF prediction against observable sensor-space signals.\n"
             << "- Post-update replay deltas compare the replayed UKF state against the logged UKF state from the capture; they are consistency checks, not external ground truth.\n"
@@ -2609,15 +2667,15 @@ namespace
         markdown << "## Aggregate Prediction Error\n\n";
         markdown << "| Signal | Unit | Samples | RMSE | MAE | Bias | Max Abs |\n";
         markdown << "| --- | --- | ---: | ---: | ---: | ---: | ---: |\n";
-        WriteMetricRow(markdown, "encoder_left_omega", "rad/s", corpus.prediction.encoderLeftOmegaRadps);
-        WriteMetricRow(markdown, "encoder_right_omega", "rad/s", corpus.prediction.encoderRightOmegaRadps);
+        WriteMetricRow(markdown, "left_encoder_wheel_speed", "rad/s", corpus.prediction.leftEncoderWheelSpeedRadps);
+        WriteMetricRow(markdown, "right_encoder_wheel_speed", "rad/s", corpus.prediction.rightEncoderWheelSpeedRadps);
         WriteMetricRow(markdown, "encoder_linear_speed", "m/s", corpus.prediction.encoderLinearSpeedMps);
         WriteMetricRow(markdown, "encoder_yaw_rate", "rad/s", corpus.prediction.encoderYawRateRadps);
         WriteMetricRow(markdown, "body_forward_speed", "m/s", corpus.prediction.bodyForwardSpeedMps);
         WriteMetricRow(markdown, "body_yaw_rate_vs_gyro", "rad/s", corpus.prediction.bodyYawRateRadps);
         WriteMetricRow(markdown, "raw_gyro", "rad/s", corpus.prediction.rawGyroRadps);
-        WriteMetricRow(markdown, "accel_body_x", "m/s^2", corpus.prediction.accelBodyXMps2);
-        WriteMetricRow(markdown, "accel_body_y", "m/s^2", corpus.prediction.accelBodyYMps2);
+        WriteMetricRow(markdown, "accel_body_right", "m/s^2", corpus.prediction.accelBodyRightMps2);
+        WriteMetricRow(markdown, "accel_body_forward", "m/s^2", corpus.prediction.accelBodyForwardMps2);
         WriteMetricRow(markdown, "planar_accel", "m/s^2", corpus.prediction.planarAccelMps2);
 
         markdown << "\n## Aggregate Post-Update Replay Delta\n\n";
@@ -2626,10 +2684,10 @@ namespace
         WriteMetricRow(markdown, "position", "mm", corpus.consistency.positionMm);
         WriteMetricRow(markdown, "heading", "deg", corpus.consistency.headingDeg);
         WriteMetricRow(markdown, "forward_speed", "m/s", corpus.consistency.forwardSpeedMps);
-        WriteMetricRow(markdown, "lateral_speed", "m/s", corpus.consistency.lateralSpeedMps);
+        WriteMetricRow(markdown, "rightward_speed", "m/s", corpus.consistency.rightwardSpeedMps);
         WriteMetricRow(markdown, "yaw_rate", "rad/s", corpus.consistency.yawRateRadps);
-        WriteMetricRow(markdown, "left_wheel_omega", "rad/s", corpus.consistency.leftWheelOmegaRadps);
-        WriteMetricRow(markdown, "right_wheel_omega", "rad/s", corpus.consistency.rightWheelOmegaRadps);
+        WriteMetricRow(markdown, "left_wheel_speed", "rad/s", corpus.consistency.leftWheelSpeedRadps);
+        WriteMetricRow(markdown, "right_wheel_speed", "rad/s", corpus.consistency.rightWheelSpeedRadps);
         WriteMetricRow(markdown, "gyro_bias", "rad/s", corpus.consistency.gyroBiasRadps);
 
         if (!corpus.feedforwardPaths.empty())
@@ -2664,8 +2722,8 @@ namespace
         markdown << "| --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: |\n";
         WritePhaseAssociationRow(markdown, "encoder_linear_speed", encoderLinearPhaseAssociation);
         WritePhaseAssociationRow(markdown, "raw_gyro", rawGyroPhaseAssociation);
-        WritePhaseAssociationRow(markdown, "accel_body_x", accelXPhaseAssociation);
-        WritePhaseAssociationRow(markdown, "accel_body_y", accelYPhaseAssociation);
+        WritePhaseAssociationRow(markdown, "accel_body_right", accelRightPhaseAssociation);
+        WritePhaseAssociationRow(markdown, "accel_body_forward", accelForwardPhaseAssociation);
         WritePhaseAssociationRow(markdown, "post_position", postPositionPhaseAssociation);
         WritePhaseAssociationRow(markdown, "post_heading", postHeadingPhaseAssociation);
 
@@ -2681,8 +2739,8 @@ namespace
                 << " | " << bucket.sampleCount
                 << " | " << FormatDouble(bucket.prediction.encoderLinearSpeedMps.rmse())
                 << " | " << FormatDouble(bucket.prediction.rawGyroRadps.rmse())
-                << " | " << FormatDouble(bucket.prediction.accelBodyXMps2.rmse())
-                << " | " << FormatDouble(bucket.prediction.accelBodyYMps2.rmse())
+                << " | " << FormatDouble(bucket.prediction.accelBodyRightMps2.rmse())
+                << " | " << FormatDouble(bucket.prediction.accelBodyForwardMps2.rmse())
                 << " | " << FormatDouble(bucket.consistency.positionMm.rmse(), 3)
                 << " | " << FormatDouble(bucket.consistency.headingDeg.rmse(), 3)
                 << " |\n";
@@ -2706,8 +2764,8 @@ namespace
                 << " | " << TotalFeedforwardValidSolutions(run.feedforwardPaths)
                 << " | " << FormatDouble(run.prediction.encoderLinearSpeedMps.rmse())
                 << " | " << FormatDouble(run.prediction.rawGyroRadps.rmse())
-                << " | " << FormatDouble(run.prediction.accelBodyXMps2.rmse())
-                << " | " << FormatDouble(run.prediction.accelBodyYMps2.rmse())
+                << " | " << FormatDouble(run.prediction.accelBodyRightMps2.rmse())
+                << " | " << FormatDouble(run.prediction.accelBodyForwardMps2.rmse())
                 << " | " << FormatDouble(run.consistency.positionMm.rmse(), 3)
                 << " | " << FormatDouble(run.consistency.headingDeg.rmse(), 3)
                 << " | " << run.batterySource
@@ -2739,7 +2797,7 @@ namespace
         }
 
         csv
-            << "run_id,format_version,csv_path,battery_source,battery_voltage_v,total_rows,kept_rows,scored_transitions,feedforward_transitions,feedforward_evaluations,ignored_section_id,predict_failures,yaw_rejects,completed,encoder_linear_rmse_mps,raw_gyro_rmse_radps,accel_body_x_rmse_mps2,accel_body_y_rmse_mps2,post_position_rmse_mm,post_heading_rmse_deg,failure_reason\n";
+            << "run_id,format_version,csv_path,battery_source,battery_voltage_v,total_rows,kept_rows,scored_transitions,feedforward_transitions,feedforward_evaluations,ignored_section_id,predict_failures,yaw_rejects,completed,encoder_linear_rmse_mps,raw_gyro_rmse_radps,accel_body_right_rmse_mps2,accel_body_forward_rmse_mps2,post_position_rmse_mm,post_heading_rmse_deg,failure_reason\n";
         for (const RunReport& run : corpus.runs)
         {
             csv
@@ -2759,8 +2817,8 @@ namespace
                 << (run.completed ? "true" : "false") << ','
                 << FormatDouble(run.prediction.encoderLinearSpeedMps.rmse()) << ','
                 << FormatDouble(run.prediction.rawGyroRadps.rmse()) << ','
-                << FormatDouble(run.prediction.accelBodyXMps2.rmse()) << ','
-                << FormatDouble(run.prediction.accelBodyYMps2.rmse()) << ','
+                << FormatDouble(run.prediction.accelBodyRightMps2.rmse()) << ','
+                << FormatDouble(run.prediction.accelBodyForwardMps2.rmse()) << ','
                 << FormatDouble(run.consistency.positionMm.rmse(), 3) << ','
                 << FormatDouble(run.consistency.headingDeg.rmse(), 3) << ','
                 << '"' << run.failureReason << '"' << '\n';
@@ -2801,7 +2859,7 @@ namespace
         }
 
         sectionPhaseCsv
-            << "section_id,section_name,phase_id,phase_name,bucket_samples,encoder_linear_samples,raw_gyro_samples,accel_body_x_samples,accel_body_y_samples,post_position_samples,post_heading_samples,encoder_linear_rmse_mps,encoder_linear_mae_mps,raw_gyro_rmse_radps,raw_gyro_mae_radps,accel_body_x_rmse_mps2,accel_body_x_mae_mps2,accel_body_y_rmse_mps2,accel_body_y_mae_mps2,post_position_rmse_mm,post_position_mae_mm,post_heading_rmse_deg,post_heading_mae_deg\n";
+            << "section_id,section_name,phase_id,phase_name,bucket_samples,encoder_linear_samples,raw_gyro_samples,accel_body_right_samples,accel_body_forward_samples,post_position_samples,post_heading_samples,encoder_linear_rmse_mps,encoder_linear_mae_mps,raw_gyro_rmse_radps,raw_gyro_mae_radps,accel_body_right_rmse_mps2,accel_body_right_mae_mps2,accel_body_forward_rmse_mps2,accel_body_forward_mae_mps2,post_position_rmse_mm,post_position_mae_mm,post_heading_rmse_deg,post_heading_mae_deg\n";
         for (const SectionPhaseReport& bucket : corpus.sectionPhaseBuckets)
         {
             sectionPhaseCsv
@@ -2812,18 +2870,18 @@ namespace
                 << bucket.sampleCount << ','
                 << bucket.prediction.encoderLinearSpeedMps.count << ','
                 << bucket.prediction.rawGyroRadps.count << ','
-                << bucket.prediction.accelBodyXMps2.count << ','
-                << bucket.prediction.accelBodyYMps2.count << ','
+                << bucket.prediction.accelBodyRightMps2.count << ','
+                << bucket.prediction.accelBodyForwardMps2.count << ','
                 << bucket.consistency.positionMm.count << ','
                 << bucket.consistency.headingDeg.count << ','
                 << FormatDouble(bucket.prediction.encoderLinearSpeedMps.rmse()) << ','
                 << FormatDouble(bucket.prediction.encoderLinearSpeedMps.mae()) << ','
                 << FormatDouble(bucket.prediction.rawGyroRadps.rmse()) << ','
                 << FormatDouble(bucket.prediction.rawGyroRadps.mae()) << ','
-                << FormatDouble(bucket.prediction.accelBodyXMps2.rmse()) << ','
-                << FormatDouble(bucket.prediction.accelBodyXMps2.mae()) << ','
-                << FormatDouble(bucket.prediction.accelBodyYMps2.rmse()) << ','
-                << FormatDouble(bucket.prediction.accelBodyYMps2.mae()) << ','
+                << FormatDouble(bucket.prediction.accelBodyRightMps2.rmse()) << ','
+                << FormatDouble(bucket.prediction.accelBodyRightMps2.mae()) << ','
+                << FormatDouble(bucket.prediction.accelBodyForwardMps2.rmse()) << ','
+                << FormatDouble(bucket.prediction.accelBodyForwardMps2.mae()) << ','
                 << FormatDouble(bucket.consistency.positionMm.rmse(), 3) << ','
                 << FormatDouble(bucket.consistency.positionMm.mae(), 3) << ','
                 << FormatDouble(bucket.consistency.headingDeg.rmse(), 3) << ','
@@ -2851,8 +2909,8 @@ namespace
             << "  \"prediction\": {\n"
             << "    \"encoder_linear_rmse_mps\": " << FormatDouble(corpus.prediction.encoderLinearSpeedMps.rmse(), 12) << ",\n"
             << "    \"raw_gyro_rmse_radps\": " << FormatDouble(corpus.prediction.rawGyroRadps.rmse(), 12) << ",\n"
-            << "    \"accel_body_x_rmse_mps2\": " << FormatDouble(corpus.prediction.accelBodyXMps2.rmse(), 12) << ",\n"
-            << "    \"accel_body_y_rmse_mps2\": " << FormatDouble(corpus.prediction.accelBodyYMps2.rmse(), 12) << ",\n"
+            << "    \"accel_body_right_rmse_mps2\": " << FormatDouble(corpus.prediction.accelBodyRightMps2.rmse(), 12) << ",\n"
+            << "    \"accel_body_forward_rmse_mps2\": " << FormatDouble(corpus.prediction.accelBodyForwardMps2.rmse(), 12) << ",\n"
             << "    \"encoder_yaw_rate_rmse_radps\": " << FormatDouble(corpus.prediction.encoderYawRateRadps.rmse(), 12) << ",\n"
             << "    \"body_forward_speed_rmse_mps\": " << FormatDouble(corpus.prediction.bodyForwardSpeedMps.rmse(), 12) << "\n"
             << "  },\n"
@@ -2892,7 +2950,6 @@ namespace
             << "Aggregate metrics written to " << aggregateJsonPath.string() << "\n";
         return true;
     }
-}
 
 int main(int argc, char* argv[])
 {
@@ -2913,7 +2970,7 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    SectionPhaseReportMap corpusSectionPhaseBuckets;
+    std::unordered_map<SectionPhaseKey, SectionPhaseReport, SectionPhaseKeyHash> corpusSectionPhaseBuckets;
     for (const RunCandidate& run : runs)
     {
         RunReport report = ReplayRun(run, options);
@@ -2950,10 +3007,14 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    const std::size_t completedRuns = static_cast<std::size_t>(std::count_if(
-        corpus.runs.begin(),
-        corpus.runs.end(),
-        [](const RunReport& report) { return report.completed; }));
+    std::size_t completedRuns = 0U;
+    for (const RunReport& report : corpus.runs)
+    {
+        if (report.completed)
+        {
+            ++completedRuns;
+        }
+    }
     std::cout
         << "Replayed " << corpus.runs.size() << " unique runs; "
         << completedRuns << " completed without replay faults.\n";

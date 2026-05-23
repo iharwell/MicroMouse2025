@@ -23,9 +23,9 @@ namespace MazeMap::Config
     constexpr float kCellClearSpanM = kCellSizeM - kMazeWallThicknessM;
     // [High] Vehicle is the sole authority for the robot's physical dimensions. Track width and its wear-bounded
     // envelope are sourced from the shared vehicle model rather than duplicated here.
-    constexpr float kTrackWidthPhysicalMinM = MazeMap::Vehicle::GetPhysicalModel().trackWidthPhysicalMinM;
-    constexpr float kTrackWidthPhysicalMaxM = MazeMap::Vehicle::GetPhysicalModel().trackWidthPhysicalMaxM;
-    constexpr float kTrackWidthM = MazeMap::Vehicle::GetPhysicalModel().trackWidthM;
+    constexpr float kTrackWidthPhysicalMinM = MazeMap::Vehicle::GetTrackWidthPhysicalMinM();
+    constexpr float kTrackWidthPhysicalMaxM = MazeMap::Vehicle::GetTrackWidthPhysicalMaxM();
+    constexpr float kTrackWidthM = MazeMap::Vehicle::GetPhysicalTrackWidthM();
     // The contact-patch envelope remains useful as a geometric reference, but the shared kinematic fit may exceed it
     // until wheel-diameter/compliance calibration is fully closed out.
     // [Low] Main mission control period. Shorten it only if the loop still has timing margin and you need faster
@@ -111,10 +111,10 @@ namespace MazeMap::Config
     constexpr uint8_t kStartupWallCalibrationFrontSweepMatchedWallMinSamples = 4U;
     constexpr float kStartupWallCalibrationFrontSweepMatchedWallMaxDistanceErrorM = 0.020f;
     // [Medium] Vehicle is the shared source for the mission-start wall-contact geometry.
-    constexpr float kRobotFrontWallContactOffsetM = MazeMap::Vehicle::GetPhysicalModel().frontWallContactOffsetM;
-    constexpr float kRobotWidthM = MazeMap::Vehicle::GetPhysicalModel().widthM;
+    constexpr float kRobotFrontWallContactOffsetM = MazeMap::Vehicle::GetPhysicalFrontWallContactOffsetM();
+    constexpr float kRobotWidthM = MazeMap::Vehicle::GetPhysicalWidthM();
     constexpr float kRobotHalfWidthM = 0.5f * kRobotWidthM;
-    constexpr float kRobotLengthM = MazeMap::Vehicle::GetPhysicalModel().lengthM;
+    constexpr float kRobotLengthM = MazeMap::Vehicle::GetPhysicalLengthM();
     // [Medium] Measured rear-to-origin distance when the chassis is backed squarely against a wall.
     constexpr float kRobotRearWallContactOffsetM = kRobotLengthM - kRobotFrontWallContactOffsetM;
     // [Medium] Measured rear-to-origin distance when the chassis is backed squarely against a wall at mission start.
@@ -223,7 +223,7 @@ namespace MazeMap::Config
     // [Low] Base maximum travel allowed while searching for a wall during touch-off. Nearby one-cell touches clamp to
     // this clear-span budget, while longer known-wall moves expand from the geometry-predicted travel plus slack.
     const float kWallTouchBaseMaxApproachDistanceM = kCellClearSpanM;
-    constexpr auto kMissionRuntimeAccelFilterFreq = MazeMap::Vehicle::ImuBackLeft::ACCEL_FILTER_FREQ::FRAC_1_020;
+    constexpr auto kMissionRuntimeAccelFilterFreq = MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::ACCEL_FILTER_FREQ::FRAC_1_020;
     // [Low] Minimum south-wall clearance required before the startup routine may rotate back to the mission heading.
     // Increase only if chassis geometry changes and the rear still clips the wall during that recovery turn.
     constexpr float kMissionStartTurnClearanceM = 0.026f;

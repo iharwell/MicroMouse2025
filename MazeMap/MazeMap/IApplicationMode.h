@@ -66,8 +66,9 @@ namespace MazeMap::App::Internal
         // successor-session staging, explicit callback transfer, timing reads, and terminal halt.
         //
         // Return value:
-        // Control proposal for the current tick. The callback may instead request a different
-        // lifecycle boundary, but that boundary is still explicit rather than implied by return.
+        // Control proposal for the next command application point. The callback may instead
+        // request a different lifecycle boundary, but that boundary is still explicit rather than
+        // implied by return.
         virtual CommandVector RunTick(
             std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,

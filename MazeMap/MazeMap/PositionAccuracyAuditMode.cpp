@@ -24,8 +24,8 @@ namespace
         MotionLimits limits =
             MazeMap::App::Internal::AuxMeasurementModeSupport::PositionAccuracyAuditStraightLimits(
                 kPositionAuditWallTouchSpeedMps);
-        limits.SetMaxAngularSpeedRadps(vehicle.GetMaxRotationalVelocity());
-        limits.SetAngularAccelRadps2(vehicle.GetMaxAngularAcceleration());
+        limits.SetMaxAngularSpeedRadps(vehicle.GetMaxYawRate());
+        limits.SetAngularAccelRadps2(vehicle.GetMaxYawAccel());
         return limits;
     }
 }
@@ -74,7 +74,11 @@ namespace MazeMap::App::Internal
             }
 
             _phase = Phase::LaunchStartupCalibration;
-            _loopController.StageNextSessionState(BuildLoopOptions());
+            const auto& runtimeState = _runtime.RuntimeState();
+            _loopController.StageNextSessionState(
+                AuxMeasurementConfig::kControlPeriodUs,
+                runtimeState.GetPositionX(),
+                runtimeState.GetPositionY());
         }
 
     private:
@@ -112,16 +116,6 @@ namespace MazeMap::App::Internal
             self->_wallTouch.Cancel();
             self->_startupCalibration.Cancel();
             self->_drive.ClearCommandEvidence();
-        }
-
-        LoopController::SessionOptions BuildLoopOptions() const noexcept
-        {
-            LoopController::SessionOptions options{};
-            const auto& runtimeState = _runtime.RuntimeState();
-            options.controlPeriodUs = AuxMeasurementConfig::kControlPeriodUs;
-            options.SessionStartPointX = runtimeState.GetPositionX();
-            options.SessionStartPointY = runtimeState.GetPositionY();
-            return options;
         }
 
         void ResetState() noexcept

@@ -7,6 +7,7 @@
 #include "IApplicationMode.h"
 #include "MazeMapRuntimeCore.h"
 #include "MazeMapRuntimeMmLog.h"
+#include "VehicleState.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -48,15 +49,7 @@ namespace MazeMap::App::Internal::Runtime
     FIELD(std::uint16_t, measurement_flags) \
     FIELD(std::uint8_t, ukf_mode_id) \
     FIELD(std::uint8_t, bias_update_enabled) \
-    FIELD(float, ukf_state_px_m) \
-    FIELD(float, ukf_state_py_m) \
-    FIELD(float, ukf_state_psi_rad) \
-    FIELD(float, ukf_state_u_mps) \
-    FIELD(float, ukf_state_v_mps) \
-    FIELD(float, ukf_state_r_radps) \
-    FIELD(float, ukf_state_omega_l_radps) \
-    FIELD(float, ukf_state_omega_r_radps) \
-    FIELD(float, ukf_state_bgz_radps) \
+    FIELD(MazeMap::VehicleStateLogEntry, ukf_state) \
     FIELD(float, gyro_bias_anchor_radps) \
     FIELD(float, yaw_consistency_lp_radps) \
     FIELD(float, yaw_window_mismatch_rad) \
@@ -64,9 +57,9 @@ namespace MazeMap::App::Internal::Runtime
     FIELD(float, nhc_residual_mps) \
     FIELD(float, nhc_residual_sigma) \
     FIELD(float, measured_linear_speed_mps) \
-    FIELD(float, measured_angular_speed_radps) \
+    FIELD(float, measured_yaw_rate_radps) \
     FIELD(float, cmd_linear_mps) \
-    FIELD(float, cmd_angular_radps) \
+    FIELD(float, cmd_yaw_rate_radps) \
     FIELD(float, left_drive_command) \
     FIELD(float, right_drive_command) \
     FIELD(float, left_plant_command) \
@@ -78,8 +71,8 @@ namespace MazeMap::App::Internal::Runtime
     FIELD(std::uint32_t, encoder_timestamp_us) \
     FIELD(std::int32_t, left_encoder_count) \
     FIELD(std::int32_t, right_encoder_count) \
-    FIELD(float, left_encoder_omega_radps) \
-    FIELD(float, right_encoder_omega_radps) \
+    FIELD(float, left_encoder_wheel_speed_radps) \
+    FIELD(float, right_encoder_wheel_speed_radps) \
     FIELD(float, left_encoder_distance_m) \
     FIELD(float, right_encoder_distance_m) \
     FIELD(float, left_encoder_velocity_mps) \
@@ -98,8 +91,8 @@ namespace MazeMap::App::Internal::Runtime
     FIELD(float, gyro_raw_radps) \
     FIELD(float, gyro_bias_radps) \
     FIELD(float, gyro_radps) \
-    FIELD(float, accel_body_x_mps2) \
-    FIELD(float, accel_body_y_mps2) \
+    FIELD(float, accel_body_right_mps2) \
+    FIELD(float, accel_body_forward_mps2) \
     FIELD(float, planar_accel_mps2) \
     FIELD(std::uint32_t, front_timestamp_us) \
     FIELD(std::uint32_t, left_timestamp_us) \
@@ -180,7 +173,6 @@ namespace MazeMap::App::Internal
         static constexpr std::size_t kLogFileNameCapacity = 96U;
 
         static void TeardownOnRuntimeFault(void* context, const char* reason) noexcept;
-        LoopController::SessionOptions BuildLoopOptions() const noexcept;
         void ResetState() noexcept;
         bool BeginMainLog();
         bool WriteBufferedMainRow();

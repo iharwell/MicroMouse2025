@@ -55,20 +55,17 @@ namespace
             return false;
         }
 
-        const MazeMap::MeasurementUpdateResult encoderUpdate = ukf.updateEncoderPair(encoderObservation, dtSeconds);
-        if (!encoderUpdate.accepted)
+        if (!ukf.updateEncoderPair(encoderObservation, dtSeconds, true))
         {
             return false;
         }
 
-        const MazeMap::MeasurementUpdateResult yawUpdate = ukf.updateYawRate(rawGyroRadps);
-        if (!yawUpdate.accepted)
+        if (!ukf.updateYawRate(rawGyroRadps))
         {
             return false;
         }
 
-        const MazeMap::MeasurementUpdateResult accelUpdate = ukf.updatePlanarAccel(accelObservation);
-        if (!accelUpdate.accepted)
+        if (!ukf.updatePlanarAccel(accelObservation))
         {
             return false;
         }
@@ -102,7 +99,7 @@ namespace
     {
         MazeMap::VehicleState runtimeState;
         MazeMap::PlantModel plant(vehicle, runtimeState);
-        MazeMap::Estimator ukf(plant, runtimeState);
+        MazeMap::Estimator ukf(vehicle, plant, runtimeState);
         ResetOpenFloorBenchmarkUkf(ukf);
 
         const MazeMap::App::Internal::CommandVector control =
@@ -111,15 +108,12 @@ namespace
         vehicle.SetFanDuty(fanDutyCycle);
 
         MazeMap::EncoderObs encoderObservation{};
-        encoderObservation.totalLeftCounts = 0;
-        encoderObservation.totalRightCounts = 0;
-        encoderObservation.omegaLeftRadps = 0.0f;
-        encoderObservation.omegaRightRadps = 0.0f;
+        encoderObservation.SetTotalLeftCounts(0);
+        encoderObservation.SetTotalRightCounts(0);
+        encoderObservation.SetLeftWheelSpeedRadps(0.0f);
+        encoderObservation.SetRightWheelSpeedRadps(0.0f);
 
-        MazeMap::ImuAccelObs accelObservation{};
-        accelObservation.valid = true;
-        accelObservation.accelBodyXMps2 = 0.0f;
-        accelObservation.accelBodyYMps2 = 0.0f;
+        const MazeMap::ImuAccelObs accelObservation(true, 0.0f, 0.0f);
 
         for (uint32_t index = 0U; index < kOpenFloorUkfBenchmarkWarmupIterations; ++index)
         {
@@ -177,13 +171,13 @@ namespace
         std::cout << "  final_state:"
             << " px=" << state.GetPositionX()
             << " py=" << state.GetPositionY()
-            << " psi=" << state.GetOrientation()
-            << " u=" << state.GetVelocity()
-            << " v=" << state.GetLateralVelocity()
-            << " r=" << state.GetRotationalVelocity()
-            << " omega_l=" << state.GetWheelSpeedLeft()
-            << " omega_r=" << state.GetWheelSpeedRight()
-            << " bgz=" << state.GetGyroBiasZ()
+            << " heading=" << state.GetHeading()
+            << " vf=" << state.GetForwardVelocity()
+            << " vr=" << state.GetRightwardVelocity()
+            << " yaw_rate=" << state.GetYawRate()
+            << " left_wheel_speed=" << state.GetWheelSpeedLeft()
+            << " right_wheel_speed=" << state.GetWheelSpeedRight()
+            << " yaw_rate_bias=" << state.GetGyroBiasZ()
             << "\n";
         return 0;
     }

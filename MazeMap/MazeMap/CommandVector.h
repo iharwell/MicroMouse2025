@@ -7,7 +7,8 @@
 
 namespace MazeMap::App::Internal
 {
-    // Left/right normalized actuator-command proposal for the next control tick.
+    // Left/right normalized actuator command active for the state interval being calculated.
+    // Producers such as Drive may return one as the caller's proposal for that interval.
     class EXPORT CommandVector final
     {
     public:

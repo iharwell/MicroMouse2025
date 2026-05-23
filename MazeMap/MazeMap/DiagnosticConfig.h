@@ -48,7 +48,7 @@ namespace MazeMap::DiagnosticConfig
     constexpr float kStraightDecelMps2 = 5.80f;
     // [High] Turn-rate limit for diagnostic turn sweeps. Increase to stress higher-yaw-rate behavior; decrease if the
     // turn data is dominated by overshoot or wheel scrub instead of clean rotational dynamics.
-    constexpr float kTurnMaxOmegaRadps = 15.0f;
+    constexpr float kTurnMaxYawRateRadps = 15.0f;
     // [High] Turn acceleration for diagnostic turn sweeps. Increase to excite sharper turn entry/exit dynamics;
     // decrease if the robot cannot reach those ramps repeatably without slipping.
     constexpr float kTurnAccelRadps2 = 350.0f;

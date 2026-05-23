@@ -99,14 +99,14 @@ namespace MazeMap
         bool freezeMutation) noexcept
     {
         if (freezeMutation ||
-            !observation.valid ||
-            (observation.confidence < config.minimumConfidence) ||
+            !observation.IsValid() ||
+            (observation.Confidence() < config.minimumConfidence) ||
             !isOrdinal(direction))
         {
             return false;
         }
 
-        if ((observation.cls == ObsClass::Ambiguous) || (observation.cls == ObsClass::PostLike))
+        if ((observation.Class() == ObsClass::Ambiguous) || (observation.Class() == ObsClass::PostLike))
         {
             return false;
         }
@@ -120,11 +120,11 @@ namespace MazeMap
         }
 
         EdgeEvidence& updated = edgeFor(targetCell, targetDirection);
-        if (observation.cls == ObsClass::WallLike)
+        if (observation.Class() == ObsClass::WallLike)
         {
             updated.score = saturatingAdd(updated.score, config.wallHitWeight, config.maxScore);
         }
-        else if (observation.cls == ObsClass::OpenLike && bestFit.type != GeometryHitType::Post)
+        else if (observation.Class() == ObsClass::OpenLike && bestFit.type != GeometryHitType::Post)
         {
             updated.score = saturatingAdd(updated.score, static_cast<int8_t>(-config.openHitWeight), config.maxScore);
         }

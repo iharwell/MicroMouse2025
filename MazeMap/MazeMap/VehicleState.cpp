@@ -3,46 +3,43 @@
 
 #include "Vehicle.h"
 
-namespace
+static float EstimatorStationaryLinearSpeedThresholdMps() noexcept
 {
-    float UkfStationaryLinearSpeedThresholdMps() noexcept
+    return 0.002936f;
+}
+
+static float EstimatorStationaryYawRateThresholdRadps() noexcept
+{
+    return 3.0f * 0.0010954451f;
+}
+
+static float EstimatorStationaryWheelSpeedThresholdRadps() noexcept
+{
+    constexpr float wheelRadiusM = MazeMap::Vehicle::GetDriveWheelRadiusM();
+    if (!std::isfinite(wheelRadiusM) || !(wheelRadiusM > 0.0f))
     {
-        return 0.002936f;
+        return 0.0f;
     }
 
-    float UkfStationaryYawRateThresholdRadps() noexcept
-    {
-        return 3.0f * 0.0010954451f;
-    }
-
-    float UkfStationaryWheelSpeedThresholdRadps() noexcept
-    {
-        constexpr float wheelRadiusM = MazeMap::Vehicle::GetDriveWheelRadiusM();
-        if (!std::isfinite(wheelRadiusM) || !(wheelRadiusM > 0.0f))
-        {
-            return 0.0f;
-        }
-
-        return UkfStationaryLinearSpeedThresholdMps() / wheelRadiusM;
-    }
+    return EstimatorStationaryLinearSpeedThresholdMps() / wheelRadiusM;
 }
 
 namespace MazeMap
 {
     bool VehicleState::IsStationary() const noexcept
     {
-        const float wheelSpeedThresholdRadps = UkfStationaryWheelSpeedThresholdRadps();
+        const float wheelSpeedThresholdRadps = EstimatorStationaryWheelSpeedThresholdRadps();
         return
-            std::isfinite(_state(kU)) &&
-            std::isfinite(_state(kV)) &&
-            std::isfinite(_state(kR)) &&
-            std::isfinite(_state(kOmegaL)) &&
-            std::isfinite(_state(kOmegaR)) &&
-            (std::fabs(_state(kU)) <= UkfStationaryLinearSpeedThresholdMps()) &&
-            (std::fabs(_state(kV)) <= UkfStationaryLinearSpeedThresholdMps()) &&
-            (std::fabs(_state(kR)) <= UkfStationaryYawRateThresholdRadps()) &&
-            (std::fabs(_state(kOmegaL)) <= wheelSpeedThresholdRadps) &&
-            (std::fabs(_state(kOmegaR)) <= wheelSpeedThresholdRadps);
+            std::isfinite(_state(kVf)) &&
+            std::isfinite(_state(kVr)) &&
+            std::isfinite(_state(kYawRate)) &&
+            std::isfinite(GetWheelSpeedLeft()) &&
+            std::isfinite(GetWheelSpeedRight()) &&
+            (std::fabs(_state(kVf)) <= EstimatorStationaryLinearSpeedThresholdMps()) &&
+            (std::fabs(_state(kVr)) <= EstimatorStationaryLinearSpeedThresholdMps()) &&
+            (std::fabs(_state(kYawRate)) <= EstimatorStationaryYawRateThresholdRadps()) &&
+            (std::fabs(GetWheelSpeedLeft()) <= wheelSpeedThresholdRadps) &&
+            (std::fabs(GetWheelSpeedRight()) <= wheelSpeedThresholdRadps);
     }
 
 }

@@ -3,6 +3,7 @@
 #include "Templates.h"
 #include "..\MazeMap\PlantModel.h"
 #include "..\MazeMap\MapEvidenceUpdater.h"
+#include "..\MazeMap\SensorSnapshot.h"
 #include "..\MazeMap\WallGeometryModel.h"
 #include "..\MazeMap\WallSensorPreprocessor.h"
 #include "..\MazeMap\WallBeliefMap.h"
@@ -46,7 +47,7 @@ namespace MazeMap
 	{
 		return geometry.buildStateFrame(
 			state.GetPosition(),
-			state.GetOrientation());
+			state.GetHeading());
 	}
 
 	TEST_CLASS(WallMappingTest)
@@ -93,32 +94,63 @@ namespace MazeMap
 			Assert::AreEqual(0.045f, curve.Apply(0.260f, WallSensorCalibrationMode::DirectInterpolation), 0.0001f);
 		}
 
-		TEST_METHOD(WallDecisionAccumulatorRequiresCommittedEvidence)
+		TEST_METHOD(BuildEvidenceObservationSnapshotRequiresCommittedEvidence)
 		{
-			WallDecisionAccumulator accumulator;
-			accumulator.Update(WallSampleClassification::WallHit, 0.55f, 0.55f, 0.08f);
-			accumulator.Update(WallSampleClassification::Unknown, 0.55f, 0.55f, 0.08f);
-			Assert::AreEqual(
-				static_cast<int>(WallSampleClassification::Unknown),
-				static_cast<int>(accumulator.FinalClassification(1.0f)));
+			SensorSnapshot firstPass[2]{};
+			firstPass[0].SetLeftWallObservationWindowValid(true);
+			firstPass[0].SetLeftWallObservation(true);
+			SensorSnapshot combined{};
+			Assert::IsTrue(combined.BuildEvidenceObservationSnapshot(firstPass, 2U));
+			Assert::IsFalse(combined.LeftWallObservationWindowValid());
 
-			accumulator.Update(WallSampleClassification::WallHit, 0.55f, 0.55f, 0.08f);
-			Assert::AreEqual(
-				static_cast<int>(WallSampleClassification::WallHit),
-				static_cast<int>(accumulator.FinalClassification(1.0f)));
+			SensorSnapshot secondPass[3]{};
+			secondPass[0] = firstPass[0];
+			secondPass[2].SetLeftWallObservationWindowValid(true);
+			secondPass[2].SetLeftWallObservation(true);
+			Assert::IsTrue(combined.BuildEvidenceObservationSnapshot(secondPass, 3U));
+			Assert::IsTrue(combined.LeftWallObservationWindowValid());
+			Assert::IsTrue(combined.HasLeftWallObservation());
 		}
 
-		TEST_METHOD(WallDecisionAccumulatorTransitionImpulseSupportsOpeningMiss)
+		TEST_METHOD(BuildEvidenceObservationSnapshotTransitionImpulseSupportsOpeningMiss)
 		{
-			WallDecisionAccumulator accumulator;
-			accumulator.Update(WallSampleClassification::Unknown, 0.55f, 0.55f, 0.08f);
-			accumulator.InjectMissImpulse(0.35f);
-			accumulator.Update(WallSampleClassification::WallMiss, 0.55f, 0.55f, 0.08f);
-			accumulator.Update(WallSampleClassification::WallMiss, 0.55f, 0.55f, 0.08f);
+			SensorSnapshot samples[3]{};
+			samples[0].SetLeftTransitionDetected(true);
+			samples[1].SetLeftWallObservationWindowValid(true);
+			samples[1].SetLeftWallObservation(false);
+			samples[2].SetLeftWallObservationWindowValid(true);
+			samples[2].SetLeftWallObservation(false);
 
-			Assert::AreEqual(
-				static_cast<int>(WallSampleClassification::WallMiss),
-				static_cast<int>(accumulator.FinalClassification(1.0f)));
+			SensorSnapshot combined{};
+			Assert::IsTrue(combined.BuildEvidenceObservationSnapshot(samples, 3U));
+			Assert::IsTrue(combined.LeftWallObservationWindowValid());
+			Assert::IsFalse(combined.HasLeftWallObservation());
+			Assert::IsTrue(combined.LeftTransitionDetected());
+		}
+
+		TEST_METHOD(BuildEvidenceObservationSnapshotSkipsInvalidFrontSamples)
+		{
+			SensorSnapshot samples[3]{};
+			samples[0].SetFrontWall(false);
+			samples[1].SetFrontWall(false);
+			samples[2].SetFrontWallObservationValid(true);
+			samples[2].SetFrontWall(true);
+			samples[2].SetFrontLeftWall(true);
+			samples[2].SetFrontRightWall(true);
+
+			SensorSnapshot combined{};
+			Assert::IsTrue(combined.BuildEvidenceObservationSnapshot(samples, 3U));
+			Assert::IsFalse(combined.FrontWallObservationValid());
+
+			samples[1].SetFrontWallObservationValid(true);
+			samples[1].SetFrontWall(true);
+			samples[1].SetFrontLeftWall(true);
+			samples[1].SetFrontRightWall(true);
+			Assert::IsTrue(combined.BuildEvidenceObservationSnapshot(samples, 3U));
+			Assert::IsTrue(combined.FrontWallObservationValid());
+			Assert::IsTrue(combined.HasFrontWall());
+			Assert::IsTrue(combined.HasFrontLeftWall());
+			Assert::IsTrue(combined.HasFrontRightWall());
 		}
 
 		TEST_METHOD(WallBeliefMapConfirmsUnknownWallAndMirrorsNeighbor)
@@ -164,34 +196,72 @@ namespace MazeMap
 			WallSensor sensor = MakeTestWallSensor();
 			WallSensorPreprocessor preprocessor;
 
-			WallSensorPreprocessor::Input wallInput{};
-			wallInput.ledOffLevel = 0.1f;
-			wallInput.ledOnLevel = 10.1f;
-			wallInput.supportSpanM = 0.06f;
-			const WallObs wallObservation = preprocessor.process(sensor, wallInput);
-			Assert::IsTrue(wallObservation.valid);
-			Assert::AreEqual(static_cast<int>(ObsClass::WallLike), static_cast<int>(wallObservation.cls));
+			const WallObs wallObservation = preprocessor.process(
+				sensor,
+				0.1f,
+				10.1f,
+				sensor.DistanceFromLightLevels(0.1f, 10.1f),
+				0.06f);
+			Assert::IsTrue(wallObservation.IsValid());
+			Assert::AreEqual(static_cast<int>(ObsClass::WallLike), static_cast<int>(wallObservation.Class()));
+			Assert::IsTrue(wallObservation.MeasurementNoiseSigmaM() > 0.0f);
 
-			WallSensorPreprocessor::Input postInput = wallInput;
-			postInput.supportSpanM = 0.01f;
-			const WallObs postObservation = preprocessor.process(sensor, postInput);
-			Assert::IsTrue(postObservation.valid);
-			Assert::AreEqual(static_cast<int>(ObsClass::PostLike), static_cast<int>(postObservation.cls));
+			const WallObs postObservation = preprocessor.process(
+				sensor,
+				0.1f,
+				10.1f,
+				sensor.DistanceFromLightLevels(0.1f, 10.1f),
+				0.01f);
+			Assert::IsTrue(postObservation.IsValid());
+			Assert::AreEqual(static_cast<int>(ObsClass::PostLike), static_cast<int>(postObservation.Class()));
 
-			WallSensorPreprocessor::Input openInput{};
-			openInput.ledOffLevel = 0.1f;
-			openInput.ledOnLevel = 6.1f;
-			openInput.supportSpanM = 0.06f;
-			const WallObs openObservation = preprocessor.process(sensor, openInput);
-			Assert::IsTrue(openObservation.valid);
-			Assert::AreEqual(static_cast<int>(ObsClass::OpenLike), static_cast<int>(openObservation.cls));
+			const WallObs openObservation = preprocessor.process(
+				sensor,
+				0.1f,
+				6.1f,
+				sensor.DistanceFromLightLevels(0.1f, 6.1f),
+				0.06f);
+			Assert::IsTrue(openObservation.IsValid());
+			Assert::AreEqual(static_cast<int>(ObsClass::OpenLike), static_cast<int>(openObservation.Class()));
+		}
+
+		TEST_METHOD(WallSensorPreprocessorPreservesFarReturnConfidenceClassAndNoise)
+		{
+			WallSensor sensor = MakeTestWallSensor();
+			WallSensorPreprocessor preprocessor;
+
+			const WallObs farObservation = preprocessor.process(
+				sensor,
+				0.1f,
+				2.1f,
+				sensor.DistanceFromLightLevels(0.1f, 2.1f),
+				0.06f);
+			Assert::IsTrue(farObservation.IsValid());
+			Assert::IsTrue(farObservation.Rho() > 0.25f);
+			Assert::AreEqual(static_cast<int>(ObsClass::OpenLike), static_cast<int>(farObservation.Class()));
+			Assert::IsTrue(farObservation.MeasurementNoiseSigmaM() > 0.0f);
+
+			const WallObs sideObservation = WallObs::BuildSideWallObservation(
+				true,
+				false,
+				false,
+				farObservation.Rho(),
+				kDefaultWallObservationMaxRangeM,
+				farObservation.MeasurementNoiseSigmaM(),
+				farObservation.Confidence(),
+				farObservation.Class());
+			Assert::IsTrue(sideObservation.IsValid());
+			Assert::AreEqual(farObservation.Rho(), sideObservation.Rho(), 1.0e-6f);
+			Assert::AreEqual(farObservation.Confidence(), sideObservation.Confidence(), 1.0e-6f);
+			Assert::AreEqual(farObservation.MeasurementNoiseSigmaM(), sideObservation.MeasurementNoiseSigmaM(), 1.0e-6f);
+			Assert::AreEqual(static_cast<int>(ObsClass::OpenLike), static_cast<int>(sideObservation.Class()));
 		}
 
 		TEST_METHOD(WallObservationPipelineBuildsCanonicalWallObservations)
 		{
 			WallObs frontLeft{};
 			WallObs frontRight{};
-			BuildFrontWallObservations(
+			WallObs::BuildFrontWallObservations(
 				true,
 				true,
 				false,
@@ -202,18 +272,63 @@ namespace MazeMap
 				frontLeft,
 				frontRight);
 
-			Assert::IsTrue(frontLeft.valid);
-			Assert::IsTrue(frontRight.valid);
-			Assert::AreEqual(0.18f, frontLeft.rho, 1.0e-6f);
-			Assert::AreEqual(0.21f, frontRight.rho, 1.0e-6f);
-			Assert::AreEqual(0.90f, frontLeft.confidence, 1.0e-6f);
-			Assert::AreEqual(static_cast<int>(ObsClass::WallLike), static_cast<int>(frontLeft.cls));
+			Assert::IsTrue(frontLeft.IsValid());
+			Assert::IsTrue(frontRight.IsValid());
+			Assert::AreEqual(0.18f, frontLeft.Rho(), 1.0e-6f);
+			Assert::AreEqual(0.21f, frontRight.Rho(), 1.0e-6f);
+			Assert::AreEqual(0.90f, frontLeft.Confidence(), 1.0e-6f);
+			Assert::AreEqual(0.0f, frontLeft.MeasurementNoiseSigmaM(), 1.0e-6f);
+			Assert::AreEqual(static_cast<int>(ObsClass::WallLike), static_cast<int>(frontLeft.Class()));
 
-			const WallObs sideObservation = BuildSideWallObservation(true, false, true, 0.14f, 0.25f);
-			Assert::IsTrue(sideObservation.valid);
-			Assert::AreEqual(0.14f, sideObservation.rho, 1.0e-6f);
-			Assert::AreEqual(0.80f, sideObservation.confidence, 1.0e-6f);
-			Assert::AreEqual(static_cast<int>(ObsClass::WallLike), static_cast<int>(sideObservation.cls));
+			const WallObs sideObservation = WallObs::BuildSideWallObservation(true, false, true, 0.14f, 0.25f);
+			Assert::IsTrue(sideObservation.IsValid());
+			Assert::AreEqual(0.14f, sideObservation.Rho(), 1.0e-6f);
+			Assert::AreEqual(0.80f, sideObservation.Confidence(), 1.0e-6f);
+			Assert::AreEqual(0.0f, sideObservation.MeasurementNoiseSigmaM(), 1.0e-6f);
+			Assert::AreEqual(static_cast<int>(ObsClass::WallLike), static_cast<int>(sideObservation.Class()));
+
+			WallObs::BuildFrontWallObservations(
+				true,
+				true,
+				false,
+				true,
+				0.18f,
+				0.21f,
+				0.25f,
+				frontLeft,
+				frontRight,
+				0.003f,
+				0.004f);
+			Assert::AreEqual(0.003f, frontLeft.MeasurementNoiseSigmaM(), 1.0e-6f);
+			Assert::AreEqual(0.004f, frontRight.MeasurementNoiseSigmaM(), 1.0e-6f);
+			WallObs::BuildFrontWallObservations(
+				true,
+				true,
+				false,
+				true,
+				0.18f,
+				0.21f,
+				0.25f,
+				frontLeft,
+				frontRight,
+				0.003f,
+				0.004f,
+				0.52f,
+				0.61f,
+				ObsClass::PostLike,
+				ObsClass::WallLike);
+			Assert::AreEqual(0.52f, frontLeft.Confidence(), 1.0e-6f);
+			Assert::AreEqual(static_cast<int>(ObsClass::PostLike), static_cast<int>(frontLeft.Class()));
+
+			const WallObs noisySideObservation = WallObs::BuildSideWallObservation(true, false, true, 0.14f, 0.25f, 0.005f);
+			Assert::AreEqual(0.005f, noisySideObservation.MeasurementNoiseSigmaM(), 1.0e-6f);
+			const WallObs openSideObservation =
+				WallObs::BuildSideWallObservation(true, false, false, 0.22f, 0.25f, 0.006f, 0.37f, ObsClass::OpenLike);
+			Assert::IsTrue(openSideObservation.IsValid());
+			Assert::AreEqual(0.22f, openSideObservation.Rho(), 1.0e-6f);
+			Assert::AreEqual(0.37f, openSideObservation.Confidence(), 1.0e-6f);
+			Assert::AreEqual(0.006f, openSideObservation.MeasurementNoiseSigmaM(), 1.0e-6f);
+			Assert::AreEqual(static_cast<int>(ObsClass::OpenLike), static_cast<int>(openSideObservation.Class()));
 		}
 
 		TEST_METHOD(WallGeometryModelRespectsSensorMountForFrontWallPrediction)
@@ -225,7 +340,7 @@ namespace MazeMap
 
 			VehicleState state;
 			state.SetPosition(Eigen::Vector2f(0.09f, 0.09f));
-			state.SetOrientation(0.0f);
+			state.SetHeading(0.0f);
 
 			const WallGeometryModel::GeometryStateFrame frame = BuildGeometryFrame(geometry, state);
 			const SensorMount frontLeftSensor = Vehicle::GetFrontLeftSensorMount();
@@ -258,7 +373,7 @@ namespace MazeMap
 
 			VehicleState state;
 			state.SetPosition(Eigen::Vector2f(0.09f, 0.09f));
-			state.SetOrientation(0.0f);
+			state.SetHeading(0.0f);
 
 			const GeometryPrediction prediction = geometry.predictRay(BuildGeometryFrame(geometry, state), sensor, maze);
 			Assert::IsTrue(prediction.hit);
@@ -270,11 +385,7 @@ namespace MazeMap
 			MapEvidenceUpdater updater;
 			MapEvidenceUpdater::Config config{};
 
-			WallObs observation{};
-			observation.valid = true;
-			observation.confidence = 0.9f;
-			observation.cls = ObsClass::PostLike;
-			observation.rho = 0.05f;
+			const WallObs observation(0.05f, 0.9f, ObsClass::PostLike);
 
 			GeometryPrediction bestFit{};
 			bestFit.hit = true;
@@ -297,10 +408,7 @@ namespace MazeMap
 			MapEvidenceUpdater updater;
 			MapEvidenceUpdater::Config config{};
 
-			WallObs wallObservation{};
-			wallObservation.valid = true;
-			wallObservation.confidence = 0.9f;
-			wallObservation.cls = ObsClass::WallLike;
+			const WallObs wallObservation(0.05f, 0.9f, ObsClass::WallLike);
 
 			GeometryPrediction wallFit{};
 			wallFit.hit = true;
@@ -320,10 +428,7 @@ namespace MazeMap
 			Assert::AreEqual(3, static_cast<int>(updater.Get(CellCoordinates(3U, 3U) >> Direction::Up, Direction::Down).score));
 
 			MapEvidenceUpdater openUpdater;
-			WallObs openObservation{};
-			openObservation.valid = true;
-			openObservation.confidence = 0.9f;
-			openObservation.cls = ObsClass::OpenLike;
+			const WallObs openObservation(0.20f, 0.9f, ObsClass::OpenLike);
 
 			GeometryPrediction openFit{};
 			openFit.hit = false;

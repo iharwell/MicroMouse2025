@@ -30,7 +30,7 @@
     <ClInclude Include="pch.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="SrUkfCoreTestSupport.h">
+    <ClInclude Include="EstimatorFilterTestSupport.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Templates.h">
@@ -143,16 +143,16 @@
     <ClCompile Include="SearchRunPlannerTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="SrUkfCoreBiasAndStationaryTest.cpp">
+    <ClCompile Include="EstimatorBiasAndStationaryTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="SrUkfCoreModeAndDiagnosticsTest.cpp">
+    <ClCompile Include="EstimatorModeAndDiagnosticsTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="SrUkfCoreMotionUpdateTest.cpp">
+    <ClCompile Include="EstimatorMotionUpdateTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="SrUkfCoreReplayRegressionTest.cpp">
+    <ClCompile Include="EstimatorReplayRegressionTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="UKFTest.cpp">

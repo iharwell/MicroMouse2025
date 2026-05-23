@@ -69,7 +69,16 @@ namespace MazeMap::App::Internal
         (void)_runtime.AppendTextLogLine("Front calibration active; side LEDs held off");
         PrintFrequency("Front LED square wave (Hz): ", WallSensorLedCalibrationHalfPeriodUs(WallSensorId::FrontLeft));
         (void)_runtime.AppendTextLogLine("Remove selector jumper to switch to side calibration");
-        _loopController.StageNextSessionState(BuildLoopOptions());
+        const auto& runtimeState = _runtime.RuntimeState();
+        _loopController.StageNextSessionState(
+            Config::kControlPeriodUs,
+            runtimeState.GetPositionX(),
+            runtimeState.GetPositionY(),
+            LoopController::WallMask::None,
+            false,
+            false,
+            false,
+            false);
     }
 
     CommandVector WallSensorLedCalibrationController::RunTick(
@@ -102,21 +111,6 @@ namespace MazeMap::App::Internal
         {
             static_cast<WallSensorLedCalibrationController*>(context)->CleanupOnRuntimeFault(reason);
         }
-    }
-
-    LoopController::SessionOptions WallSensorLedCalibrationController::BuildLoopOptions() const noexcept
-    {
-        LoopController::SessionOptions options{};
-        const auto& runtimeState = _runtime.RuntimeState();
-        options.controlPeriodUs = Config::kControlPeriodUs;
-        options.workPlan.SetWallMask(LoopController::WallMask::None);
-        options.workPlan.SetUseEncoderUpdate(false);
-        options.workPlan.SetUseGyroUpdate(false);
-        options.workPlan.SetUseAccelUpdate(false);
-        options.workPlan.SetUseWallUpdates(false);
-        options.SessionStartPointX = runtimeState.GetPositionX();
-        options.SessionStartPointY = runtimeState.GetPositionY();
-        return options;
     }
 
     CommandVector WallSensorLedCalibrationController::OnModeWork(

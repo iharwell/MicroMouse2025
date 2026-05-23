@@ -148,9 +148,9 @@ namespace MazeMap
             cluster.YawRateStatePD.SetGains(100.0f, 0.0f);
             cluster.HeadingStatePD.SetGains(100.0f, 0.0f);
             DriveBaseHarness harness(cluster);
-            harness.runtimeState.SetVelocity(0.5f);
-            harness.runtimeState.SetRotationalVelocity(1.0f);
-            harness.runtimeState.SetOrientation(0.25f);
+            harness.runtimeState.SetForwardVelocity(0.5f);
+            harness.runtimeState.SetYawRate(1.0f);
+            harness.runtimeState.SetHeading(0.25f);
 
             (void)harness.drive.ProposeBodyTick(kNaN, kNaN, kNaN, kNaN, kNaN);
             const DriveTelemetry& telemetry = harness.drive.LastTelemetry();
@@ -173,7 +173,7 @@ namespace MazeMap
             PDCluster cluster;
             cluster.VelocityStatePD.SetGains(3.0f, 0.0f);
             DriveBaseHarness harness(cluster);
-            harness.runtimeState.SetVelocity(0.20f);
+            harness.runtimeState.SetForwardVelocity(0.20f);
 
             (void)harness.drive.ProposeBodyTick(1.0f, kNaN, 0.50f, kNaN, kNaN);
             const DriveTelemetry& telemetry = harness.drive.LastTelemetry();
@@ -192,8 +192,8 @@ namespace MazeMap
             cluster.YawRateStatePD.SetGains(2.0f, 0.0f);
             cluster.HeadingStatePD.SetGains(5.0f, 0.0f);
             DriveBaseHarness harness(cluster);
-            harness.runtimeState.SetRotationalVelocity(0.40f);
-            harness.runtimeState.SetOrientation(0.25f);
+            harness.runtimeState.SetYawRate(0.40f);
+            harness.runtimeState.SetHeading(0.25f);
 
             (void)harness.drive.ProposeBodyTick(kNaN, 1.0f, kNaN, 0.30f, 0.75f);
             const DriveTelemetry& telemetry = harness.drive.LastTelemetry();

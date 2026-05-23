@@ -86,17 +86,14 @@ def smoothstep(edge0: float, edge1: float, value: float) -> float:
 
 
 def load_setup(repo_root: Path) -> PivotScrubSetup:
-    vehicle_entries = extract_initializer_entries(
-        repo_root / "MazeMap" / "MazeMap" / "Vehicle.h",
-        "inline static constexpr VehiclePhysicalModel kPhysicalModel",
-    )
+    vehicle_header = repo_root / "MazeMap" / "MazeMap" / "Vehicle.h"
     drive_entries = extract_initializer_entries(
         repo_root / "MazeMap" / "MazeMap" / "MotorEncoderDrive.h",
         "inline static constexpr PhysicalModel kSharedPhysicalModel",
     )
 
-    track_width_m = evaluate_cpp_expr(vehicle_entries[5])
-    yaw_inertia_kg_m2 = evaluate_cpp_expr(vehicle_entries[3])
+    track_width_m = load_named_float(vehicle_header, "kPhysicalTrackWidthM")
+    yaw_inertia_kg_m2 = load_named_float(vehicle_header, "kPhysicalYawInertiaKgM2")
     supply_voltage_v = evaluate_cpp_expr(drive_entries[2])
     resistance_ohms = evaluate_cpp_expr(drive_entries[3])
     torque_constant_nm_per_a = evaluate_cpp_expr(drive_entries[4])

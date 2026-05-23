@@ -239,10 +239,10 @@
     <ClCompile Include="PlantModelDynamicsTest.cpp" />
     <ClCompile Include="RelativeDirectionalDistanceTest.cpp" />
     <ClCompile Include="SearchRunPlannerTest.cpp" />
-    <ClCompile Include="SrUkfCoreBiasAndStationaryTest.cpp" />
-    <ClCompile Include="SrUkfCoreModeAndDiagnosticsTest.cpp" />
-    <ClCompile Include="SrUkfCoreMotionUpdateTest.cpp" />
-    <ClCompile Include="SrUkfCoreReplayRegressionTest.cpp" />
+    <ClCompile Include="EstimatorBiasAndStationaryTest.cpp" />
+    <ClCompile Include="EstimatorModeAndDiagnosticsTest.cpp" />
+    <ClCompile Include="EstimatorMotionUpdateTest.cpp" />
+    <ClCompile Include="EstimatorReplayRegressionTest.cpp" />
     <ClCompile Include="UKFTest.cpp">
       <ObjectFileName>$(IntDir)UKFTest.obj</ObjectFileName>
     </ClCompile>
@@ -253,7 +253,7 @@
     <ClInclude Include="EstimatorTestSupport.h" />
     <ClInclude Include="MazeRef.h" />
     <ClInclude Include="pch.h" />
-    <ClInclude Include="SrUkfCoreTestSupport.h" />
+    <ClInclude Include="EstimatorFilterTestSupport.h" />
     <ClInclude Include="Templates.h" />
     <ClInclude Include="TimeStepPropagationTestSupport.h" />
   </ItemGroup>

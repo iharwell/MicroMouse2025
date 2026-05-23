@@ -6,88 +6,103 @@
 
 namespace MazeMap
 {
-    WallSensorPreprocessor::WallSensorPreprocessor() noexcept
-        : WallSensorPreprocessor(Config{})
-    {
-    }
-
-    WallSensorPreprocessor::WallSensorPreprocessor(
-        const Config& config) noexcept
-        : _config(config)
-    {
-    }
-
-    const WallSensorPreprocessor::Config& WallSensorPreprocessor::config() const noexcept
-    {
-        return _config;
-    }
+    WallSensorPreprocessor::WallSensorPreprocessor() noexcept = default;
 
     WallObs WallSensorPreprocessor::process(
         const WallSensor& sensor,
-        const Input& input) const noexcept
+        const float ledOffLevel,
+        const float ledOnLevel,
+        const float measuredRangeM,
+        const float supportSpanM,
+        const float multiSensorCoherence,
+        const float incidenceCosine,
+        const float derivativeConsistency) const noexcept
     {
-        WallObs observation{};
         const float differential =
-            (std::max)(0.0f, ((sensor.DifferentialLightLevel(input.ledOffLevel, input.ledOnLevel) - _config.zeroOffset) * _config.gain));
+            (std::max)(
+                0.0f,
+                ((sensor.DifferentialLightLevel(ledOffLevel, ledOnLevel) -
+                    _zeroOffset) *
+                    _gain));
         if (!std::isfinite(differential))
         {
-            return observation;
+            return WallObs{};
         }
 
-        float pseudoRangeM = sensor.DistanceFromDifferentialLight(differential);
-        if (_config.calibration.GetCount() > 0U)
+        const float pseudoRangeM = sensor.DistanceFromDifferentialLight(differential);
+        float lowNoiseRangeM = pseudoRangeM;
+        float highNoiseRangeM = pseudoRangeM;
+        const float differentialNoise =
+            (std::isfinite(_noiseFloor) && (_noiseFloor > 0.0f)) ?
+            _noiseFloor :
+            0.0f;
+        if (differentialNoise > 0.0f)
         {
-            pseudoRangeM = _config.calibration.Apply(pseudoRangeM, _config.calibrationMode);
+            lowNoiseRangeM =
+                sensor.DistanceFromDifferentialLight(
+                    (std::max)(0.0f, differential - differentialNoise));
+            highNoiseRangeM =
+                sensor.DistanceFromDifferentialLight(
+                    differential + differentialNoise);
         }
 
-        if (!(std::isfinite(pseudoRangeM) &&
-            (pseudoRangeM >= _config.minPseudoRangeM) &&
-            (pseudoRangeM <= _config.maxPseudoRangeM)))
+        const float observationRangeM =
+            std::isfinite(measuredRangeM) ?
+            measuredRangeM :
+            pseudoRangeM;
+        if (!(std::isfinite(observationRangeM) && (observationRangeM > 0.0f)))
         {
-            return observation;
+            return WallObs{};
         }
 
-        const float ambientMagnitude = (std::max)(std::fabs(input.ledOffLevel), _config.noiseFloor);
+        const float ambientMagnitude = (std::max)(std::fabs(ledOffLevel), _noiseFloor);
         const float snr = differential / ambientMagnitude;
         const float snrScore = (std::clamp)((snr - 1.0f) / 7.0f, 0.0f, 1.0f);
-        const float supportScore = (std::clamp)(input.supportSpanM / _config.wallSupportSpanM, 0.0f, 1.0f);
-        const float coherenceScore = (std::clamp)(input.multiSensorCoherence, 0.0f, 1.0f);
-        const float incidenceScore = (std::clamp)(input.incidenceCosine, 0.0f, 1.0f);
-        const float derivativeScore = (std::clamp)(input.derivativeConsistency, 0.0f, 1.0f);
-        const float saturationScore = input.saturated ? 0.15f : 1.0f;
+        const float supportScore =
+            (std::clamp)(supportSpanM / _wallSupportSpanM, 0.0f, 1.0f);
+        const float coherenceScore = (std::clamp)(multiSensorCoherence, 0.0f, 1.0f);
+        const float incidenceScore = (std::clamp)(incidenceCosine, 0.0f, 1.0f);
+        const float derivativeScore = (std::clamp)(derivativeConsistency, 0.0f, 1.0f);
 
-        observation.valid = true;
-        observation.rho = pseudoRangeM;
-        observation.confidence =
+        const float measurementNoiseSigmaM =
+            (std::max)(
+                0.0f,
+                (std::max)(
+                    std::fabs(lowNoiseRangeM - pseudoRangeM),
+                    std::fabs(highNoiseRangeM - pseudoRangeM)));
+        float confidence =
             (0.30f * snrScore) +
             (0.20f * supportScore) +
             (0.20f * coherenceScore) +
             (0.15f * incidenceScore) +
-            (0.10f * derivativeScore) +
-            (0.05f * saturationScore);
-        observation.confidence = (std::clamp)(observation.confidence, 0.0f, 1.0f);
+            (0.15f * derivativeScore);
+        confidence =
+            std::isfinite(confidence) ?
+            (std::clamp)(confidence, 0.0f, 1.0f) :
+            0.0f;
 
-        if (observation.confidence < _config.minConfidence)
+        ObsClass observationClass = ObsClass::Ambiguous;
+        if (confidence < _minConfidence)
         {
-            observation.cls = ObsClass::Ambiguous;
+            observationClass = ObsClass::Ambiguous;
         }
-        else if (pseudoRangeM >= _config.openLikeRangeM)
+        else if (observationRangeM >= _openLikeRangeM)
         {
-            observation.cls = ObsClass::OpenLike;
+            observationClass = ObsClass::OpenLike;
         }
-        else if (input.supportSpanM <= _config.postSupportSpanM)
+        else if (supportSpanM <= _postSupportSpanM)
         {
-            observation.cls = ObsClass::PostLike;
+            observationClass = ObsClass::PostLike;
         }
-        else if (pseudoRangeM <= _config.wallLikeRangeM)
+        else if (observationRangeM <= _wallLikeRangeM)
         {
-            observation.cls = ObsClass::WallLike;
-        }
-        else
-        {
-            observation.cls = ObsClass::Ambiguous;
+            observationClass = ObsClass::WallLike;
         }
 
-        return observation;
+        return WallObs(
+            observationRangeM,
+            confidence,
+            observationClass,
+            measurementNoiseSigmaM);
     }
 }

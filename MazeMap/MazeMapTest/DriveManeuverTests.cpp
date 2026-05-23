@@ -35,7 +35,7 @@ namespace MazeMap::App
         constexpr float kVelocityVariationLimit = 0.05f;
         constexpr float kYawAccelerationVariationLimit = 0.20f;
         constexpr float kYawRateVariationLimit = 0.08f;
-        constexpr float kOmegaMagnitudeEpsilonRadps = 1.0e-4f;
+        constexpr float kYawRateMagnitudeEpsilonRadps = 1.0e-4f;
         constexpr float kTurnPlateauFraction = 0.95f;
         constexpr std::size_t kRampDeltaTrimSamples = 5U;
 
@@ -85,8 +85,8 @@ namespace MazeMap::App
         SensorSnapshot BuildDriveManeuverSensorSnapshot(const float yawRateRadps = 0.0f) noexcept
         {
             SensorSnapshot snapshot{};
-            snapshot.gyroRawRadps = yawRateRadps;
-            snapshot.gyroRadps = yawRateRadps;
+            snapshot.SetRawYawRateRadps(yawRateRadps);
+            snapshot.SetYawRateRadps(yawRateRadps);
             return snapshot;
         }
 
@@ -121,34 +121,27 @@ namespace MazeMap::App
                 ConsumeWholeEncoderCounts(rightDistanceDeltaM / distancePerCountM, rightEncoderRemainderCounts);
 
             SensorSnapshot snapshot = BuildDriveManeuverSensorSnapshot(yawRateRadps);
-            snapshot.encoderObservation.totalLeftCounts = leftCounts;
-            snapshot.encoderObservation.totalRightCounts = rightCounts;
-            snapshot.encoderObservation.leftDistanceDeltaM = static_cast<float>(leftCounts) * distancePerCountM;
-            snapshot.encoderObservation.rightDistanceDeltaM = static_cast<float>(rightCounts) * distancePerCountM;
+            MazeMap::EncoderObs encoderObservation{};
+            encoderObservation.SetTotalLeftCounts(leftCounts);
+            encoderObservation.SetTotalRightCounts(rightCounts);
+            encoderObservation.SetLeftDistanceDeltaM(static_cast<float>(leftCounts) * distancePerCountM);
+            encoderObservation.SetRightDistanceDeltaM(static_cast<float>(rightCounts) * distancePerCountM);
             if ((dtSeconds > 0.0f) && std::isfinite(dtSeconds) && (MazeMap::Vehicle::GetDriveWheelRadiusM() > 0.0f))
             {
                 const float invWheelRadiusM = 1.0f / MazeMap::Vehicle::GetDriveWheelRadiusM();
                 const float invDtSeconds = 1.0f / dtSeconds;
-                snapshot.encoderObservation.leftVelocityMps =
-                    snapshot.encoderObservation.leftDistanceDeltaM * invDtSeconds;
-                snapshot.encoderObservation.rightVelocityMps =
-                    snapshot.encoderObservation.rightDistanceDeltaM * invDtSeconds;
-                snapshot.encoderObservation.omegaLeftRadps =
-                    snapshot.encoderObservation.leftVelocityMps * invWheelRadiusM;
-                snapshot.encoderObservation.omegaRightRadps =
-                    snapshot.encoderObservation.rightVelocityMps * invWheelRadiusM;
+                encoderObservation.SetLeftVelocityMps(encoderObservation.LeftDistanceDeltaM() * invDtSeconds);
+                encoderObservation.SetRightVelocityMps(encoderObservation.RightDistanceDeltaM() * invDtSeconds);
+                encoderObservation.SetLeftWheelSpeedRadps(encoderObservation.LeftVelocityMps() * invWheelRadiusM);
+                encoderObservation.SetRightWheelSpeedRadps(encoderObservation.RightVelocityMps() * invWheelRadiusM);
             }
-            snapshot.encoderObservationValid = true;
-            snapshot.leftEncoderTotalCounts =
-                runtimeState.GetSensorSnapshot().leftEncoderTotalCounts +
-                static_cast<std::int64_t>(leftCounts);
-            snapshot.rightEncoderTotalCounts =
-                runtimeState.GetSensorSnapshot().rightEncoderTotalCounts +
-                static_cast<std::int64_t>(rightCounts);
-            snapshot.leftEncoderDistanceM =
-                MazeMap::Vehicle::DriveEncoderDistanceFromCounts(snapshot.leftEncoderTotalCounts);
-            snapshot.rightEncoderDistanceM =
-                MazeMap::Vehicle::DriveEncoderDistanceFromCounts(snapshot.rightEncoderTotalCounts);
+            snapshot.SetEncoderObservation(encoderObservation, true);
+            snapshot.SetEncoderTotals(
+                runtimeState.GetSensorSnapshot().LeftEncoderTotalCounts() + static_cast<std::int64_t>(leftCounts),
+                runtimeState.GetSensorSnapshot().RightEncoderTotalCounts() + static_cast<std::int64_t>(rightCounts));
+            snapshot.SetEncoderDistancesM(
+                MazeMap::Vehicle::DriveEncoderDistanceFromCounts(snapshot.LeftEncoderTotalCounts()),
+                MazeMap::Vehicle::DriveEncoderDistanceFromCounts(snapshot.RightEncoderTotalCounts()));
             UpdateDriveEstimator(
                 estimator,
                 runtimeState,
@@ -162,10 +155,10 @@ namespace MazeMap::App
             return
                 std::isfinite(state.GetPositionX()) &&
                 std::isfinite(state.GetPositionY()) &&
-                std::isfinite(state.GetOrientation()) &&
-                std::isfinite(state.GetVelocity()) &&
-                std::isfinite(state.GetLateralVelocity()) &&
-                std::isfinite(state.GetRotationalVelocity()) &&
+                std::isfinite(state.GetHeading()) &&
+                std::isfinite(state.GetForwardVelocity()) &&
+                std::isfinite(state.GetRightwardVelocity()) &&
+                std::isfinite(state.GetYawRate()) &&
                 std::isfinite(state.GetWheelSpeedLeft()) &&
                 std::isfinite(state.GetWheelSpeedRight()) &&
                 std::isfinite(state.GetGyroBiasZ());
@@ -173,11 +166,11 @@ namespace MazeMap::App
 
         VehicleState BuildTruthState(const float linearSpeedMps) noexcept
         {
-            const float wheelOmegaRadps = Vehicle::WheelOmegaFromLinearVelocity(linearSpeedMps);
+            const float wheelSpeedRadps = Vehicle::WheelSpeedFromLinearVelocity(linearSpeedMps);
             VehicleState state;
-            state.SetVelocity(linearSpeedMps);
-            state.SetWheelSpeedLeft(wheelOmegaRadps);
-            state.SetWheelSpeedRight(wheelOmegaRadps);
+            state.SetForwardVelocity(linearSpeedMps);
+            state.SetWheelSpeedLeft(wheelSpeedRadps);
+            state.SetWheelSpeedRight(wheelSpeedRadps);
             return state;
         }
 
@@ -240,7 +233,7 @@ namespace MazeMap::App
                 runtime.RuntimeState(),
                 leftDistanceDeltaM,
                 rightDistanceDeltaM,
-                truthState.GetRotationalVelocity(),
+                truthState.GetYawRate(),
                 leftEncoderRemainderCounts,
                 rightEncoderRemainderCounts,
                 dtSeconds,
@@ -470,14 +463,14 @@ namespace MazeMap::App
                 return magnitudes;
             }
 
-            float maxOmegaMagnitudeRadps = 0.0f;
+            float maxYawRateMagnitudeRadps = 0.0f;
             for (const CommandSample& sample : trace.samples)
             {
-                maxOmegaMagnitudeRadps =
-                    (std::max)(maxOmegaMagnitudeRadps, std::fabs(sample.angularCommandRadps));
+                maxYawRateMagnitudeRadps =
+                    (std::max)(maxYawRateMagnitudeRadps, std::fabs(sample.angularCommandRadps));
             }
 
-            const float plateauThresholdRadps = kTurnPlateauFraction * maxOmegaMagnitudeRadps;
+            const float plateauThresholdRadps = kTurnPlateauFraction * maxYawRateMagnitudeRadps;
             for (const CommandSample& sample : trace.samples)
             {
                 const float magnitudeRadps = std::fabs(sample.angularCommandRadps);
@@ -498,18 +491,18 @@ namespace MazeMap::App
                 return magnitudes;
             }
 
-            float maxOmegaMagnitudeRadps = 0.0f;
+            float maxYawRateMagnitudeRadps = 0.0f;
             std::size_t plateauBeginIndex = trace.samples.size();
             std::size_t plateauEndIndex = 0U;
             for (std::size_t index = 0U; index < trace.samples.size(); ++index)
             {
-                maxOmegaMagnitudeRadps =
+                maxYawRateMagnitudeRadps =
                     (std::max)(
-                        maxOmegaMagnitudeRadps,
+                        maxYawRateMagnitudeRadps,
                         std::fabs(trace.samples[index].angularCommandRadps));
             }
 
-            const float plateauThresholdRadps = kTurnPlateauFraction * maxOmegaMagnitudeRadps;
+            const float plateauThresholdRadps = kTurnPlateauFraction * maxYawRateMagnitudeRadps;
             for (std::size_t index = 0U; index < trace.samples.size(); ++index)
             {
                 if (std::fabs(trace.samples[index].angularCommandRadps) >= plateauThresholdRadps)
@@ -542,12 +535,12 @@ namespace MazeMap::App
                 const std::size_t trimmedEndIndexExclusive = deltaEndIndexExclusive - kRampDeltaTrimSamples;
                 for (std::size_t index = trimmedBeginIndex; index < trimmedEndIndexExclusive; ++index)
                 {
-                    const float previousOmegaMagnitudeRadps =
+                    const float previousYawRateMagnitudeRadps =
                         std::fabs(trace.samples[index - 1U].angularCommandRadps);
-                    const float currentOmegaMagnitudeRadps =
+                    const float currentYawRateMagnitudeRadps =
                         std::fabs(trace.samples[index].angularCommandRadps);
-                    if ((previousOmegaMagnitudeRadps <= kOmegaMagnitudeEpsilonRadps) ||
-                        (currentOmegaMagnitudeRadps <= kOmegaMagnitudeEpsilonRadps))
+                    if ((previousYawRateMagnitudeRadps <= kYawRateMagnitudeEpsilonRadps) ||
+                        (currentYawRateMagnitudeRadps <= kYawRateMagnitudeEpsilonRadps))
                     {
                         continue;
                     }
@@ -592,7 +585,7 @@ namespace MazeMap::App
         {
             const ManeuverExecutionTrace trace = SimulateDriveManeuver(code, false);
             const float headingErrorRad =
-                std::fabs(AngleErrorRad(BuildNominalEndYawRad(code), trace.truthState.GetOrientation()));
+                std::fabs(AngleErrorRad(BuildNominalEndYawRad(code), trace.truthState.GetHeading()));
             CheckResult result{};
             result.passed = trace.started && trace.completed && (headingErrorRad <= kHeadingToleranceRad);
             result.message =
@@ -690,7 +683,7 @@ namespace MazeMap::App
         {
             const ManeuverExecutionTrace trace = SimulateDriveManeuver(code, true);
             const float headingErrorRad =
-                std::fabs(AngleErrorRad(BuildNominalEndYawRad(code), trace.truthState.GetOrientation()));
+                std::fabs(AngleErrorRad(BuildNominalEndYawRad(code), trace.truthState.GetHeading()));
             CheckResult result{};
             result.passed = trace.started && trace.completed && (headingErrorRad <= kHeadingToleranceRad);
             result.message =

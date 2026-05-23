@@ -2,6 +2,7 @@
 #include "RuntimeSensorSuite.h"
 
 #include "SharedRobotRuntime.h"
+#include "WallSensorPreprocessor.h"
 
 #include <algorithm>
 #include <cmath>
@@ -46,25 +47,27 @@ namespace MazeMap
 
     #if defined(ARDUINO_TEENSY41)
     static bool ConfigureLoopMatchedBackLeftImu(
-        MazeMap::Vehicle::ImuBackLeft& imu,
+        MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>& imu,
         unsigned long controlPeriodUs,
         bool enableAccel)
     {
-        using Imu = MazeMap::Vehicle::ImuBackLeft;
-
         switch (MazeMap::SelectUiImuSamplingProfile(controlPeriodUs))
         {
         case MazeMap::UiImuSamplingProfile::Exact1000Hz:
             imu.ConfigureUiHighAccuracyOdr(
-                Imu::HAODR_SELECTION::EXACT_1000_2000_4000_8000,
-                enableAccel ? Imu::ODR_SETTING::ODR_0960HZ_HP_N_LP : Imu::ODR_SETTING::DISABLE,
-                Imu::ODR_SETTING::ODR_0960HZ_HP_N_LP);
+                MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::HAODR_SELECTION::EXACT_1000_2000_4000_8000,
+                enableAccel ?
+                    MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::ODR_SETTING::ODR_0960HZ_HP_N_LP :
+                    MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::ODR_SETTING::DISABLE,
+                MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::ODR_SETTING::ODR_0960HZ_HP_N_LP);
             return true;
         case MazeMap::UiImuSamplingProfile::Exact2000Hz:
             imu.ConfigureUiHighAccuracyOdr(
-                Imu::HAODR_SELECTION::EXACT_1000_2000_4000_8000,
-                enableAccel ? Imu::ODR_SETTING::ODR_1920HZ_HP_N_LP : Imu::ODR_SETTING::DISABLE,
-                Imu::ODR_SETTING::ODR_1920HZ_HP_N_LP);
+                MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::HAODR_SELECTION::EXACT_1000_2000_4000_8000,
+                enableAccel ?
+                    MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::ODR_SETTING::ODR_1920HZ_HP_N_LP :
+                    MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::ODR_SETTING::DISABLE,
+                MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::ODR_SETTING::ODR_1920HZ_HP_N_LP);
             return true;
         default:
             (void)MazeMap::App::Internal::GetSharedRobotRuntime().AppendTextLogFormatted(
@@ -75,11 +78,11 @@ namespace MazeMap
     }
 
     static bool ConfigureBackLeftImuForRuntime(
-        MazeMap::Vehicle::ImuBackLeft& imu,
+        MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>& imu,
         unsigned long controlPeriodUs,
         bool enableAccel,
-        MazeMap::Vehicle::ImuBackLeft::ACCEL_FILTER_FREQ accelFilterFreq =
-            MazeMap::Vehicle::ImuBackLeft::ACCEL_FILTER_FREQ::FRAC_1_400)
+        MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::ACCEL_FILTER_FREQ accelFilterFreq =
+            MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::ACCEL_FILTER_FREQ::FRAC_1_400)
     {
         const bool imuConfigured = ConfigureLoopMatchedBackLeftImu(imu, controlPeriodUs, enableAccel);
         if (!imuConfigured)
@@ -88,40 +91,218 @@ namespace MazeMap
         }
 
         imu.SetSelfTest(
-            MazeMap::Vehicle::ImuBackLeft::SELF_TEST_MODE::DISABLED,
-            MazeMap::Vehicle::ImuBackLeft::SELF_TEST_MODE::DISABLED);
+            MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::SELF_TEST_MODE::DISABLED,
+            MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::SELF_TEST_MODE::DISABLED);
         if (enableAccel)
         {
             imu.SetAccelRange(
                 accelFilterFreq,
-                MazeMap::Vehicle::ImuBackLeft::ACCEL_FULLSCALE::G8);
+                MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::ACCEL_FULLSCALE::G8);
         }
 
         imu.SetGyroRange(
-            MazeMap::Vehicle::ImuBackLeft::GYRO_LPF1_MODE::CUT_213,
-            MazeMap::Vehicle::ImuBackLeft::GYRO_FULLSCALE_RANGE::DPS2000);
+            MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::GYRO_LPF1_MODE::CUT_213,
+            MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::GYRO_FULLSCALE_RANGE::DPS2000);
         return true;
     }
 
-    template <typename CaptureEncoderCounts>
-    static StationaryImuCalibrationResult RunStationaryBackLeftImuSelfTest(
-        MazeMap::Vehicle::ImuBackLeft& imu,
-        unsigned long controlPeriodUs,
-        const MazeMap::EncoderCountPair& startCounts,
-        CaptureEncoderCounts& captureEncoderCounts,
-        MazeMap::Vehicle::ImuBackLeft::ACCEL_FILTER_FREQ accelFilterFreq =
-            MazeMap::Vehicle::ImuBackLeft::ACCEL_FILTER_FREQ::FRAC_1_400)
+    #endif
+
+    RuntimeSensorSuite::RuntimeSensorSuite(MazeMap::Vehicle& vehicle, WallDistanceCalibration& wallCalibration)
+        : _vehicle(vehicle)
+        , _wallCalibration(wallCalibration)
+        , _gyroBiasRadps(0.0f)
+        , _frontLeftWallSignalFiltered(0.0f)
+        , _frontRightWallSignalFiltered(0.0f)
+        , _sideLeftWallSignalFiltered(0.0f)
+        , _sideRightWallSignalFiltered(0.0f)
+        , _accelBiasRightG(0.0f)
+        , _accelBiasForwardG(0.0f)
+        , _frontLeftWallState(false)
+        , _frontRightWallState(false)
+        , _sideLeftWallState(false)
+        , _sideRightWallState(false)
+        , _frontWallUsesFallbackDetection(false)
+        , _frontLeftWallSignalInitialized(false)
+        , _frontRightWallSignalInitialized(false)
+        , _sideLeftWallSignalInitialized(false)
+        , _sideRightWallSignalInitialized(false)
+        , _sideLeftPreviousSignalRise(0.0f)
+        , _sideRightPreviousSignalRise(0.0f)
+        , _sideLeftPreviousSignalRiseValid(false)
+        , _sideRightPreviousSignalRiseValid(false)
+        , _accelBiasInitialized(false)
+        , _encoderObservationDegraded(false)
     {
-        if (!ConfigureBackLeftImuForRuntime(imu, controlPeriodUs, true, accelFilterFreq))
+    }
+
+    bool RuntimeSensorSuite::Begin(const unsigned long controlPeriodUs)
+    {
+        _frontLeftWallSignalFiltered = 0.0f;
+        _frontRightWallSignalFiltered = 0.0f;
+        _sideLeftWallSignalFiltered = 0.0f;
+        _sideRightWallSignalFiltered = 0.0f;
+        _frontLeftInputAverage.Clear();
+        _frontRightInputAverage.Clear();
+        _sideLeftInputAverage.Clear();
+        _sideRightInputAverage.Clear();
+        _frontLeftWallState = false;
+        _frontRightWallState = false;
+        _sideLeftWallState = false;
+        _sideRightWallState = false;
+        _frontWallUsesFallbackDetection = false;
+        _frontLeftWallSignalInitialized = false;
+        _frontRightWallSignalInitialized = false;
+        _sideLeftWallSignalInitialized = false;
+        _sideRightWallSignalInitialized = false;
+        _sideLeftPreviousSignalRise = 0.0f;
+        _sideRightPreviousSignalRise = 0.0f;
+        _sideLeftPreviousSignalRiseValid = false;
+        _sideRightPreviousSignalRiseValid = false;
+        _accelBiasRightG = 0.0f;
+        _accelBiasForwardG = 0.0f;
+        _accelBiasInitialized = false;
+        _leftEncoderTotalCounts = 0;
+        _rightEncoderTotalCounts = 0;
+        _encoderObservationDegraded = false;
+        InitializeWallSensorLedOffState();
+
+        bool ok = true;
+    #if defined(ARDUINO_TEENSY41)
+        (void)MazeMap::App::Internal::GetSharedRobotRuntime().AppendTextLogLine("IMU_FR disabled; using IMU_BL only");
+
+        const bool imuBackLeftOk = _vehicle.BackLeftImu().Begin();
+        if (!imuBackLeftOk)
+        {
+            const uint8_t whoAmI = _vehicle.BackLeftImu().GetLastWhoAmI();
+            const uint8_t whoAmIMode3 = _vehicle.BackLeftImu().ReadWhoAmIWithSettings(400000UL, SPI_MODE3);
+            const uint8_t whoAmIMode0 = _vehicle.BackLeftImu().ReadWhoAmIWithSettings(400000UL, SPI_MODE0);
+            char whoAmIBuffer[3] = {};
+            char whoAmIMode3Buffer[3] = {};
+            char whoAmIMode0Buffer[3] = {};
+            FormatHexByte(whoAmI, whoAmIBuffer);
+            FormatHexByte(whoAmIMode3, whoAmIMode3Buffer);
+            FormatHexByte(whoAmIMode0, whoAmIMode0Buffer);
+            (void)MazeMap::App::Internal::GetSharedRobotRuntime().AppendTextLogFormatted(
+                "IMU_BL init failed (%s), WHO_AM_I=0x%s, INT1_pullup=%s, WHO_AM_I@mode3/400kHz=0x%s, WHO_AM_I@mode0/400kHz=0x%s",
+                _vehicle.BackLeftImu().GetLastBeginFailureReasonName(),
+                whoAmIBuffer,
+                ReadDrivenLowPinWithPullup(Pins::IMU_INT_1B) == LOW ? "low" : "high",
+                whoAmIMode3Buffer,
+                whoAmIMode0Buffer);
+        }
+        ok = imuBackLeftOk && ok;
+    #endif
+
+        if (ok)
+        {
+            ok = CalibrateGyroBias(controlPeriodUs, true) && ok;
+        }
+
+        return ok;
+    }
+
+    bool RuntimeSensorSuite::CalibrateGyroBias(const unsigned long controlPeriodUs, const bool enableAccelRuntime)
+    {
+        return CalibrateStationaryBackLeftGyroBias(controlPeriodUs, enableAccelRuntime);
+    }
+
+    StationaryImuCalibrationResult RuntimeSensorSuite::WaitForBackLeftImuCalibrationSettle(
+        const MazeMap::EncoderCountPair& startCounts,
+        const unsigned long settleMs) noexcept
+    {
+        const unsigned long settleStartMs = millis();
+        while ((millis() - settleStartMs) < settleMs)
+        {
+            if (MazeMap::HaveEncoderCountsChanged(startCounts, CaptureEncoderCountPairForCalibration()))
+            {
+                return StationaryImuCalibrationResult::RestartEncoderMotion;
+            }
+
+            delay(1);
+        }
+
+        return StationaryImuCalibrationResult::Success;
+    }
+
+    StationaryImuCalibrationResult RuntimeSensorSuite::AverageBackLeftImuSelfTestSample(
+        const std::uint16_t sampleCount,
+        const MazeMap::EncoderCountPair& startCounts,
+        AveragedBackLeftImuSample& averagedSample) noexcept
+    {
+        if (sampleCount == 0U)
         {
             return StationaryImuCalibrationResult::Failure;
         }
 
-        using SelfTestMode = MazeMap::Vehicle::ImuBackLeft::SELF_TEST_MODE;
+    #if defined(ARDUINO_TEENSY41)
+        const float accelMgPerLsb = _vehicle.BackLeftImu().AccelSensitivityMgPerLsb();
+        const float gyroDpsPerLsb = _vehicle.BackLeftImu().GyroSensitivityMdpsPerLsb() / 1000.0f;
+        double accelMgSumX = 0.0;
+        double accelMgSumY = 0.0;
+        double accelMgSumZ = 0.0;
+        double gyroDpsSumX = 0.0;
+        double gyroDpsSumY = 0.0;
+        double gyroDpsSumZ = 0.0;
 
-        imu.SetSelfTest(SelfTestMode::DISABLED, SelfTestMode::DISABLED);
+        for (std::uint16_t sampleIndex = 0U; sampleIndex < sampleCount; ++sampleIndex)
+        {
+            if (MazeMap::HaveEncoderCountsChanged(startCounts, CaptureEncoderCountPairForCalibration()))
+            {
+                return StationaryImuCalibrationResult::RestartEncoderMotion;
+            }
+
+            const MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::Axes accel = _vehicle.BackLeftImu().ReadAccel();
+            const MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::Axes gyro = _vehicle.BackLeftImu().ReadGyro();
+            accelMgSumX += static_cast<double>(accel.x) * accelMgPerLsb;
+            accelMgSumY += static_cast<double>(accel.y) * accelMgPerLsb;
+            accelMgSumZ += static_cast<double>(accel.z) * accelMgPerLsb;
+            gyroDpsSumX += static_cast<double>(gyro.x) * gyroDpsPerLsb;
+            gyroDpsSumY += static_cast<double>(gyro.y) * gyroDpsPerLsb;
+            gyroDpsSumZ += static_cast<double>(gyro.z) * gyroDpsPerLsb;
+            delay(kImuCalibrationSampleIntervalMs);
+        }
+
+        if (MazeMap::HaveEncoderCountsChanged(startCounts, CaptureEncoderCountPairForCalibration()))
+        {
+            return StationaryImuCalibrationResult::RestartEncoderMotion;
+        }
+
+        const double normalization = 1.0 / static_cast<double>(sampleCount);
+        averagedSample.accelMgX = static_cast<float>(accelMgSumX * normalization);
+        averagedSample.accelMgY = static_cast<float>(accelMgSumY * normalization);
+        averagedSample.accelMgZ = static_cast<float>(accelMgSumZ * normalization);
+        averagedSample.gyroDpsX = static_cast<float>(gyroDpsSumX * normalization);
+        averagedSample.gyroDpsY = static_cast<float>(gyroDpsSumY * normalization);
+        averagedSample.gyroDpsZ = static_cast<float>(gyroDpsSumZ * normalization);
+        return StationaryImuCalibrationResult::Success;
+    #else
+        (void)startCounts;
+        averagedSample = AveragedBackLeftImuSample{};
+        return StationaryImuCalibrationResult::Success;
+    #endif
+    }
+
+    StationaryImuCalibrationResult RuntimeSensorSuite::RunStationaryBackLeftImuSelfTest(
+        const unsigned long controlPeriodUs)
+    {
+    #if defined(ARDUINO_TEENSY41)
+        if (!ConfigureBackLeftImuForRuntime(
+                _vehicle.BackLeftImu(),
+                controlPeriodUs,
+                true,
+                Config::kMissionRuntimeAccelFilterFreq))
+        {
+            return StationaryImuCalibrationResult::Failure;
+        }
+
+        _vehicle.BackLeftImu().SetSelfTest(
+            MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::SELF_TEST_MODE::DISABLED,
+            MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::SELF_TEST_MODE::DISABLED);
+        (void)CaptureEncoderCountPairForCalibration();
+        const MazeMap::EncoderCountPair startCounts{};
         StationaryImuCalibrationResult settleResult =
-            WaitForImuCalibrationSettle(startCounts, kImuSelfTestSettleMs, captureEncoderCounts);
+            WaitForBackLeftImuCalibrationSettle(startCounts, kImuSelfTestSettleMs);
         if (settleResult != StationaryImuCalibrationResult::Success)
         {
             return settleResult;
@@ -129,39 +310,36 @@ namespace MazeMap
 
         AveragedBackLeftImuSample baseline{};
         StationaryImuCalibrationResult sampleResult =
-            AverageBackLeftImuSelfTestSample(
-                imu,
-                kImuSelfTestAverageSamples,
-                startCounts,
-                baseline,
-                captureEncoderCounts);
+            AverageBackLeftImuSelfTestSample(kImuSelfTestAverageSamples, startCounts, baseline);
         if (sampleResult != StationaryImuCalibrationResult::Success)
         {
             return sampleResult;
         }
 
-        imu.SetSelfTest(SelfTestMode::POSITIVE, SelfTestMode::POSITIVE);
-        settleResult = WaitForImuCalibrationSettle(startCounts, kImuSelfTestSettleMs, captureEncoderCounts);
+        _vehicle.BackLeftImu().SetSelfTest(
+            MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::SELF_TEST_MODE::POSITIVE,
+            MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::SELF_TEST_MODE::POSITIVE);
+        settleResult = WaitForBackLeftImuCalibrationSettle(startCounts, kImuSelfTestSettleMs);
         if (settleResult != StationaryImuCalibrationResult::Success)
         {
-            imu.SetSelfTest(SelfTestMode::DISABLED, SelfTestMode::DISABLED);
+            _vehicle.BackLeftImu().SetSelfTest(
+                MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::SELF_TEST_MODE::DISABLED,
+                MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::SELF_TEST_MODE::DISABLED);
             return settleResult;
         }
 
         AveragedBackLeftImuSample stimulated{};
-        sampleResult = AverageBackLeftImuSelfTestSample(
-            imu,
-            kImuSelfTestAverageSamples,
-            startCounts,
-            stimulated,
-            captureEncoderCounts);
-        imu.SetSelfTest(SelfTestMode::DISABLED, SelfTestMode::DISABLED);
+        sampleResult =
+            AverageBackLeftImuSelfTestSample(kImuSelfTestAverageSamples, startCounts, stimulated);
+        _vehicle.BackLeftImu().SetSelfTest(
+            MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::SELF_TEST_MODE::DISABLED,
+            MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::SELF_TEST_MODE::DISABLED);
         if (sampleResult != StationaryImuCalibrationResult::Success)
         {
             return sampleResult;
         }
 
-        settleResult = WaitForImuCalibrationSettle(startCounts, kImuSelfTestSettleMs, captureEncoderCounts);
+        settleResult = WaitForBackLeftImuCalibrationSettle(startCounts, kImuSelfTestSettleMs);
         if (settleResult != StationaryImuCalibrationResult::Success)
         {
             return settleResult;
@@ -195,43 +373,25 @@ namespace MazeMap
             gyroDeltaDpsY,
             gyroDeltaDpsZ);
         return StationaryImuCalibrationResult::Failure;
-    }
+    #else
+        (void)controlPeriodUs;
+        return StationaryImuCalibrationResult::Success;
     #endif
+    }
 
-    template <typename CaptureEncoderCounts>
-    static bool CalibrateStationaryBackLeftGyroBias(
-        MazeMap::Vehicle& vehicle,
-        unsigned long controlPeriodUs,
-        bool enableAccelRuntime,
-        float& gyroBiasRadps,
-        float* accelBiasXG,
-        float* accelBiasYG,
-        bool* accelBiasInitialized,
-        CaptureEncoderCounts& captureEncoderCounts,
-        MazeMap::Vehicle::ImuBackLeft::ACCEL_FILTER_FREQ accelFilterFreq =
-            MazeMap::Vehicle::ImuBackLeft::ACCEL_FILTER_FREQ::FRAC_1_400)
+    bool RuntimeSensorSuite::CalibrateStationaryBackLeftGyroBias(
+        const unsigned long controlPeriodUs,
+        const bool enableAccelRuntime)
     {
-        if (accelBiasInitialized != nullptr)
-        {
-            *accelBiasInitialized = false;
-        }
+        _accelBiasInitialized = false;
 
     #if defined(ARDUINO_TEENSY41)
-        const bool captureAccelBias =
-            enableAccelRuntime &&
-            (accelBiasXG != nullptr) &&
-            (accelBiasYG != nullptr);
+        const bool captureAccelBias = enableAccelRuntime;
         while (true)
         {
-            (void)captureEncoderCounts();
-            const MazeMap::EncoderCountPair startCounts{};
+            (void)CaptureEncoderCountPairForCalibration();
             const StationaryImuCalibrationResult selfTestResult =
-                RunStationaryBackLeftImuSelfTest(
-                    vehicle.IMU_BL,
-                    controlPeriodUs,
-                    startCounts,
-                    captureEncoderCounts,
-                    accelFilterFreq);
+                RunStationaryBackLeftImuSelfTest(controlPeriodUs);
             if (selfTestResult == StationaryImuCalibrationResult::RestartEncoderMotion)
             {
                 (void)MazeMap::App::Internal::GetSharedRobotRuntime().AppendTextLogLine(
@@ -243,24 +403,30 @@ namespace MazeMap
                 return false;
             }
 
-            if (!ConfigureBackLeftImuForRuntime(vehicle.IMU_BL, controlPeriodUs, enableAccelRuntime, accelFilterFreq))
+            if (!ConfigureBackLeftImuForRuntime(
+                    _vehicle.BackLeftImu(),
+                    controlPeriodUs,
+                    enableAccelRuntime,
+                    Config::kMissionRuntimeAccelFilterFreq))
             {
                 return false;
             }
 
+            (void)CaptureEncoderCountPairForCalibration();
+            const MazeMap::EncoderCountPair startCounts{};
             const unsigned long requiredSamples = MazeMap::ComputeGyroBiasSampleCount(
                 static_cast<unsigned long>(MazeMap::Config::kGyroBiasSamples),
                 kImuCalibrationSampleIntervalMs,
                 static_cast<unsigned long>(MazeMap::Config::kGyroBiasMinimumAveragingWindowMs));
             const unsigned long measurementStartMs = millis();
             double accumulatedRadps = 0.0;
-            double accumulatedAccelXG = 0.0;
-            double accumulatedAccelYG = 0.0;
+            double accumulatedAccelRightG = 0.0;
+            double accumulatedAccelForwardG = 0.0;
             unsigned long collectedSamples = 0UL;
             while ((collectedSamples < requiredSamples) ||
                 ((millis() - measurementStartMs) < static_cast<unsigned long>(MazeMap::Config::kGyroBiasMinimumAveragingWindowMs)))
             {
-                if (MazeMap::HaveEncoderCountsChanged(startCounts, captureEncoderCounts()))
+                if (MazeMap::HaveEncoderCountsChanged(startCounts, CaptureEncoderCountPairForCalibration()))
                 {
                     (void)MazeMap::App::Internal::GetSharedRobotRuntime().AppendTextLogLine(
                         "Encoder motion detected during gyro bias measurement; restarting IMU self-test");
@@ -271,11 +437,11 @@ namespace MazeMap
 
                 if (captureAccelBias)
                 {
-                    const MazeMap::Vehicle::ImuBackLeft::Axes accel = vehicle.IMU_BL.ReadAccel();
-                    accumulatedAccelXG += static_cast<double>(vehicle.IMU_BL.AccelRawToG(accel.x));
-                    accumulatedAccelYG += static_cast<double>(vehicle.IMU_BL.AccelRawToG(accel.y));
+                    const MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::Axes accel = _vehicle.BackLeftImu().ReadAccel();
+                    accumulatedAccelRightG += static_cast<double>(_vehicle.BackLeftImu().AccelRawToG(accel.x));
+                    accumulatedAccelForwardG += static_cast<double>(_vehicle.BackLeftImu().AccelRawToG(accel.y));
                 }
-                accumulatedRadps += static_cast<double>(ReadBackLeftGyroZRadpsRaw(vehicle));
+                accumulatedRadps += static_cast<double>(ReadBackLeftGyroZRadpsRaw(_vehicle));
                 ++collectedSamples;
                 delay(kImuCalibrationSampleIntervalMs);
             }
@@ -285,175 +451,38 @@ namespace MazeMap
                 continue;
             }
 
-            if (MazeMap::HaveEncoderCountsChanged(startCounts, captureEncoderCounts()))
+            if (MazeMap::HaveEncoderCountsChanged(startCounts, CaptureEncoderCountPairForCalibration()))
             {
                 (void)MazeMap::App::Internal::GetSharedRobotRuntime().AppendTextLogLine(
                     "Encoder motion detected after gyro bias capture; restarting IMU self-test");
                 continue;
             }
 
-            gyroBiasRadps = static_cast<float>(accumulatedRadps / static_cast<double>(collectedSamples));
+            _gyroBiasRadps = static_cast<float>(accumulatedRadps / static_cast<double>(collectedSamples));
             if (captureAccelBias)
             {
-                *accelBiasXG = static_cast<float>(accumulatedAccelXG / static_cast<double>(collectedSamples));
-                *accelBiasYG = static_cast<float>(accumulatedAccelYG / static_cast<double>(collectedSamples));
+                _accelBiasRightG = static_cast<float>(accumulatedAccelRightG / static_cast<double>(collectedSamples));
+                _accelBiasForwardG = static_cast<float>(accumulatedAccelForwardG / static_cast<double>(collectedSamples));
             }
-            if (accelBiasInitialized != nullptr)
-            {
-                *accelBiasInitialized = captureAccelBias;
-            }
+            _accelBiasInitialized = captureAccelBias;
             return true;
         }
     #else
         (void)controlPeriodUs;
         (void)enableAccelRuntime;
-        (void)accelBiasXG;
-        (void)accelBiasYG;
-        (void)accelBiasInitialized;
-        (void)captureEncoderCounts;
-        (void)accelFilterFreq;
-        gyroBiasRadps = EstimateMissionGyroBiasRadps(vehicle);
+        _gyroBiasRadps = EstimateMissionGyroBiasRadps(_vehicle);
         return true;
     #endif
     }
 
-    bool RuntimeSensorSuite::CaptureServices::ServiceWallRead() noexcept
-    {
-        return (_serviceWallRead != nullptr) ? _serviceWallRead(_context) : false;
-    }
-
-    void RuntimeSensorSuite::CaptureServices::CaptureImu() noexcept
-    {
-        if (_captureImu != nullptr)
-        {
-            _captureImu(_context);
-        }
-    }
-
-    RuntimeSensorSuite::RuntimeSensorSuite(MazeMap::Vehicle& vehicle, WallDistanceCalibration& wallCalibration)
-        : _vehicle(vehicle)
-        , _wallCalibration(wallCalibration)
-        , _gyroBiasRadps(0.0f)
-        , _frontLeft{}
-        , _frontRight{}
-        , _sideLeft{}
-        , _sideRight{}
-        , _frontLeftWallSignalFiltered(0.0f)
-        , _frontRightWallSignalFiltered(0.0f)
-        , _sideLeftWallSignalFiltered(0.0f)
-        , _sideRightWallSignalFiltered(0.0f)
-        , _accelBiasXG(0.0f)
-        , _accelBiasYG(0.0f)
-        , _frontLeftWallState(false)
-        , _frontRightWallState(false)
-        , _frontWallUsesFallbackDetection(false)
-        , _frontLeftWallSignalInitialized(false)
-        , _frontRightWallSignalInitialized(false)
-        , _sideLeftWallSignalInitialized(false)
-        , _sideRightWallSignalInitialized(false)
-        , _sideLeftPreviousSignalRise(0.0f)
-        , _sideRightPreviousSignalRise(0.0f)
-        , _sideLeftPreviousSignalRiseValid(false)
-        , _sideRightPreviousSignalRiseValid(false)
-        , _accelBiasInitialized(false)
-    {
-    }
-
-    bool RuntimeSensorSuite::Begin(const unsigned long controlPeriodUs)
-    {
-        _frontLeft = {};
-        _frontRight = {};
-        _sideLeft = {};
-        _sideRight = {};
-        _frontLeftWallSignalFiltered = 0.0f;
-        _frontRightWallSignalFiltered = 0.0f;
-        _sideLeftWallSignalFiltered = 0.0f;
-        _sideRightWallSignalFiltered = 0.0f;
-        _frontLeftInputAverage.Clear();
-        _frontRightInputAverage.Clear();
-        _sideLeftInputAverage.Clear();
-        _sideRightInputAverage.Clear();
-        _frontLeftWallState = false;
-        _frontRightWallState = false;
-        _frontWallUsesFallbackDetection = false;
-        _frontLeftWallSignalInitialized = false;
-        _frontRightWallSignalInitialized = false;
-        _sideLeftWallSignalInitialized = false;
-        _sideRightWallSignalInitialized = false;
-        _sideLeftPreviousSignalRise = 0.0f;
-        _sideRightPreviousSignalRise = 0.0f;
-        _sideLeftPreviousSignalRiseValid = false;
-        _sideRightPreviousSignalRiseValid = false;
-        _accelBiasXG = 0.0f;
-        _accelBiasYG = 0.0f;
-        _accelBiasInitialized = false;
-        _leftEncoderTotalCounts = 0;
-        _rightEncoderTotalCounts = 0;
-        InitializeWallSensorLedOffState();
-
-        bool ok = true;
-    #if defined(ARDUINO_TEENSY41)
-        (void)MazeMap::App::Internal::GetSharedRobotRuntime().AppendTextLogLine("IMU_FR disabled; using IMU_BL only");
-
-        const bool imuBackLeftOk = _vehicle.IMU_BL.Begin();
-        if (!imuBackLeftOk)
-        {
-            const uint8_t whoAmI = _vehicle.IMU_BL.GetLastWhoAmI();
-            const uint8_t whoAmIMode3 = _vehicle.IMU_BL.ReadWhoAmIWithSettings(400000UL, SPI_MODE3);
-            const uint8_t whoAmIMode0 = _vehicle.IMU_BL.ReadWhoAmIWithSettings(400000UL, SPI_MODE0);
-            char whoAmIBuffer[3] = {};
-            char whoAmIMode3Buffer[3] = {};
-            char whoAmIMode0Buffer[3] = {};
-            FormatHexByte(whoAmI, whoAmIBuffer);
-            FormatHexByte(whoAmIMode3, whoAmIMode3Buffer);
-            FormatHexByte(whoAmIMode0, whoAmIMode0Buffer);
-            (void)MazeMap::App::Internal::GetSharedRobotRuntime().AppendTextLogFormatted(
-                "IMU_BL init failed (%s), WHO_AM_I=0x%s, INT1_pullup=%s, WHO_AM_I@mode3/400kHz=0x%s, WHO_AM_I@mode0/400kHz=0x%s",
-                _vehicle.IMU_BL.GetLastBeginFailureReasonName(),
-                whoAmIBuffer,
-                ReadDrivenLowPinWithPullup(Pins::IMU_INT_1B) == LOW ? "low" : "high",
-                whoAmIMode3Buffer,
-                whoAmIMode0Buffer);
-        }
-        ok = imuBackLeftOk && ok;
-    #endif
-
-        if (ok)
-        {
-            ok = CalibrateGyroBias(controlPeriodUs, true) && ok;
-        }
-
-        return ok;
-    }
-
-    bool RuntimeSensorSuite::CalibrateGyroBias(const unsigned long controlPeriodUs, const bool enableAccelRuntime)
-    {
-        auto captureEncoderCounts = [this]() noexcept
-        {
-            const MazeMap::EncoderObs observation = CaptureEncoderObservation(0.0f);
-            return MazeMap::EncoderCountPair{ observation.totalLeftCounts, observation.totalRightCounts };
-        };
-
-        return CalibrateStationaryBackLeftGyroBias(
-            _vehicle,
-            controlPeriodUs,
-            enableAccelRuntime,
-            _gyroBiasRadps,
-            &_accelBiasXG,
-            &_accelBiasYG,
-            &_accelBiasInitialized,
-            captureEncoderCounts,
-            Config::kMissionRuntimeAccelFilterFreq);
-    }
-
     void RuntimeSensorSuite::ResetSideWallMemory() noexcept
     {
-        _sideLeft = {};
-        _sideRight = {};
         _sideLeftWallSignalFiltered = 0.0f;
         _sideRightWallSignalFiltered = 0.0f;
         _sideLeftInputAverage.Clear();
         _sideRightInputAverage.Clear();
+        _sideLeftWallState = false;
+        _sideRightWallState = false;
         _sideLeftWallSignalInitialized = false;
         _sideRightWallSignalInitialized = false;
         _sideLeftPreviousSignalRise = 0.0f;
@@ -462,149 +491,143 @@ namespace MazeMap
         _sideRightPreviousSignalRiseValid = false;
     }
 
-    void RuntimeSensorSuite::Capture(
+    void RuntimeSensorSuite::BeginInterlacedCapture(
         const bool stationary,
         const MazeMap::VehicleState& state,
         SensorSnapshot& snapshot,
-        const CaptureHandler callback,
-        void* const callbackContext,
+        const bool captureWalls,
         const bool captureEncoders,
         const float encoderDtSeconds)
     {
+        if (_interlacedCaptureActive && _interlacedCaptureWalls)
+        {
+            AbortAsyncWallSensorSweepRead(_interlacedWallRead);
+            _frontLeftLedOffCommandUs = _interlacedWallRead.nextFrontLeftLedOffCommandUs;
+            _frontRightLedOffCommandUs = _interlacedWallRead.nextFrontRightLedOffCommandUs;
+            _sideLeftLedOffCommandUs = _interlacedWallRead.nextSideLeftLedOffCommandUs;
+            _sideRightLedOffCommandUs = _interlacedWallRead.nextSideRightLedOffCommandUs;
+        }
+        ClearInterlacedCaptureState();
+
         snapshot = SensorSnapshot{};
+        _interlacedCaptureActive = true;
+        _interlacedCaptureWalls = captureWalls;
+        _interlacedCaptureStationary = stationary;
+        _interlacedCaptureSnapshot = &snapshot;
+        _interlacedCaptureState = &state;
         PublishEncoderTotals(snapshot);
         if (captureEncoders)
         {
             CaptureEncoderSnapshot(snapshot, encoderDtSeconds);
         }
 
-        AsyncWallSensorSweepRead wallRead{};
+        if (!captureWalls)
+        {
+            return;
+        }
+
         StartAsyncWallSensorSweepRead(
-            _vehicle.FrontLeft,
+            _vehicle.FrontLeftWallSensor(),
             _frontLeftLedOffCommandUs,
-            _vehicle.FrontRight,
+            _vehicle.FrontRightWallSensor(),
             _frontRightLedOffCommandUs,
-            _vehicle.SideLeft,
+            _vehicle.SideLeftWallSensor(),
             _sideLeftLedOffCommandUs,
-            _vehicle.SideRight,
+            _vehicle.SideRightWallSensor(),
             _sideRightLedOffCommandUs,
-            wallRead);
+            _interlacedWallRead);
+    }
 
-        bool imuCaptured = false;
-        class CaptureContext final
+    void RuntimeSensorSuite::CaptureInterlacedInertialSnapshot() noexcept
+    {
+        if (!_interlacedCaptureActive ||
+            (_interlacedCaptureSnapshot == nullptr) ||
+            _interlacedCaptureImuCaptured)
         {
-        public:
-            CaptureContext(
-                AsyncWallSensorSweepRead* wallRead,
-                bool* imuCaptured,
-                RuntimeSensorSuite* owner,
-                const bool stationary,
-                SensorSnapshot* snapshot) noexcept
-                : _wallRead(wallRead)
-                , _imuCaptured(imuCaptured)
-                , _owner(owner)
-                , _stationary(stationary)
-                , _snapshot(snapshot)
-            {
-            }
-
-            AsyncWallSensorSweepRead& WallRead() const noexcept
-            {
-                return *_wallRead;
-            }
-
-            bool& ImuCaptured() const noexcept
-            {
-                return *_imuCaptured;
-            }
-
-            RuntimeSensorSuite& Owner() const noexcept
-            {
-                return *_owner;
-            }
-
-            bool Stationary() const noexcept
-            {
-                return _stationary;
-            }
-
-            SensorSnapshot& Snapshot() const noexcept
-            {
-                return *_snapshot;
-            }
-
-        private:
-            AsyncWallSensorSweepRead* _wallRead{};
-            bool* _imuCaptured{};
-            RuntimeSensorSuite* _owner{};
-            bool _stationary{};
-            SensorSnapshot* _snapshot{};
-        } captureContext{ &wallRead, &imuCaptured, this, stationary, &snapshot };
-
-        CaptureServices services{};
-        services._context = &captureContext;
-        services._serviceWallRead = [](void* rawContext) noexcept -> bool
-        {
-            auto& context = *static_cast<CaptureContext*>(rawContext);
-            return ServiceAsyncWallSensorSweepRead(context.WallRead());
-        };
-        services._captureImu = [](void* rawContext) noexcept
-        {
-            auto& context = *static_cast<CaptureContext*>(rawContext);
-            (void)ServiceAsyncWallSensorSweepRead(context.WallRead());
-            if (!context.ImuCaptured())
-            {
-                context.Owner().CaptureInertialSnapshot(context.Stationary(), context.Snapshot());
-                context.ImuCaptured() = true;
-            }
-            (void)ServiceAsyncWallSensorSweepRead(context.WallRead());
-        };
-
-        if (callback != nullptr)
-        {
-            callback(callbackContext, snapshot, services);
-        }
-        else
-        {
-            services.CaptureImu();
+            return;
         }
 
-        if (!imuCaptured)
+        CaptureInertialSnapshot(_interlacedCaptureStationary, *_interlacedCaptureSnapshot);
+        _interlacedCaptureImuCaptured = true;
+    }
+
+    void RuntimeSensorSuite::ServiceFrontWallCollection() noexcept
+    {
+        if (_interlacedWallRead.stage == AsyncWallSensorSweepStage::Front)
         {
-            services.CaptureImu();
+            (void)ServiceAsyncWallSensorSweepRead(_interlacedWallRead);
+        }
+    }
+
+    void RuntimeSensorSuite::ServiceLeftWallCollection() noexcept
+    {
+        if (_interlacedWallRead.stage == AsyncWallSensorSweepStage::Left)
+        {
+            (void)ServiceAsyncWallSensorSweepRead(_interlacedWallRead);
+        }
+    }
+
+    void RuntimeSensorSuite::ServiceRightWallCollection() noexcept
+    {
+        if (_interlacedWallRead.stage == AsyncWallSensorSweepStage::Right)
+        {
+            (void)ServiceAsyncWallSensorSweepRead(_interlacedWallRead);
+        }
+    }
+
+    void RuntimeSensorSuite::FinishInterlacedCapture()
+    {
+        if (!_interlacedCaptureActive || (_interlacedCaptureSnapshot == nullptr))
+        {
+            return;
         }
 
-        (void)services.ServiceWallRead();
-        if (wallRead.active)
+        SensorSnapshot& snapshot = *_interlacedCaptureSnapshot;
+        const MazeMap::VehicleState* const state = _interlacedCaptureState;
+        if (!_interlacedCaptureImuCaptured)
         {
-            AwaitAsyncWallSensorSweepRead(wallRead);
+            CaptureInterlacedInertialSnapshot();
         }
 
-        _frontLeftLedOffCommandUs = wallRead.nextFrontLeftLedOffCommandUs;
-        _frontRightLedOffCommandUs = wallRead.nextFrontRightLedOffCommandUs;
-        _sideLeftLedOffCommandUs = wallRead.nextSideLeftLedOffCommandUs;
-        _sideRightLedOffCommandUs = wallRead.nextSideRightLedOffCommandUs;
+        if (!_interlacedCaptureWalls)
+        {
+            ClearInterlacedCaptureState();
+            return;
+        }
+
+        ServiceFrontWallCollection();
+        ServiceLeftWallCollection();
+        ServiceRightWallCollection();
+        if (_interlacedWallRead.active)
+        {
+            AwaitAsyncWallSensorSweepRead(_interlacedWallRead);
+        }
+
+        _frontLeftLedOffCommandUs = _interlacedWallRead.nextFrontLeftLedOffCommandUs;
+        _frontRightLedOffCommandUs = _interlacedWallRead.nextFrontRightLedOffCommandUs;
+        _sideLeftLedOffCommandUs = _interlacedWallRead.nextSideLeftLedOffCommandUs;
+        _sideRightLedOffCommandUs = _interlacedWallRead.nextSideRightLedOffCommandUs;
 
         const WallSensorCalibrationInput frontLeftRawInput =
-            BuildWallSensorCalibrationInput(WallSensorId::FrontLeft, wallRead.frontLeftSample);
+            BuildWallSensorCalibrationInput(WallSensorId::FrontLeft, _interlacedWallRead.frontLeftSample);
         const WallSensorCalibrationInput frontRightRawInput =
-            BuildWallSensorCalibrationInput(WallSensorId::FrontRight, wallRead.frontRightSample);
+            BuildWallSensorCalibrationInput(WallSensorId::FrontRight, _interlacedWallRead.frontRightSample);
         const WallSensorCalibrationInput sideLeftRawInput =
-            BuildWallSensorCalibrationInput(WallSensorId::SideLeft, wallRead.sideLeftSample);
+            BuildWallSensorCalibrationInput(WallSensorId::SideLeft, _interlacedWallRead.sideLeftSample);
         const WallSensorCalibrationInput sideRightRawInput =
-            BuildWallSensorCalibrationInput(WallSensorId::SideRight, wallRead.sideRightSample);
+            BuildWallSensorCalibrationInput(WallSensorId::SideRight, _interlacedWallRead.sideRightSample);
         const WallSensorCalibrationInput frontLeftInput = _frontLeftInputAverage.PushAndAverage(frontLeftRawInput);
         const WallSensorCalibrationInput frontRightInput = _frontRightInputAverage.PushAndAverage(frontRightRawInput);
         const WallSensorCalibrationInput sideLeftInput = _sideLeftInputAverage.PushAndAverage(sideLeftRawInput);
         const WallSensorCalibrationInput sideRightInput = _sideRightInputAverage.PushAndAverage(sideRightRawInput);
 
-        snapshot.frontLeft = BuildWallSensorTelemetry(WallSensorId::FrontLeft, frontLeftInput);
-        snapshot.frontRight = BuildWallSensorTelemetry(WallSensorId::FrontRight, frontRightInput);
-        snapshot.sideLeft = BuildWallSensorTelemetry(WallSensorId::SideLeft, sideLeftInput);
-        snapshot.sideRight = BuildWallSensorTelemetry(WallSensorId::SideRight, sideRightInput);
-        snapshot.frontTiming = frontLeftRawInput.timing;
-        snapshot.leftTiming = sideLeftInput.timing;
-        snapshot.rightTiming = sideRightInput.timing;
+        WallSensorTelemetry frontLeftTelemetry = BuildWallSensorTelemetry(WallSensorId::FrontLeft, frontLeftInput);
+        WallSensorTelemetry frontRightTelemetry = BuildWallSensorTelemetry(WallSensorId::FrontRight, frontRightInput);
+        WallSensorTelemetry sideLeftTelemetry = BuildWallSensorTelemetry(WallSensorId::SideLeft, sideLeftInput);
+        WallSensorTelemetry sideRightTelemetry = BuildWallSensorTelemetry(WallSensorId::SideRight, sideRightInput);
+        snapshot.SetFrontTiming(frontLeftRawInput.timing);
+        snapshot.SetLeftTiming(sideLeftInput.timing);
+        snapshot.SetRightTiming(sideRightInput.timing);
 
         float sideWallOnThresholdM = Config::kSideWallOnThresholdM;
         float sideWallOffThresholdM = Config::kSideWallOffThresholdM;
@@ -614,40 +637,69 @@ namespace MazeMap
             sideWallOnThresholdM,
             sideWallOffThresholdM);
 
-        snapshot.frontLeftDistanceM = UpdateChannelFromMeasuredDistance(_frontLeft, snapshot.frontLeft.distanceM);
-        snapshot.frontRightDistanceM = UpdateChannelFromMeasuredDistance(_frontRight, snapshot.frontRight.distanceM);
-        snapshot.frontLeftDifferentialLight = snapshot.frontLeft.differentialLight;
-        snapshot.frontRightDifferentialLight = snapshot.frontRight.differentialLight;
+        snapshot.SetFrontLeftDistanceM(frontLeftTelemetry.distanceM);
+        snapshot.SetFrontRightDistanceM(frontRightTelemetry.distanceM);
+        snapshot.SetFrontLeftDifferentialLight(frontLeftTelemetry.differentialLight);
+        snapshot.SetFrontRightDifferentialLight(frontRightTelemetry.differentialLight);
 
         (void)TryComputeSideWallSignalDistanceM(
             _wallCalibration,
             WallSensorId::SideLeft,
-            snapshot.sideLeft.differentialLight,
-            snapshot.sideLeft.distanceM);
+            sideLeftTelemetry.differentialLight,
+            sideLeftTelemetry.distanceM);
         (void)TryComputeSideWallSignalDistanceM(
             _wallCalibration,
             WallSensorId::SideRight,
-            snapshot.sideRight.differentialLight,
-            snapshot.sideRight.distanceM);
-        snapshot.sideLeftDistanceM = UpdateChannelFromMeasuredDistance(_sideLeft, snapshot.sideLeft.distanceM);
-        snapshot.sideRightDistanceM = UpdateChannelFromMeasuredDistance(_sideRight, snapshot.sideRight.distanceM);
-        snapshot.sideLeftDifferentialLight = snapshot.sideLeft.differentialLight;
-        snapshot.sideRightDifferentialLight = snapshot.sideRight.differentialLight;
+            sideRightTelemetry.differentialLight,
+            sideRightTelemetry.distanceM);
+        WallSensorPreprocessor wallPreprocessor{};
+        const WallObs frontLeftWallSensorObservation = wallPreprocessor.process(
+            _vehicle.FrontLeftWallSensor(),
+            frontLeftTelemetry.ambientLight,
+            frontLeftTelemetry.litLight,
+            frontLeftTelemetry.distanceM);
+        const WallObs frontRightWallSensorObservation = wallPreprocessor.process(
+            _vehicle.FrontRightWallSensor(),
+            frontRightTelemetry.ambientLight,
+            frontRightTelemetry.litLight,
+            frontRightTelemetry.distanceM);
+        const WallObs sideLeftWallSensorObservation = wallPreprocessor.process(
+            _vehicle.SideLeftWallSensor(),
+            sideLeftTelemetry.ambientLight,
+            sideLeftTelemetry.litLight,
+            sideLeftTelemetry.distanceM);
+        const WallObs sideRightWallSensorObservation = wallPreprocessor.process(
+            _vehicle.SideRightWallSensor(),
+            sideRightTelemetry.ambientLight,
+            sideRightTelemetry.litLight,
+            sideRightTelemetry.distanceM);
+        snapshot.SetSideLeftDistanceM(sideLeftTelemetry.distanceM);
+        snapshot.SetSideRightDistanceM(sideRightTelemetry.distanceM);
+        snapshot.SetSideLeftDifferentialLight(sideLeftTelemetry.differentialLight);
+        snapshot.SetSideRightDifferentialLight(sideRightTelemetry.differentialLight);
 
-        snapshot.frontWall = UpdateFrontWallState(
+        snapshot.SetFrontWall(UpdateFrontWallState(
             frontLeftInput.ambientLight,
             frontLeftInput.measuredValue,
             frontRightInput.ambientLight,
             frontRightInput.measuredValue,
-            (std::min)(snapshot.frontLeftDistanceM, snapshot.frontRightDistanceM));
-        snapshot.frontLeftWall = _frontLeftWallState;
-        snapshot.frontRightWall = _frontRightWallState;
-        snapshot.frontWallObservationValid = false;
-        snapshot.frontWallUsesFallbackDetection = _frontWallUsesFallbackDetection;
-        snapshot.frontWallUsesCharacterizationDetection = false;
+            (std::min)(snapshot.FrontLeftDistanceM(), snapshot.FrontRightDistanceM())));
+        snapshot.SetFrontLeftWall(_frontLeftWallState);
+        snapshot.SetFrontRightWall(_frontRightWallState);
+        snapshot.SetFrontWallObservationValid(
+            std::isfinite(snapshot.FrontLeftDistanceM()) &&
+            (snapshot.FrontLeftDistanceM() > 0.0f) &&
+            std::isfinite(snapshot.FrontRightDistanceM()) &&
+            (snapshot.FrontRightDistanceM() > 0.0f));
+        snapshot.SetFrontWallUsesFallbackDetection(_frontWallUsesFallbackDetection);
+        snapshot.SetFrontWallUsesCharacterizationDetection(false);
 
-        const bool sideLeftWindowValid = IsSideWallDetectionWindowValid(state, _vehicle.SideLeft);
-        const bool sideRightWindowValid = IsSideWallDetectionWindowValid(state, _vehicle.SideRight);
+        const bool sideLeftWindowValid =
+            (state != nullptr) &&
+            IsSideWallDetectionWindowValid(*state, _vehicle.SideLeftWallSensor());
+        const bool sideRightWindowValid =
+            (state != nullptr) &&
+            IsSideWallDetectionWindowValid(*state, _vehicle.SideRightWallSensor());
 
         float sideLeftSignalRise = 0.0f;
         float sideLeftLatchRiseThreshold = 0.0f;
@@ -699,31 +751,31 @@ namespace MazeMap
             (sideRightSignalRise >= sideRightLatchRiseThreshold) :
             (sideRightFallbackValid && (sideRightInput.fallbackDistanceM < sideWallOffThresholdM));
 
-        snapshot.leftTransitionDetected = DetectTransitionFromSignalRise(
+        snapshot.SetLeftTransitionDetected(DetectTransitionFromSignalRise(
             sideLeftWindowValid,
             sideLeftSignalMetricsValid,
             sideLeftSignalRise,
             sideLeftLatchRiseThreshold * Config::kSideWallTransitionSignalFractionOfLatch,
             _sideLeftPreviousSignalRise,
-            _sideLeftPreviousSignalRiseValid);
-        snapshot.rightTransitionDetected = DetectTransitionFromSignalRise(
+            _sideLeftPreviousSignalRiseValid));
+        snapshot.SetRightTransitionDetected(DetectTransitionFromSignalRise(
             sideRightWindowValid,
             sideRightSignalMetricsValid,
             sideRightSignalRise,
             sideRightLatchRiseThreshold * Config::kSideWallTransitionSignalFractionOfLatch,
             _sideRightPreviousSignalRise,
-            _sideRightPreviousSignalRiseValid);
-        snapshot.leftWallObservationWindowValid = sideLeftObservationEligible;
-        snapshot.rightWallObservationWindowValid = sideRightObservationEligible;
-        snapshot.leftDistanceValidForControl =
+            _sideRightPreviousSignalRiseValid));
+        snapshot.SetLeftWallObservationWindowValid(sideLeftObservationEligible);
+        snapshot.SetRightWallObservationWindowValid(sideRightObservationEligible);
+        snapshot.SetLeftDistanceValidForControl(
             sideLeftObservationEligible &&
-            !snapshot.leftTransitionDetected &&
-            sideLeftControlRangeValid;
-        snapshot.rightDistanceValidForControl =
+            !snapshot.LeftTransitionDetected() &&
+            sideLeftControlRangeValid);
+        snapshot.SetRightDistanceValidForControl(
             sideRightObservationEligible &&
-            !snapshot.rightTransitionDetected &&
-            sideRightControlRangeValid;
-        snapshot.leftWall = UpdateSideWallState(
+            !snapshot.RightTransitionDetected() &&
+            sideRightControlRangeValid);
+        snapshot.SetLeftWall(UpdateSideWallState(
             WallSensorId::SideLeft,
             sideLeftInput.differentialLight,
             sideLeftInput.fallbackDistanceM,
@@ -732,8 +784,8 @@ namespace MazeMap
             sideLeftWindowValid,
             _sideLeftWallSignalFiltered,
             _sideLeftWallSignalInitialized,
-            _sideLeft.wall);
-        snapshot.rightWall = UpdateSideWallState(
+            _sideLeftWallState));
+        snapshot.SetRightWall(UpdateSideWallState(
             WallSensorId::SideRight,
             sideRightInput.differentialLight,
             sideRightInput.fallbackDistanceM,
@@ -742,41 +794,62 @@ namespace MazeMap
             sideRightWindowValid,
             _sideRightWallSignalFiltered,
             _sideRightWallSignalInitialized,
-            _sideRight.wall);
-        snapshot.leftWallObservation = ComputeSideWallObservationHit(
+            _sideRightWallState));
+        snapshot.SetLeftWallObservation(ComputeSideWallObservationHit(
             WallSensorId::SideLeft,
             sideLeftInput.differentialLight,
             sideLeftInput.fallbackDistanceM,
             sideWallOnThresholdM,
-            sideLeftObservationEligible);
-        snapshot.rightWallObservation = ComputeSideWallObservationHit(
+            sideLeftObservationEligible));
+        snapshot.SetRightWallObservation(ComputeSideWallObservationHit(
             WallSensorId::SideRight,
             sideRightInput.differentialLight,
             sideRightInput.fallbackDistanceM,
             sideWallOnThresholdM,
-            sideRightObservationEligible);
+            sideRightObservationEligible));
 
-        snapshot.frontLeft.wall = snapshot.frontLeftWall;
-        snapshot.frontRight.wall = snapshot.frontRightWall;
-        snapshot.sideLeft.wall = snapshot.leftWall;
-        snapshot.sideRight.wall = snapshot.rightWall;
-        snapshot.frontSkewM = snapshot.frontLeftDistanceM - snapshot.frontRightDistanceM;
-        snapshot.corridorErrorM = MazeMap::App::Internal::Runtime::ComputeCorridorError(
-            snapshot.sideLeftDistanceM,
-            snapshot.sideRightDistanceM,
-            snapshot.leftDistanceValidForControl,
-            snapshot.rightDistanceValidForControl,
-            _wallCalibration.GetExpectedSideWallDistanceM());
+        frontLeftTelemetry.wall = snapshot.HasFrontLeftWall();
+        frontRightTelemetry.wall = snapshot.HasFrontRightWall();
+        sideLeftTelemetry.wall = snapshot.HasLeftWall();
+        sideRightTelemetry.wall = snapshot.HasRightWall();
+        snapshot.SetFrontLeftTelemetry(frontLeftTelemetry);
+        snapshot.SetFrontRightTelemetry(frontRightTelemetry);
+        snapshot.SetSideLeftTelemetry(sideLeftTelemetry);
+        snapshot.SetSideRightTelemetry(sideRightTelemetry);
+        snapshot.SetFrontLeftWallSensorObservation(frontLeftWallSensorObservation);
+        snapshot.SetFrontRightWallSensorObservation(frontRightWallSensorObservation);
+        snapshot.SetSideLeftWallSensorObservation(sideLeftWallSensorObservation);
+        snapshot.SetSideRightWallSensorObservation(sideRightWallSensorObservation);
+        snapshot.SetFrontSkewM(snapshot.FrontLeftDistanceM() - snapshot.FrontRightDistanceM());
+        snapshot.SetCorridorErrorM(MazeMap::App::Internal::Runtime::ComputeCorridorError(
+            snapshot.SideLeftDistanceM(),
+            snapshot.SideRightDistanceM(),
+            snapshot.LeftDistanceValidForControl(),
+            snapshot.RightDistanceValidForControl(),
+            _wallCalibration.GetExpectedSideWallDistanceM()));
+
+        ClearInterlacedCaptureState();
+    }
+
+    void RuntimeSensorSuite::ClearInterlacedCaptureState() noexcept
+    {
+        _interlacedWallRead = AsyncWallSensorSweepRead{};
+        _interlacedCaptureState = nullptr;
+        _interlacedCaptureSnapshot = nullptr;
+        _interlacedCaptureActive = false;
+        _interlacedCaptureWalls = false;
+        _interlacedCaptureStationary = false;
+        _interlacedCaptureImuCaptured = false;
     }
 
     float RuntimeSensorSuite::GetGyroSensitivityMdpsPerLsb() const noexcept
     {
-        return _vehicle.IMU_BL.GyroSensitivityMdpsPerLsb();
+        return _vehicle.BackLeftImu().GyroSensitivityMdpsPerLsb();
     }
 
     float RuntimeSensorSuite::GetAccelSensitivityMgPerLsb() const noexcept
     {
-        return _vehicle.IMU_BL.AccelSensitivityMgPerLsb();
+        return _vehicle.BackLeftImu().AccelSensitivityMgPerLsb();
     }
 
     float RuntimeSensorSuite::GetGyroBiasRadps() const noexcept
@@ -789,49 +862,146 @@ namespace MazeMap
         return _accelBiasInitialized;
     }
 
-    float RuntimeSensorSuite::GetAccelBiasXG() const noexcept
+    float RuntimeSensorSuite::GetAccelBiasRightG() const noexcept
     {
-        return _accelBiasXG;
+        return _accelBiasRightG;
     }
 
-    float RuntimeSensorSuite::GetAccelBiasYG() const noexcept
+    float RuntimeSensorSuite::GetAccelBiasForwardG() const noexcept
     {
-        return _accelBiasYG;
+        return _accelBiasForwardG;
     }
 
     MazeMap::EncoderObs RuntimeSensorSuite::CaptureEncoderObservation(const float dtSeconds) noexcept
     {
         MazeMap::EncoderObs observation = _vehicle.CaptureEncoderObservation(dtSeconds);
-        _leftEncoderTotalCounts += static_cast<std::int64_t>(observation.totalLeftCounts);
-        _rightEncoderTotalCounts += static_cast<std::int64_t>(observation.totalRightCounts);
+        _leftEncoderTotalCounts += static_cast<std::int64_t>(observation.TotalLeftCounts());
+        _rightEncoderTotalCounts += static_cast<std::int64_t>(observation.TotalRightCounts());
         return observation;
+    }
+
+    MazeMap::EncoderCountPair RuntimeSensorSuite::CaptureEncoderCountPairForCalibration() noexcept
+    {
+        const MazeMap::EncoderObs observation = CaptureEncoderObservation(0.0f);
+        return MazeMap::EncoderCountPair{ observation.TotalLeftCounts(), observation.TotalRightCounts() };
+    }
+
+    bool RuntimeSensorSuite::IsEncoderObservationUsableForPrediction(
+        const MazeMap::EncoderObs& observation,
+        const float dtSeconds,
+        const char*& degradedReason) const noexcept
+    {
+        degradedReason = "ok";
+        if (!std::isfinite(dtSeconds) || !(dtSeconds > 0.0f))
+        {
+            degradedReason = "invalid_encoder_dt";
+            return false;
+        }
+
+        const float wheelRadiusM = MazeMap::Vehicle::GetDriveWheelRadiusM();
+        if (!std::isfinite(wheelRadiusM) || !(wheelRadiusM > 0.0f))
+        {
+            degradedReason = "invalid_vehicle_wheel_radius";
+            return false;
+        }
+
+        const float leftDistanceFromCountsM =
+            MazeMap::Vehicle::DriveEncoderDistanceFromCounts(observation.TotalLeftCounts());
+        const float rightDistanceFromCountsM =
+            MazeMap::Vehicle::DriveEncoderDistanceFromCounts(observation.TotalRightCounts());
+        if (!std::isfinite(leftDistanceFromCountsM) || !std::isfinite(rightDistanceFromCountsM))
+        {
+            degradedReason = "nonfinite_encoder_count_distance";
+            return false;
+        }
+
+        if (!std::isfinite(observation.LeftDistanceDeltaM()) ||
+            !std::isfinite(observation.RightDistanceDeltaM()) ||
+            !std::isfinite(observation.LeftVelocityMps()) ||
+            !std::isfinite(observation.RightVelocityMps()) ||
+            !std::isfinite(observation.LeftWheelSpeedRadps()) ||
+            !std::isfinite(observation.RightWheelSpeedRadps()))
+        {
+            degradedReason = "nonfinite_encoder_observation";
+            return false;
+        }
+
+        const float leftVelocityFromWheelSpeedMps =
+            MazeMap::Vehicle::WheelLinearVelocityFromWheelSpeed(observation.LeftWheelSpeedRadps());
+        const float rightVelocityFromWheelSpeedMps =
+            MazeMap::Vehicle::WheelLinearVelocityFromWheelSpeed(observation.RightWheelSpeedRadps());
+        if (!std::isfinite(leftVelocityFromWheelSpeedMps) ||
+            !std::isfinite(rightVelocityFromWheelSpeedMps))
+        {
+            degradedReason = "nonfinite_vehicle_encoder_velocity";
+            return false;
+        }
+
+        return true;
+    }
+
+    void RuntimeSensorSuite::ReportEncoderObservationState(
+        const bool validForPrediction,
+        const char* const degradedReason,
+        const MazeMap::EncoderObs& observation,
+        const float dtSeconds) noexcept
+    {
+        if (validForPrediction)
+        {
+            if (_encoderObservationDegraded)
+            {
+                (void)MazeMap::App::Internal::GetSharedRobotRuntime().AppendTextLogLine(
+                    "Encoder observation recovered; prediction input restored");
+            }
+            _encoderObservationDegraded = false;
+            return;
+        }
+
+        if (!_encoderObservationDegraded)
+        {
+            (void)MazeMap::App::Internal::GetSharedRobotRuntime().AppendTextLogFormatted(
+                "Encoder observation degraded; prediction input omitted; reason=%s; dt_s=%.9g; left_counts=%ld; right_counts=%ld; left_speed_radps=%.9g; right_speed_radps=%.9g",
+                (degradedReason != nullptr) ? degradedReason : "unknown",
+                static_cast<double>(dtSeconds),
+                static_cast<long>(observation.TotalLeftCounts()),
+                static_cast<long>(observation.TotalRightCounts()),
+                static_cast<double>(observation.LeftWheelSpeedRadps()),
+                static_cast<double>(observation.RightWheelSpeedRadps()));
+        }
+        _encoderObservationDegraded = true;
     }
 
     void RuntimeSensorSuite::PublishEncoderTotals(SensorSnapshot& snapshot) const noexcept
     {
-        snapshot.leftEncoderTotalCounts = _leftEncoderTotalCounts;
-        snapshot.rightEncoderTotalCounts = _rightEncoderTotalCounts;
-        snapshot.leftEncoderDistanceM =
-            MazeMap::Vehicle::DriveEncoderDistanceFromCounts(_leftEncoderTotalCounts);
-        snapshot.rightEncoderDistanceM =
-            MazeMap::Vehicle::DriveEncoderDistanceFromCounts(_rightEncoderTotalCounts);
+        snapshot.SetEncoderTotals(_leftEncoderTotalCounts, _rightEncoderTotalCounts);
+        snapshot.SetEncoderDistancesM(
+            MazeMap::Vehicle::DriveEncoderDistanceFromCounts(_leftEncoderTotalCounts),
+            MazeMap::Vehicle::DriveEncoderDistanceFromCounts(_rightEncoderTotalCounts));
     }
 
     void RuntimeSensorSuite::CaptureEncoderSnapshot(
         SensorSnapshot& snapshot,
         const float dtSeconds) noexcept
     {
-        snapshot.encoderObservation = CaptureEncoderObservation(dtSeconds);
-        snapshot.encoderObservationValid = true;
+        const EncoderObs encoderObservation = CaptureEncoderObservation(dtSeconds);
+        const char* degradedReason = "ok";
+        const bool encoderObservationValid =
+            IsEncoderObservationUsableForPrediction(encoderObservation, dtSeconds, degradedReason);
+        snapshot.SetEncoderObservation(encoderObservation, encoderObservationValid);
+        ReportEncoderObservationState(
+            encoderObservationValid,
+            degradedReason,
+            encoderObservation,
+            dtSeconds);
         PublishEncoderTotals(snapshot);
     }
 
     void RuntimeSensorSuite::InitializeWallSensorLedOffState() noexcept
     {
-        _vehicle.FrontLeft.SetLedEnabled(false);
-        _vehicle.FrontRight.SetLedEnabled(false);
-        _vehicle.SideLeft.SetLedEnabled(false);
-        _vehicle.SideRight.SetLedEnabled(false);
+        _vehicle.FrontLeftWallSensor().SetLedEnabled(false);
+        _vehicle.FrontRightWallSensor().SetLedEnabled(false);
+        _vehicle.SideLeftWallSensor().SetLedEnabled(false);
+        _vehicle.SideRightWallSensor().SetLedEnabled(false);
         const uint32_t nowUs = micros();
         _frontLeftLedOffCommandUs = nowUs;
         _frontRightLedOffCommandUs = nowUs;
@@ -842,56 +1012,60 @@ namespace MazeMap
     void RuntimeSensorSuite::CaptureInertialSnapshot(const bool stationary, SensorSnapshot& snapshot)
     {
         const MazeMap::SensorMount imuMount = MazeMap::Vehicle::GetBackLeftImuMount();
-        snapshot.imuFrontRight = {};
-        snapshot.imuBackLeft = CaptureImuTelemetry(_vehicle.IMU_BL, Pins::IMU_INT_1B, &snapshot.imuTiming);
+        ImuObservationTiming imuTiming{};
+        const ImuTelemetry backLeftImuTelemetry =
+            CaptureImuTelemetry(_vehicle.BackLeftImu(), Pins::IMU_INT_1B, &imuTiming);
+        snapshot.SetFrontRightImuTelemetry(ImuTelemetry{});
+        snapshot.SetBackLeftImuTelemetry(backLeftImuTelemetry);
+        snapshot.SetImuTiming(imuTiming);
 
-        float rawGyroRadps = imuMount.TransformClockwiseYawRateToBody(ReadGyroZRadpsRaw());
+        float rawYawRateRadps = imuMount.TransformClockwiseYawRateToBody(ReadGyroZRadpsRaw());
     #if defined(ARDUINO_TEENSY41)
-        rawGyroRadps =
+        rawYawRateRadps =
             imuMount.TransformClockwiseYawRateToBody(
-                _vehicle.IMU_BL.GyroRawToClockwiseYawDps(snapshot.imuBackLeft.gyroZ) * DEG_TO_RAD_F);
+                _vehicle.BackLeftImu().GyroRawToClockwiseYawDps(backLeftImuTelemetry.gyroZ) * DEG_TO_RAD_F);
 
         const Eigen::Vector2f accelImuG(
-            _vehicle.IMU_BL.AccelRawToG(snapshot.imuBackLeft.accelX),
-            _vehicle.IMU_BL.AccelRawToG(snapshot.imuBackLeft.accelY));
+            _vehicle.BackLeftImu().AccelRawToG(backLeftImuTelemetry.accelX),
+            _vehicle.BackLeftImu().AccelRawToG(backLeftImuTelemetry.accelY));
         const Eigen::Vector2f accelBodyG = imuMount.TransformPlanarVectorToBody(accelImuG);
-        snapshot.accelBiasValid = _accelBiasInitialized;
+        snapshot.SetAccelerationBiasValid(_accelBiasInitialized);
         if (_accelBiasInitialized && stationary)
         {
-            _accelBiasXG = (0.998f * _accelBiasXG) + (0.002f * accelBodyG.x());
-            _accelBiasYG = (0.998f * _accelBiasYG) + (0.002f * accelBodyG.y());
+            _accelBiasRightG = (0.998f * _accelBiasRightG) + (0.002f * accelBodyG.x());
+            _accelBiasForwardG = (0.998f * _accelBiasForwardG) + (0.002f * accelBodyG.y());
         }
 
         if (_accelBiasInitialized)
         {
-            const float accelDeltaXG = accelBodyG.x() - _accelBiasXG;
-            const float accelDeltaYG = accelBodyG.y() - _accelBiasYG;
-            snapshot.accelBodyXMps2 = kStandardGravityMps2 * accelDeltaXG;
-            snapshot.accelBodyYMps2 = kStandardGravityMps2 * accelDeltaYG;
-            snapshot.planarAccelMps2 =
-                kStandardGravityMps2 * MazeMap::Math::Sqrtf((accelDeltaXG * accelDeltaXG) + (accelDeltaYG * accelDeltaYG));
+            const float accelDeltaRightG = accelBodyG.x() - _accelBiasRightG;
+            const float accelDeltaForwardG = accelBodyG.y() - _accelBiasForwardG;
+            snapshot.SetBodyRightAccelerationMps2(kStandardGravityMps2 * accelDeltaRightG);
+            snapshot.SetBodyForwardAccelerationMps2(kStandardGravityMps2 * accelDeltaForwardG);
+            snapshot.SetPlanarAccelerationMps2(
+                kStandardGravityMps2 * MazeMap::Math::Sqrtf((accelDeltaRightG * accelDeltaRightG) + (accelDeltaForwardG * accelDeltaForwardG)));
         }
         else
         {
-            snapshot.accelBodyXMps2 = 0.0f;
-            snapshot.accelBodyYMps2 = 0.0f;
-            snapshot.planarAccelMps2 = 0.0f;
+            snapshot.SetBodyRightAccelerationMps2(0.0f);
+            snapshot.SetBodyForwardAccelerationMps2(0.0f);
+            snapshot.SetPlanarAccelerationMps2(0.0f);
         }
     #else
-        snapshot.accelBodyXMps2 = 0.0f;
-        snapshot.accelBodyYMps2 = 0.0f;
-        snapshot.planarAccelMps2 = 0.0f;
-        snapshot.accelBiasValid = false;
+        snapshot.SetBodyRightAccelerationMps2(0.0f);
+        snapshot.SetBodyForwardAccelerationMps2(0.0f);
+        snapshot.SetPlanarAccelerationMps2(0.0f);
+        snapshot.SetAccelerationBiasValid(false);
     #endif
 
         if (stationary &&
-            MazeMap::ShouldUpdateGyroBiasFromStationarySample(rawGyroRadps, Config::kGyroBiasUpdateMaxAbsRateRadps))
+            MazeMap::ShouldUpdateGyroBiasFromStationarySample(rawYawRateRadps, Config::kGyroBiasUpdateMaxAbsRateRadps))
         {
-            _gyroBiasRadps = (0.995f * _gyroBiasRadps) + (0.005f * rawGyroRadps);
+            _gyroBiasRadps = (0.995f * _gyroBiasRadps) + (0.005f * rawYawRateRadps);
         }
-        snapshot.gyroRawRadps = rawGyroRadps;
-        snapshot.gyroBiasRadps = _gyroBiasRadps;
-        snapshot.gyroRadps = rawGyroRadps - _gyroBiasRadps;
+        snapshot.SetRawYawRateRadps(rawYawRateRadps);
+        snapshot.SetYawRateBiasRadps(_gyroBiasRadps);
+        snapshot.SetYawRateRadps(rawYawRateRadps - _gyroBiasRadps);
     }
 
     bool RuntimeSensorSuite::TryComputeSideSignalMetrics(
@@ -953,25 +1127,6 @@ namespace MazeMap
         previousSignalRise = currentValid ? signalRise : 0.0f;
         previousValid = currentValid;
         return transitionDetected;
-    }
-
-    float RuntimeSensorSuite::UpdateChannelFromMeasuredDistance(FilteredIrChannel& channel, const float measuredDistanceM)
-    {
-        channel.filteredDistanceM = measuredDistanceM;
-        channel.initialized = true;
-        return measuredDistanceM;
-    }
-
-    float RuntimeSensorSuite::UpdateChannelFromMeasuredDistance(
-        FilteredIrChannel& channel,
-        const float measuredDistanceM,
-        const float onThresholdM,
-        const float offThresholdM)
-    {
-        (void)offThresholdM;
-        const float currentDistanceM = UpdateChannelFromMeasuredDistance(channel, measuredDistanceM);
-        channel.wall = currentDistanceM < onThresholdM;
-        return currentDistanceM;
     }
 
     bool RuntimeSensorSuite::ComputeSideWallObservationHit(

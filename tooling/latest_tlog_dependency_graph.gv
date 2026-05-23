@@ -52,12 +52,10 @@ digraph LatestTlogSymbolDependencyGraph {
     n_FrozenCycleSchedule [label="FrozenCycleSchedule\nEstimatorGeometry.h", shape=ellipse, fillcolor="#d9eaf7", color="#333333"];
     n_GripUtilizationSnapshot [label="GripUtilizationSnapshot\nEstimatorGeometry.h", shape=ellipse, fillcolor="#d9eaf7", color="#333333"];
     n_MapEvidenceUpdater [label="MapEvidenceUpdater\nMapEvidenceUpdater.h", shape=box, fillcolor="#d9eaf7", color="#333333"];
-    n_MeasurementUpdateResult [label="MeasurementUpdateResult\nSRUKFCore.h", shape=ellipse, fillcolor="#d9eaf7", color="#333333"];
+    n_MeasurementUpdateResult [label="MeasurementUpdateResult\nEstimator.h", shape=ellipse, fillcolor="#d9eaf7", color="#333333"];
     n_ModelCycleContext [label="ModelCycleContext\nEstimatorGeometry.h", shape=ellipse, fillcolor="#d9eaf7", color="#333333"];
     n_RegripRecoveryState [label="RegripRecoveryState\nEstimatorGeometry.h", shape=ellipse, fillcolor="#d9eaf7", color="#333333"];
     n_SigmaPointSetSimplex [label="SigmaPointSetSimplex\nSigmaPointSetSimplex.h", shape=box, fillcolor="#d9eaf7", color="#333333"];
-    n_SrUkfCore [label="SrUkfCore\nSRUKFCore.h", shape=box, fillcolor="#d9eaf7", color="#333333"];
-    n_SrUkfWeights [label="SrUkfWeights\nUKF.h", shape=box, fillcolor="#d9eaf7", color="#333333"];
     n_TransientContactMemoryState [label="TransientContactMemoryState\nEstimatorGeometry.h", shape=ellipse, fillcolor="#d9eaf7", color="#333333"];
     n_UKF [label="UKF\nUKF.h", shape=box, fillcolor="#d9eaf7", color="#333333"];
   }
@@ -179,7 +177,6 @@ digraph LatestTlogSymbolDependencyGraph {
   n_Estimator -> n_MapEvidenceUpdater [color="#2ca02c", penwidth=1.4];
   n_Estimator -> n_ModelCycleContext [color="#7a7a7a", style=dashed, constraint=false];
   n_Estimator -> n_PoseEstimate [color="#2ca02c", penwidth=1.4];
-  n_Estimator -> n_SrUkfCore [color="#2ca02c", penwidth=1.4];
   n_Estimator -> n_VehicleState [color="#2ca02c", penwidth=1.4];
   n_EstimatorPredictModel -> n_ModelCycleContext [color="#7a7a7a", style=dashed, constraint=false];
   n_EstimatorPredictModel -> n_VehicleState [color="#2ca02c", penwidth=1.4];
@@ -273,20 +270,6 @@ digraph LatestTlogSymbolDependencyGraph {
   n_SimpleManeuver -> n_RelativeDirectionalDistance [color="#2ca02c", penwidth=1.4];
   n_SmoothTurnManeuver -> n_ManeuverPoint [color="#7a7a7a", style=dashed, constraint=false];
   n_SmoothTurnManeuver -> n_SimpleManeuver [color="#1f77b4", penwidth=1.8, arrowhead=empty];
-  n_SrUkfCore -> n_ControlInput [color="#2ca02c", penwidth=1.4];
-  n_SrUkfCore -> n_EncoderObs [color="#2ca02c", penwidth=1.4];
-  n_SrUkfCore -> n_EstimatorPredictModel [color="#2ca02c", penwidth=1.4];
-  n_SrUkfCore -> n_ImuAccelObs [color="#7a7a7a", style=dashed, constraint=false];
-  n_SrUkfCore -> n_MeasurementUpdateResult [color="#7a7a7a", style=dashed, constraint=false];
-  n_SrUkfCore -> n_ModelCycleContext [color="#2ca02c", penwidth=1.4];
-  n_SrUkfCore -> n_PlantModel [color="#2ca02c", penwidth=1.4];
-  n_SrUkfCore -> n_PlantParams [color="#2ca02c", penwidth=1.4];
-  n_SrUkfCore -> n_RegripRecoveryState [color="#2ca02c", penwidth=1.4];
-  n_SrUkfCore -> n_TransientContactMemoryState [color="#2ca02c", penwidth=1.4];
-  n_SrUkfCore -> n_UKF [color="#2ca02c", penwidth=1.4];
-  n_SrUkfCore -> n_VehicleState [color="#2ca02c", penwidth=1.4];
-  n_SrUkfCore -> n_WallGeometryModel [color="#2ca02c", penwidth=1.4];
-  n_SrUkfCore -> n_WallObs [color="#7a7a7a", style=dashed, constraint=false];
   n_TryComputeSideWallAimCoordinateM -> n_ComputeCellInnerMaxCoordinateM [color="#7a7a7a", style=dashed, constraint=false];
   n_TryComputeSideWallAimCoordinateM -> n_ComputeCellInnerMinCoordinateM [color="#7a7a7a", style=dashed, constraint=false];
   n_TryComputeSideWallAimCoordinateM -> n_PoseEstimate [color="#7a7a7a", style=dashed, constraint=false];
@@ -295,7 +278,6 @@ digraph LatestTlogSymbolDependencyGraph {
   n_TurnInPlace -> n_ManeuverCode [color="#7a7a7a", style=dashed, constraint=false];
   n_TurnInPlace -> n_SimpleManeuver [color="#1f77b4", penwidth=1.8, arrowhead=empty];
   n_UKF -> n_SigmaPointSetSimplex [color="#7a7a7a", style=dashed, constraint=false];
-  n_UKF -> n_SrUkfWeights [color="#2ca02c", penwidth=1.4];
   n_Vehicle -> n_SensorExtrinsics [color="#7a7a7a", style=dashed, constraint=false];
   n_Vehicle -> n_VehiclePhysicalModel [color="#2ca02c", penwidth=1.4];
   n_Vehicle -> n_VehicleState [color="#7a7a7a", style=dashed, constraint=false];

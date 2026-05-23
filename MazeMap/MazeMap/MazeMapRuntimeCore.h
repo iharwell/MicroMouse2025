@@ -203,7 +203,7 @@ inline StationaryImuCalibrationResult WaitForImuCalibrationSettle(
 
 template <typename CaptureEncoderCounts>
 inline StationaryImuCalibrationResult AverageBackLeftImuSelfTestSample(
-    MazeMap::Vehicle::ImuBackLeft& imu,
+    MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>& imu,
     uint16_t sampleCount,
     const MazeMap::EncoderCountPair& startCounts,
     AveragedBackLeftImuSample& averagedSample,
@@ -230,8 +230,8 @@ inline StationaryImuCalibrationResult AverageBackLeftImuSelfTestSample(
             return StationaryImuCalibrationResult::RestartEncoderMotion;
         }
 
-        const MazeMap::Vehicle::ImuBackLeft::Axes accel = imu.ReadAccel();
-        const MazeMap::Vehicle::ImuBackLeft::Axes gyro = imu.ReadGyro();
+        const MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::Axes accel = imu.ReadAccel();
+        const MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::Axes gyro = imu.ReadGyro();
         accelMgSumX += static_cast<double>(accel.x) * accelMgPerLsb;
         accelMgSumY += static_cast<double>(accel.y) * accelMgPerLsb;
         accelMgSumZ += static_cast<double>(accel.z) * accelMgPerLsb;
@@ -707,14 +707,14 @@ inline bool TryComputeFrontWallCandidateDistancesForPose(
     const bool haveFrontLeftDistance =
         TryComputeDistanceToCellWallM(
             state,
-            vehicle.FrontLeft,
+            vehicle.FrontLeftWallSensor(),
             observedCell,
             forwardDirection,
             frontLeftDistanceM);
     const bool haveFrontRightDistance =
         TryComputeDistanceToCellWallM(
             state,
-            vehicle.FrontRight,
+            vehicle.FrontRightWallSensor(),
             observedCell,
             forwardDirection,
             frontRightDistanceM);
@@ -732,7 +732,7 @@ inline bool TryComputeFrontWallObservationSampleDistanceM(
     float poseXM = 0.0f;
     float poseYM = 0.0f;
     const float sideSensorForwardOffsetM =
-        (std::max)(vehicle.SideLeft.GetPosition().y(), vehicle.SideRight.GetPosition().y());
+        (std::max)(vehicle.SideLeftWallSensor().GetPosition().y(), vehicle.SideRightWallSensor().GetPosition().y());
     const MazeMap::CellCoordinates observedCell(0, 0);
     if (!MazeMap::TryComputeSideWallObservationSamplePoseM(
             observedCell,
@@ -751,9 +751,9 @@ inline bool TryComputeFrontWallObservationSampleDistanceM(
 
     MazeMap::VehicleState state{};
     state.SetPosition(Eigen::Vector2f(poseXM, poseYM));
-    state.SetOrientation(DirectionToYawRad(MazeMap::Up));
-    state.SetVelocity(0.0f);
-    state.SetRotationalVelocity(0.0f);
+    state.SetHeading(DirectionToYawRad(MazeMap::Up));
+    state.SetForwardVelocity(0.0f);
+    state.SetYawRate(0.0f);
     return TryComputeDistanceToCellWallM(state, sensor, observedCell, MazeMap::Up, distanceM);
 }
 
@@ -773,8 +773,8 @@ inline bool TryComputeFrontWallObservationThresholdDistancesM(
 
     const MazeMap::WallSensor& sensor =
         (sensorId == WallSensorId::FrontLeft) ?
-        vehicle.FrontLeft :
-        vehicle.FrontRight;
+        vehicle.FrontLeftWallSensor() :
+        vehicle.FrontRightWallSensor();
     constexpr uint8_t kLatchSampleIndex =
         MazeMap::Config::kSearchRollingObservationSampleCount - MazeMap::Config::kSearchRollingObservationMajorityCount;
     float preferredOnThresholdM = 0.0f;
@@ -1654,7 +1654,7 @@ inline void FormatManeuverCodeName(MazeMap::ManeuverCode code, char* buffer, siz
 inline float ReadBackLeftGyroZRadpsRaw(MazeMap::Vehicle& vehicle)
 {
 #if defined(ARDUINO_TEENSY41)
-    const float blDps = vehicle.IMU_BL.ReadClockwiseYawDps();
+    const float blDps = vehicle.BackLeftImu().ReadClockwiseYawDps();
     return blDps * DEG_TO_RAD_F;
 #else
     (void)vehicle;
@@ -1686,7 +1686,7 @@ inline bool TryComputeSideWallAimCoordinateM(
     alongWallCoordinateM = 0.0f;
     if (!std::isfinite(state.GetPositionX()) ||
         !std::isfinite(state.GetPositionY()) ||
-        !std::isfinite(state.GetOrientation()))
+        !std::isfinite(state.GetHeading()))
     {
         return false;
     }

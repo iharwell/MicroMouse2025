@@ -304,13 +304,13 @@ def load_control_log_parameters(path: Path) -> RunPlantParameters | None:
     drive_fields: dict[str, float] | None = None
     with path.open(encoding="utf-8", errors="replace") as control_log:
         for line in control_log:
-            if "ukf_dump_params_mass_geometry:" in line:
+            if "plant_dump_params_mass_geometry:" in line:
                 geometry_fields = parse_key_value_fields(
-                    line.split("ukf_dump_params_mass_geometry:", 1)[1].strip()
+                    line.split("plant_dump_params_mass_geometry:", 1)[1].strip()
                 )
-            elif "ukf_dump_params_drive_electrical:" in line:
+            elif "plant_dump_params_drive_electrical:" in line:
                 drive_fields = parse_key_value_fields(
-                    line.split("ukf_dump_params_drive_electrical:", 1)[1].strip()
+                    line.split("plant_dump_params_drive_electrical:", 1)[1].strip()
                 )
     if geometry_fields is None or drive_fields is None:
         return None
@@ -402,8 +402,8 @@ def estimate_torque_only_yaw_inertia_upper_bound(
             continue
         if left_command * right_command > -0.25:
             continue
-        left_torque_nm = drive_torque_from_command(left_command, parse_float(row["left_encoder_omega_radps"]), params)
-        right_torque_nm = drive_torque_from_command(right_command, parse_float(row["right_encoder_omega_radps"]), params)
+        left_torque_nm = drive_torque_from_command(left_command, parse_float(row["left_encoder_wheel_speed_radps"]), params)
+        right_torque_nm = drive_torque_from_command(right_command, parse_float(row["right_encoder_wheel_speed_radps"]), params)
         differential_force_upper_bound_n = abs((left_torque_nm - right_torque_nm) / params.wheel_radius_m)
         yaw_moment_upper_bound_nm = 0.5 * effective_track_width_m * differential_force_upper_bound_n
         if yaw_moment_upper_bound_nm <= 0.0:

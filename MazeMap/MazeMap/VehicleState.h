@@ -14,7 +14,6 @@ namespace MazeMap
 {
     class Estimator;
     class PlantModel;
-    class SrUkfCore;
 
     class EXPORT VehicleState
     {
@@ -23,63 +22,30 @@ namespace MazeMap
         {
             kPx = 0,
             kPy = 1,
-            kPsi = 2,
-            kU = 3,
-            kV = 4,
-            kR = 5,
-            kOmegaL = 6,
-            kOmegaR = 7,
-            kBgz = 8
+            kHeading = 2,
+            kVf = 3,
+            kVr = 4,
+            kYawRate = 5,
+            kDeltaAf = 6,
+            kDeltaAr = 7,
+            kDeltaYawAccel = 8
         };
     public:
         static constexpr int kDimension = 9;
-        using StateVector = Eigen::Matrix<float, kDimension, 1>;
-        using StateMatrix = Eigen::Matrix<float, kDimension, kDimension>;
 
         // World pose uses +X right and +Y forward.
-        // Body velocity uses kV = body-right speed, kU = body-forward speed, and kR = clockwise yaw rate.
-
-
-        static StateMatrix DefaultInitialCovariance() noexcept
-        {
-            StateMatrix covariance = StateMatrix::Identity() * 1.0e-3f;
-            covariance(kPx, kPx) = 1.0e-5f;
-            covariance(kPy, kPy) = 1.0e-5f;
-            covariance(kOmegaL, kOmegaL) = 0.25f;
-            covariance(kOmegaR, kOmegaR) = 0.25f;
-            covariance(kBgz, kBgz) = 3.05e-4f;
-            return covariance;
-        }
+        // Body velocity uses kVf = body-forward speed, kVr = body-right speed, and kYawRate = clockwise yaw rate.
+        // The final states are colored acceleration residuals: kDeltaAf, kDeltaAr, and kDeltaYawAccel.
 
         VehicleState() noexcept
-            : _state(StateVector::Zero())
-            , _sqrtCovariance(StateMatrix::Zero())
+            : _state(Eigen::Matrix<float, kDimension, 1>::Zero())
+            , _sqrtCovariance(Eigen::Matrix<float, kDimension, kDimension>::Zero())
+            , _gyroBiasZRadps(0.0f)
+            , _gyroBiasZVarianceRadps2(3.05e-4f)
             , _time(0.0f)
             , _timestampUs(0U)
         {
             SetCovariance(DefaultInitialCovariance());
-        }
-
-        const StateMatrix& GetSqrtCovariance() const noexcept { return _sqrtCovariance; }
-        void SetSqrtCovariance(const StateMatrix& sqrtCovariance) noexcept { _sqrtCovariance = sqrtCovariance; }
-
-        StateMatrix GetCovariance() const noexcept { return _sqrtCovariance * _sqrtCovariance.transpose(); }
-        void SetCovariance(const StateMatrix& covariance) noexcept
-        {
-            Eigen::LLT<StateMatrix> llt;
-            llt.compute(covariance);
-            if (llt.info() == Eigen::Success)
-            {
-                _sqrtCovariance = llt.matrixL();
-                return;
-            }
-            const StateMatrix symmetric = 0.5f * (covariance + covariance.transpose());
-            llt.compute(symmetric);
-            if (llt.info() == Eigen::Success)
-            {
-                _sqrtCovariance = llt.matrixL();
-                return;
-            }
         }
 
         bool IsStationary() const noexcept;
@@ -92,59 +58,88 @@ namespace MazeMap
         Eigen::Vector2f GetPosition() const noexcept { return Eigen::Vector2f(_state(kPx), _state(kPy)); }
         Eigen::Vector2f GetPosition() noexcept { return const_cast<const VehicleState*>(this)->GetPosition(); }
 
-        void SetVelocity(float velocity) noexcept { _state(kU) = velocity; }
-        float GetVelocity() const noexcept { return _state(kU); }
-        float GetVelocity() noexcept { return const_cast<const VehicleState*>(this)->GetVelocity(); }
+        void SetForwardVelocity(float forwardVelocityMps) noexcept { _state(kVf) = forwardVelocityMps; }
+        float GetForwardVelocity() const noexcept { return _state(kVf); }
+        float GetForwardVelocity() noexcept { return const_cast<const VehicleState*>(this)->GetForwardVelocity(); }
 
-        void SetLateralVelocity(float velocity) noexcept { _state(kV) = velocity; }
-        float GetLateralVelocity() const noexcept { return _state(kV); }
-        float GetLateralVelocity() noexcept { return const_cast<const VehicleState*>(this)->GetLateralVelocity(); }
+        void SetRightwardVelocity(float rightwardVelocityMps) noexcept { _state(kVr) = rightwardVelocityMps; }
+        float GetRightwardVelocity() const noexcept { return _state(kVr); }
+        float GetRightwardVelocity() noexcept { return const_cast<const VehicleState*>(this)->GetRightwardVelocity(); }
 
-        void SetOrientation(float orientation) noexcept { _state(kPsi) = NormalizeAngle(orientation); }
-        float GetOrientation() const noexcept { return _state(kPsi); }
-        float GetOrientation() noexcept { return const_cast<const VehicleState*>(this)->GetOrientation(); }
+        void SetHeading(float headingRad) noexcept { _state(kHeading) = NormalizeAngle(headingRad); }
+        float GetHeading() const noexcept { return _state(kHeading); }
+        float GetHeading() noexcept { return const_cast<const VehicleState*>(this)->GetHeading(); }
         Eigen::Vector2f GetHeadingUnit() const noexcept
         {
-            return Eigen::Vector2f(std::sin(_state(kPsi)), std::cos(_state(kPsi)));
+            return Eigen::Vector2f(std::sin(_state(kHeading)), std::cos(_state(kHeading)));
         }
         Eigen::Vector2f GetHeadingUnit() noexcept { return const_cast<const VehicleState*>(this)->GetHeadingUnit(); }
 
-        void SetRotationalVelocity(float rotationalVelocity) noexcept { _state(kR) = rotationalVelocity; }
-        float GetRotationalVelocity() const noexcept { return _state(kR); }
-        float GetRotationalVelocity() noexcept { return const_cast<const VehicleState*>(this)->GetRotationalVelocity(); }
+        void SetYawRate(float yawRateRadps) noexcept { _state(kYawRate) = yawRateRadps; }
+        float GetYawRate() const noexcept { return _state(kYawRate); }
+        float GetYawRate() noexcept { return const_cast<const VehicleState*>(this)->GetYawRate(); }
 
-        void SetLongitudinalAcceleration(float accelerationMps2) noexcept
+        void SetForwardAcceleration(float accelerationMps2) noexcept
         {
-            _longitudinalAccelerationMps2 = accelerationMps2;
+            _forwardAccelerationMps2 = accelerationMps2;
         }
-        float GetLongitudinalAcceleration() const noexcept { return _longitudinalAccelerationMps2; }
-        float GetLongitudinalAcceleration() noexcept { return const_cast<const VehicleState*>(this)->GetLongitudinalAcceleration(); }
+        float GetForwardAcceleration() const noexcept { return _forwardAccelerationMps2; }
+        float GetForwardAcceleration() noexcept { return const_cast<const VehicleState*>(this)->GetForwardAcceleration(); }
 
-        void SetLateralAcceleration(float accelerationMps2) noexcept
+        void SetRightAcceleration(float accelerationMps2) noexcept
         {
-            _lateralAccelerationMps2 = accelerationMps2;
+            _rightAccelerationMps2 = accelerationMps2;
         }
-        float GetLateralAcceleration() const noexcept { return _lateralAccelerationMps2; }
-        float GetLateralAcceleration() noexcept { return const_cast<const VehicleState*>(this)->GetLateralAcceleration(); }
+        float GetRightAcceleration() const noexcept { return _rightAccelerationMps2; }
+        float GetRightAcceleration() noexcept { return const_cast<const VehicleState*>(this)->GetRightAcceleration(); }
 
-        void SetYawAcceleration(float accelerationRadps2) noexcept
+        void SetYawAccel(float accelerationRadps2) noexcept
         {
-            _yawAccelerationRadps2 = accelerationRadps2;
+            _yawAccelRadps2 = accelerationRadps2;
         }
-        float GetYawAcceleration() const noexcept { return _yawAccelerationRadps2; }
-        float GetYawAcceleration() noexcept { return const_cast<const VehicleState*>(this)->GetYawAcceleration(); }
+        float GetYawAccel() const noexcept { return _yawAccelRadps2; }
+        float GetYawAccel() noexcept { return const_cast<const VehicleState*>(this)->GetYawAccel(); }
 
-        void SetWheelSpeedLeft(float wheelSpeedRadps) noexcept { _state(kOmegaL) = wheelSpeedRadps; }
-        float GetWheelSpeedLeft() const noexcept { return _state(kOmegaL); }
+        void SetForwardAccelerationResidual(float accelerationMps2) noexcept { _state(kDeltaAf) = accelerationMps2; }
+        float GetForwardAccelerationResidual() const noexcept { return _state(kDeltaAf); }
+        float GetForwardAccelerationResidual() noexcept { return const_cast<const VehicleState*>(this)->GetForwardAccelerationResidual(); }
+
+        void SetRightwardAccelerationResidual(float accelerationMps2) noexcept { _state(kDeltaAr) = accelerationMps2; }
+        float GetRightwardAccelerationResidual() const noexcept { return _state(kDeltaAr); }
+        float GetRightwardAccelerationResidual() noexcept { return const_cast<const VehicleState*>(this)->GetRightwardAccelerationResidual(); }
+
+        void SetYawAccelResidual(float accelerationRadps2) noexcept { _state(kDeltaYawAccel) = accelerationRadps2; }
+        float GetYawAccelResidual() const noexcept { return _state(kDeltaYawAccel); }
+        float GetYawAccelResidual() noexcept { return const_cast<const VehicleState*>(this)->GetYawAccelResidual(); }
+
+        void SetWheelSpeedLeft(float wheelSpeedRadps) noexcept
+        {
+            MazeMap::EncoderObs encoderObservation = _sensorSnapshot.EncoderObservation();
+            encoderObservation.SetLeftWheelSpeedRadps(wheelSpeedRadps);
+            _sensorSnapshot.SetEncoderObservation(encoderObservation);
+        }
+        float GetWheelSpeedLeft() const noexcept { return _sensorSnapshot.EncoderObservation().LeftWheelSpeedRadps(); }
         float GetWheelSpeedLeft() noexcept { return const_cast<const VehicleState*>(this)->GetWheelSpeedLeft(); }
 
-        void SetWheelSpeedRight(float wheelSpeedRadps) noexcept { _state(kOmegaR) = wheelSpeedRadps; }
-        float GetWheelSpeedRight() const noexcept { return _state(kOmegaR); }
+        void SetWheelSpeedRight(float wheelSpeedRadps) noexcept
+        {
+            MazeMap::EncoderObs encoderObservation = _sensorSnapshot.EncoderObservation();
+            encoderObservation.SetRightWheelSpeedRadps(wheelSpeedRadps);
+            _sensorSnapshot.SetEncoderObservation(encoderObservation);
+        }
+        float GetWheelSpeedRight() const noexcept { return _sensorSnapshot.EncoderObservation().RightWheelSpeedRadps(); }
         float GetWheelSpeedRight() noexcept { return const_cast<const VehicleState*>(this)->GetWheelSpeedRight(); }
 
-        void SetGyroBiasZ(float gyroBiasRadps) noexcept { _state(kBgz) = gyroBiasRadps; }
-        float GetGyroBiasZ() const noexcept { return _state(kBgz); }
+        void SetGyroBiasZ(float gyroBiasRadps) noexcept { _gyroBiasZRadps = gyroBiasRadps; }
+        float GetGyroBiasZ() const noexcept { return _gyroBiasZRadps; }
         float GetGyroBiasZ() noexcept { return const_cast<const VehicleState*>(this)->GetGyroBiasZ(); }
+
+        void SetGyroBiasZVar(float gyroBiasVarianceRadps2) noexcept
+        {
+            _gyroBiasZVarianceRadps2 = (std::max)(0.0f, gyroBiasVarianceRadps2);
+        }
+        float GetGyroBiasZVar() const noexcept { return _gyroBiasZVarianceRadps2; }
+        float GetGyroBiasZVar() noexcept { return const_cast<const VehicleState*>(this)->GetGyroBiasZVar(); }
 
         void SetTime(float time) noexcept { _time = time; }
         float GetTime() const noexcept { return _time; }
@@ -156,26 +151,25 @@ namespace MazeMap
 
         void SetSensorSnapshot(const ::SensorSnapshot& sensorSnapshot) noexcept { _sensorSnapshot = sensorSnapshot; }
         const ::SensorSnapshot& GetSensorSnapshot() const noexcept { return _sensorSnapshot; }
-        ::SensorSnapshot& GetSensorSnapshot() noexcept { return _sensorSnapshot; }
 
         void SetCurrentCommand(const App::Internal::CommandVector& currentCommand) noexcept { _currentCommand = currentCommand; }
         const App::Internal::CommandVector& GetCurrentCommand() const noexcept { return _currentCommand; }
         App::Internal::CommandVector& GetCurrentCommand() noexcept { return _currentCommand; }
 
-        void SetVarianceValues(float xVar, float yVar, float velocityVar, float orientationVar, float rotVelocityVar)
+        void SetVarianceValues(float xVar, float yVar, float forwardVelocityVar, float headingVar, float yawRateVar)
         {
-            StateMatrix covariance = GetCovariance();
+            Eigen::Matrix<float, kDimension, kDimension> covariance = GetCovariance();
             covariance(kPx, kPx) = (std::max)(0.0f, xVar);
             covariance(kPy, kPy) = (std::max)(0.0f, yVar);
-            covariance(kU, kU) = (std::max)(0.0f, velocityVar);
-            covariance(kPsi, kPsi) = (std::max)(0.0f, orientationVar);
-            covariance(kR, kR) = (std::max)(0.0f, rotVelocityVar);
+            covariance(kVf, kVf) = (std::max)(0.0f, forwardVelocityVar);
+            covariance(kHeading, kHeading) = (std::max)(0.0f, headingVar);
+            covariance(kYawRate, kYawRate) = (std::max)(0.0f, yawRateVar);
             SetCovariance(covariance);
         }
 
         void SetPositionVar(const Eigen::Vector2f& positionVariance) noexcept
         {
-            StateMatrix covariance = GetCovariance();
+            Eigen::Matrix<float, kDimension, kDimension> covariance = GetCovariance();
             covariance(kPx, kPx) = (std::max)(0.0f, positionVariance.x());
             covariance(kPy, kPy) = (std::max)(0.0f, positionVariance.y());
             SetCovariance(covariance);
@@ -183,99 +177,134 @@ namespace MazeMap
 
         Eigen::Vector2f GetPositionVar() const noexcept
         {
-            const StateMatrix covariance = GetCovariance();
+            const Eigen::Matrix<float, kDimension, kDimension> covariance = GetCovariance();
             return Eigen::Vector2f(covariance(kPx, kPx), covariance(kPy, kPy));
         }
 
         Eigen::Vector2f GetPositionVar() noexcept { return const_cast<const VehicleState*>(this)->GetPositionVar(); }
 
-        void SetVelocityVar(float velocityVariance) noexcept
+        void SetForwardVelocityVar(float forwardVelocityVariance) noexcept
         {
-            StateMatrix covariance = GetCovariance();
-            covariance(kU, kU) = (std::max)(0.0f, velocityVariance);
+            Eigen::Matrix<float, kDimension, kDimension> covariance = GetCovariance();
+            covariance(kVf, kVf) = (std::max)(0.0f, forwardVelocityVariance);
             SetCovariance(covariance);
         }
 
-        float GetVelocityVar() const noexcept { return GetCovariance()(kU, kU); }
-        float GetVelocityVar() noexcept { return const_cast<const VehicleState*>(this)->GetVelocityVar(); }
+        float GetForwardVelocityVar() const noexcept { return GetCovariance()(kVf, kVf); }
+        float GetForwardVelocityVar() noexcept { return const_cast<const VehicleState*>(this)->GetForwardVelocityVar(); }
 
-        void SetLateralVelocityVar(float lateralVelocityVariance) noexcept
+        void SetRightwardVelocityVar(float rightwardVelocityVariance) noexcept
         {
-            StateMatrix covariance = GetCovariance();
-            covariance(kV, kV) = (std::max)(0.0f, lateralVelocityVariance);
+            Eigen::Matrix<float, kDimension, kDimension> covariance = GetCovariance();
+            covariance(kVr, kVr) = (std::max)(0.0f, rightwardVelocityVariance);
             SetCovariance(covariance);
         }
 
-        float GetLateralVelocityVar() const noexcept { return GetCovariance()(kV, kV); }
-        float GetLateralVelocityVar() noexcept { return const_cast<const VehicleState*>(this)->GetLateralVelocityVar(); }
+        float GetRightwardVelocityVar() const noexcept { return GetCovariance()(kVr, kVr); }
+        float GetRightwardVelocityVar() noexcept { return const_cast<const VehicleState*>(this)->GetRightwardVelocityVar(); }
 
-        void SetOrientationVar(float orientationVariance) noexcept
+        void SetHeadingVar(float headingVariance) noexcept
         {
-            StateMatrix covariance = GetCovariance();
-            covariance(kPsi, kPsi) = (std::max)(0.0f, orientationVariance);
+            Eigen::Matrix<float, kDimension, kDimension> covariance = GetCovariance();
+            covariance(kHeading, kHeading) = (std::max)(0.0f, headingVariance);
             SetCovariance(covariance);
         }
 
-        float GetOrientationVar() const noexcept { return GetCovariance()(kPsi, kPsi); }
-        float GetOrientationVar() noexcept { return const_cast<const VehicleState*>(this)->GetOrientationVar(); }
+        float GetHeadingVar() const noexcept { return GetCovariance()(kHeading, kHeading); }
+        float GetHeadingVar() noexcept { return const_cast<const VehicleState*>(this)->GetHeadingVar(); }
 
-        void SetRotationalVelocityVar(float rotationalVelocityVariance) noexcept
+        void SetYawRateVar(float yawRateVariance) noexcept
         {
-            StateMatrix covariance = GetCovariance();
-            covariance(kR, kR) = (std::max)(0.0f, rotationalVelocityVariance);
+            Eigen::Matrix<float, kDimension, kDimension> covariance = GetCovariance();
+            covariance(kYawRate, kYawRate) = (std::max)(0.0f, yawRateVariance);
             SetCovariance(covariance);
         }
 
-        float GetRotationalVelocityVar() const noexcept { return GetCovariance()(kR, kR); }
-        float GetRotationalVelocityVar() noexcept { return const_cast<const VehicleState*>(this)->GetRotationalVelocityVar(); }
+        float GetYawRateVar() const noexcept { return GetCovariance()(kYawRate, kYawRate); }
+        float GetYawRateVar() noexcept { return const_cast<const VehicleState*>(this)->GetYawRateVar(); }
 
-        void SetLWheelSpeedVar(float motorDriveLVariance) noexcept
+        void SetForwardAccelerationResidualVar(float residualVariance) noexcept
         {
-            StateMatrix covariance = GetCovariance();
-            covariance(kOmegaL, kOmegaL) = (std::max)(0.0f, motorDriveLVariance);
+            Eigen::Matrix<float, kDimension, kDimension> covariance = GetCovariance();
+            covariance(kDeltaAf, kDeltaAf) = (std::max)(0.0f, residualVariance);
             SetCovariance(covariance);
         }
 
-        float GetLWheelSpeedVar() const noexcept { return GetCovariance()(kOmegaL, kOmegaL); }
-        float GetLWheelSpeedVar() noexcept { return const_cast<const VehicleState*>(this)->GetLWheelSpeedVar(); }
+        float GetForwardAccelerationResidualVar() const noexcept { return GetCovariance()(kDeltaAf, kDeltaAf); }
+        float GetForwardAccelerationResidualVar() noexcept { return const_cast<const VehicleState*>(this)->GetForwardAccelerationResidualVar(); }
 
-        void SetRWheelSpeedVar(float motorDriveRVariance) noexcept
+        void SetRightwardAccelerationResidualVar(float residualVariance) noexcept
         {
-            StateMatrix covariance = GetCovariance();
-            covariance(kOmegaR, kOmegaR) = (std::max)(0.0f, motorDriveRVariance);
+            Eigen::Matrix<float, kDimension, kDimension> covariance = GetCovariance();
+            covariance(kDeltaAr, kDeltaAr) = (std::max)(0.0f, residualVariance);
             SetCovariance(covariance);
         }
 
-        float GetRWheelSpeedVar() const noexcept { return GetCovariance()(kOmegaR, kOmegaR); }
-        float GetRWheelSpeedVar() noexcept { return const_cast<const VehicleState*>(this)->GetRWheelSpeedVar(); }
+        float GetRightwardAccelerationResidualVar() const noexcept { return GetCovariance()(kDeltaAr, kDeltaAr); }
+        float GetRightwardAccelerationResidualVar() noexcept { return const_cast<const VehicleState*>(this)->GetRightwardAccelerationResidualVar(); }
 
-        void SetGyroBiasZVar(float gyroBiasVariance) noexcept
+        void SetYawAccelResidualVar(float residualVariance) noexcept
         {
-            StateMatrix covariance = GetCovariance();
-            covariance(kBgz, kBgz) = (std::max)(0.0f, gyroBiasVariance);
+            Eigen::Matrix<float, kDimension, kDimension> covariance = GetCovariance();
+            covariance(kDeltaYawAccel, kDeltaYawAccel) = (std::max)(0.0f, residualVariance);
             SetCovariance(covariance);
         }
 
-        float GetGyroBiasZVar() const noexcept { return GetCovariance()(kBgz, kBgz); }
+        float GetYawAccelResidualVar() const noexcept { return GetCovariance()(kDeltaYawAccel, kDeltaYawAccel); }
+        float GetYawAccelResidualVar() noexcept { return const_cast<const VehicleState*>(this)->GetYawAccelResidualVar(); }
 
     private:
         friend class Estimator;
         friend class PlantModel;
-        friend class SrUkfCore;
 
-        const StateVector& GetStateVector() const noexcept { return _state; }
-
-        void SetStateVector(const StateVector& state) noexcept
+        static Eigen::Matrix<float, kDimension, kDimension> DefaultInitialCovariance() noexcept
         {
-            _state = state;
-            _state(kPsi) = NormalizeAngle(_state(kPsi));
+            Eigen::Matrix<float, kDimension, kDimension> covariance = Eigen::Matrix<float, kDimension, kDimension>::Identity() * 1.0e-3f;
+            covariance(kPx, kPx) = 1.0e-5f;
+            covariance(kPy, kPy) = 1.0e-5f;
+            covariance(kDeltaAf, kDeltaAf) = 0.25f;
+            covariance(kDeltaAr, kDeltaAr) = 0.25f;
+            covariance(kDeltaYawAccel, kDeltaYawAccel) = 0.25f;
+            return covariance;
         }
 
-        StateVector _state;
-        StateMatrix _sqrtCovariance;
-        float _longitudinalAccelerationMps2 = 0.0f;
-        float _lateralAccelerationMps2 = 0.0f;
-        float _yawAccelerationRadps2 = 0.0f;
+        const Eigen::Matrix<float, kDimension, kDimension>& GetSqrtCovariance() const noexcept { return _sqrtCovariance; }
+        void SetSqrtCovariance(const Eigen::Matrix<float, kDimension, kDimension>& sqrtCovariance) noexcept { _sqrtCovariance = sqrtCovariance; }
+
+        Eigen::Matrix<float, kDimension, kDimension> GetCovariance() const noexcept { return _sqrtCovariance * _sqrtCovariance.transpose(); }
+        void SetCovariance(const Eigen::Matrix<float, kDimension, kDimension>& covariance) noexcept
+        {
+            Eigen::LLT<Eigen::Matrix<float, kDimension, kDimension>> llt;
+            llt.compute(covariance);
+            if (llt.info() == Eigen::Success)
+            {
+                _sqrtCovariance = llt.matrixL();
+                return;
+            }
+            const Eigen::Matrix<float, kDimension, kDimension> symmetric = 0.5f * (covariance + covariance.transpose());
+            llt.compute(symmetric);
+            if (llt.info() == Eigen::Success)
+            {
+                _sqrtCovariance = llt.matrixL();
+                return;
+            }
+        }
+
+        const Eigen::Matrix<float, kDimension, 1>& GetStateVector() const noexcept { return _state; }
+
+        void SetStateVector(const Eigen::Matrix<float, kDimension, 1>& state) noexcept
+        {
+            _state = state;
+            _state(kHeading) = NormalizeAngle(_state(kHeading));
+        }
+
+        Eigen::Matrix<float, kDimension, 1> _state;
+        Eigen::Matrix<float, kDimension, kDimension> _sqrtCovariance;
+        float _gyroBiasZRadps;
+        float _gyroBiasZVarianceRadps2;
+        float _forwardAccelerationMps2 = 0.0f;
+        float _rightAccelerationMps2 = 0.0f;
+        float _yawAccelRadps2 = 0.0f;
         float _time;
         std::uint32_t _timestampUs;
         ::SensorSnapshot _sensorSnapshot;
@@ -285,13 +314,14 @@ namespace MazeMap
 #define VEHICLE_STATE_LOG_FIELDS(X) \
     X(float, px_m) \
     X(float, py_m) \
-    X(float, psi_rad) \
-    X(float, u_mps) \
-    X(float, v_mps) \
-    X(float, r_radps) \
-    X(float, omega_l_radps) \
-    X(float, omega_r_radps) \
-    X(float, bgz_radps)
+    X(float, heading_rad) \
+    X(float, vf_mps) \
+    X(float, vr_mps) \
+    X(float, yaw_rate_radps) \
+    X(float, delta_af_mps2) \
+    X(float, delta_ar_mps2) \
+    X(float, delta_yaw_accel_radps2) \
+    X(float, gyro_bias_z_radps)
 
     MMLOG_DEFINE_PRIVATE_ENTRY_WITH_BODY(
         VehicleStateLogEntry,
@@ -300,13 +330,14 @@ namespace MazeMap
         {
             px_m = state.GetPositionX();
             py_m = state.GetPositionY();
-            psi_rad = state.GetOrientation();
-            u_mps = state.GetVelocity();
-            v_mps = state.GetLateralVelocity();
-            r_radps = state.GetRotationalVelocity();
-            omega_l_radps = state.GetWheelSpeedLeft();
-            omega_r_radps = state.GetWheelSpeedRight();
-            bgz_radps = state.GetGyroBiasZ();
+            heading_rad = state.GetHeading();
+            vf_mps = state.GetForwardVelocity();
+            vr_mps = state.GetRightwardVelocity();
+            yaw_rate_radps = state.GetYawRate();
+            delta_af_mps2 = state.GetForwardAccelerationResidual();
+            delta_ar_mps2 = state.GetRightwardAccelerationResidual();
+            delta_yaw_accel_radps2 = state.GetYawAccelResidual();
+            gyro_bias_z_radps = state.GetGyroBiasZ();
         });
 
 #undef VEHICLE_STATE_LOG_FIELDS

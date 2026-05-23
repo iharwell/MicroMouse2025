@@ -472,7 +472,7 @@ namespace MazeMap::App::Internal
         }
 
         const float targetYawRad = DirectionToYawRad(targetDirection);
-        const float angleRad = AngleErrorRad(targetYawRad, _runtime->RuntimeState().GetOrientation());
+        const float angleRad = AngleErrorRad(targetYawRad, _runtime->RuntimeState().GetHeading());
         if (!std::isfinite(angleRad))
         {
             return false;
@@ -638,9 +638,9 @@ namespace MazeMap::App::Internal
         WallSensorCalibrationCapture rightCapture{};
         SampleWallCalibrationCaptureAverageRawPair(
             WallSensorId::SideLeft,
-            _vehicle->SideLeft,
+            _vehicle->SideLeftWallSensor(),
             WallSensorId::SideRight,
-            _vehicle->SideRight,
+            _vehicle->SideRightWallSensor(),
             leftCapture,
             rightCapture);
 
@@ -648,7 +648,7 @@ namespace MazeMap::App::Internal
         {
             float actualDistanceM = 0.0f;
             const bool storedReference =
-                TryDistanceToSouthWall(_runtime->RuntimeState(), _vehicle->SideLeft, actualDistanceM) &&
+                TryDistanceToSouthWall(_runtime->RuntimeState(), _vehicle->SideLeftWallSensor(), actualDistanceM) &&
                 StoreSideReference(WallSensorId::SideLeft, leftCapture, actualDistanceM);
             if (storedReference)
             {
@@ -690,9 +690,9 @@ namespace MazeMap::App::Internal
         WallSensorCalibrationCapture rightCapture{};
         SampleWallCalibrationCaptureAverageRawPair(
             WallSensorId::SideLeft,
-            _vehicle->SideLeft,
+            _vehicle->SideLeftWallSensor(),
             WallSensorId::SideRight,
-            _vehicle->SideRight,
+            _vehicle->SideRightWallSensor(),
             leftCapture,
             rightCapture);
 
@@ -700,7 +700,7 @@ namespace MazeMap::App::Internal
         {
             float actualDistanceM = 0.0f;
             const bool storedReference =
-                TryDistanceToSouthWall(_runtime->RuntimeState(), _vehicle->SideRight, actualDistanceM) &&
+                TryDistanceToSouthWall(_runtime->RuntimeState(), _vehicle->SideRightWallSensor(), actualDistanceM) &&
                 StoreSideReference(WallSensorId::SideRight, rightCapture, actualDistanceM);
             if (storedReference)
             {
@@ -746,9 +746,9 @@ namespace MazeMap::App::Internal
         WallSensorCalibrationCapture frontRightCapture{};
         SampleWallCalibrationCaptureAverageRawPair(
             WallSensorId::FrontLeft,
-            _vehicle->FrontLeft,
+            _vehicle->FrontLeftWallSensor(),
             WallSensorId::FrontRight,
-            _vehicle->FrontRight,
+            _vehicle->FrontRightWallSensor(),
             frontLeftCapture,
             frontRightCapture);
 

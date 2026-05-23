@@ -32,7 +32,7 @@ DEFAULT_TUNING: Dict[str, float] = {
     "launch_sigma_r_sqrt_q": 0.050,
     "grip_sigma_u_sqrt_q": 0.012,
     "grip_sigma_r_sqrt_q": 0.025,
-    "grip_sigma_omega_sqrt_q": 0.400,
+    "grip_sigma_wheel_speed_sqrt_q": 0.400,
     "inconsistent_sigma_u_sqrt_q": 0.030,
     "inconsistent_sigma_r_sqrt_q": 0.070,
 }
@@ -47,8 +47,8 @@ METRIC_PATHS = {
     "raw_gyro_rmse_radps": ("prediction", "raw_gyro_rmse_radps"),
     "encoder_yaw_rate_rmse_radps": ("prediction", "encoder_yaw_rate_rmse_radps"),
     "body_forward_speed_rmse_mps": ("prediction", "body_forward_speed_rmse_mps"),
-    "accel_body_x_rmse_mps2": ("prediction", "accel_body_x_rmse_mps2"),
-    "accel_body_y_rmse_mps2": ("prediction", "accel_body_y_rmse_mps2"),
+    "accel_body_right_rmse_mps2": ("prediction", "accel_body_right_rmse_mps2"),
+    "accel_body_forward_rmse_mps2": ("prediction", "accel_body_forward_rmse_mps2"),
     "post_position_rmse_mm": ("consistency", "post_position_rmse_mm"),
     "post_heading_rmse_deg": ("consistency", "post_heading_rmse_deg"),
 }
@@ -58,8 +58,8 @@ METRIC_WEIGHTS = {
     "raw_gyro_rmse_radps": 3.0,
     "encoder_yaw_rate_rmse_radps": 1.5,
     "body_forward_speed_rmse_mps": 1.0,
-    "accel_body_x_rmse_mps2": 0.5,
-    "accel_body_y_rmse_mps2": 0.5,
+    "accel_body_right_rmse_mps2": 0.5,
+    "accel_body_forward_rmse_mps2": 0.5,
     "post_position_rmse_mm": 1.25,
     "post_heading_rmse_deg": 1.0,
 }

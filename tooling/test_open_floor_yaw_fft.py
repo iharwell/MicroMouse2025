@@ -74,7 +74,7 @@ class OpenFloorYawFftTest(unittest.TestCase):
                 [
                     "open_floor_measurement [1] run_start: run_id=ofm_yaw_fft_test;fan_duty_cycle_start=0.8",
                     (
-                        "open_floor_main [2] ukf_dump_params_mass_geometry: "
+                        "open_floor_main [2] plant_dump_params_mass_geometry: "
                         f"mass_kg=0.140;effective_longitudinal_mass_kg=0.140;yaw_inertia_kg_m2={yaw_inertia_kg_m2};"
                         f"track_width_m={track_width_m};contact_patch_longitudinal_offset_m=0.0;wheel_radius_m={wheel_radius_m};"
                         f"equivalent_wheel_inertia_kg_m2={configured_equivalent_wheel_inertia_kg_m2}"
@@ -87,13 +87,13 @@ class OpenFloorYawFftTest(unittest.TestCase):
             "\n".join(
                 [
                     (
-                        "open_floor_main [2] ukf_dump_params_mass_geometry: "
+                        "open_floor_main [2] plant_dump_params_mass_geometry: "
                         f"mass_kg=0.140;effective_longitudinal_mass_kg=0.140;yaw_inertia_kg_m2={yaw_inertia_kg_m2};"
                         f"track_width_m={track_width_m};contact_patch_longitudinal_offset_m=0.0;wheel_radius_m={wheel_radius_m};"
                         f"equivalent_wheel_inertia_kg_m2={configured_equivalent_wheel_inertia_kg_m2}"
                     ),
                     (
-                        "open_floor_main [3] ukf_dump_params_drive_electrical: "
+                        "open_floor_main [3] plant_dump_params_drive_electrical: "
                         "supply_voltage_v=8.0;drive_resistance_ohms=4.0;torque_constant_nm_per_a=0.01;"
                         "speed_constant_radps_per_volt=1000000000000.0;no_load_current_a=0.0;gear_ratio=1.0"
                     ),

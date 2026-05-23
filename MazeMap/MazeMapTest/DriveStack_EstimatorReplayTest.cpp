@@ -93,29 +93,22 @@ namespace MazeMap
             encoderState.rightTotalCounts += static_cast<std::int64_t>(rightDeltaCounts);
 
             SensorSnapshot snapshot{};
-            snapshot.gyroRawRadps = gyroRawRadps;
-            snapshot.gyroRadps = std::isfinite(gyroRawRadps) ? gyroRawRadps : 0.0f;
-            snapshot.encoderObservationValid = encoderObservationValid;
-            snapshot.encoderObservation.totalLeftCounts = leftDeltaCounts;
-            snapshot.encoderObservation.totalRightCounts = rightDeltaCounts;
-            snapshot.encoderObservation.leftDistanceDeltaM =
-                static_cast<float>(leftDeltaCounts) * distancePerCountM;
-            snapshot.encoderObservation.rightDistanceDeltaM =
-                static_cast<float>(rightDeltaCounts) * distancePerCountM;
-            snapshot.encoderObservation.leftVelocityMps =
-                snapshot.encoderObservation.leftDistanceDeltaM / dtSeconds;
-            snapshot.encoderObservation.rightVelocityMps =
-                snapshot.encoderObservation.rightDistanceDeltaM / dtSeconds;
-            snapshot.encoderObservation.omegaLeftRadps =
-                Vehicle::WheelOmegaFromLinearVelocity(snapshot.encoderObservation.leftVelocityMps);
-            snapshot.encoderObservation.omegaRightRadps =
-                Vehicle::WheelOmegaFromLinearVelocity(snapshot.encoderObservation.rightVelocityMps);
-            snapshot.leftEncoderTotalCounts = encoderState.leftTotalCounts;
-            snapshot.rightEncoderTotalCounts = encoderState.rightTotalCounts;
-            snapshot.leftEncoderDistanceM =
-                Vehicle::DriveEncoderDistanceFromCounts(snapshot.leftEncoderTotalCounts);
-            snapshot.rightEncoderDistanceM =
-                Vehicle::DriveEncoderDistanceFromCounts(snapshot.rightEncoderTotalCounts);
+            snapshot.SetRawYawRateRadps(gyroRawRadps);
+            snapshot.SetYawRateRadps(std::isfinite(gyroRawRadps) ? gyroRawRadps : 0.0f);
+            MazeMap::EncoderObs encoderObservation{};
+            encoderObservation.SetTotalLeftCounts(leftDeltaCounts);
+            encoderObservation.SetTotalRightCounts(rightDeltaCounts);
+            encoderObservation.SetLeftDistanceDeltaM(static_cast<float>(leftDeltaCounts) * distancePerCountM);
+            encoderObservation.SetRightDistanceDeltaM(static_cast<float>(rightDeltaCounts) * distancePerCountM);
+            encoderObservation.SetLeftVelocityMps(encoderObservation.LeftDistanceDeltaM() / dtSeconds);
+            encoderObservation.SetRightVelocityMps(encoderObservation.RightDistanceDeltaM() / dtSeconds);
+            encoderObservation.SetLeftWheelSpeedRadps(Vehicle::WheelSpeedFromLinearVelocity(encoderObservation.LeftVelocityMps()));
+            encoderObservation.SetRightWheelSpeedRadps(Vehicle::WheelSpeedFromLinearVelocity(encoderObservation.RightVelocityMps()));
+            snapshot.SetEncoderObservation(encoderObservation, encoderObservationValid);
+            snapshot.SetEncoderTotals(encoderState.leftTotalCounts, encoderState.rightTotalCounts);
+            snapshot.SetEncoderDistancesM(
+                Vehicle::DriveEncoderDistanceFromCounts(snapshot.LeftEncoderTotalCounts()),
+                Vehicle::DriveEncoderDistanceFromCounts(snapshot.RightEncoderTotalCounts()));
             return snapshot;
         }
 
@@ -169,9 +162,9 @@ namespace MazeMap
 
             ReplayScenarioResult result{};
             result.estimatorFault = runtime.Estimator().HasFault();
-            result.leftEncoderTotalCounts = snapshot.leftEncoderTotalCounts;
-            result.rightEncoderTotalCounts = snapshot.rightEncoderTotalCounts;
-            result.leftEncoderDistanceM = snapshot.leftEncoderDistanceM;
+            result.leftEncoderTotalCounts = snapshot.LeftEncoderTotalCounts();
+            result.rightEncoderTotalCounts = snapshot.RightEncoderTotalCounts();
+            result.leftEncoderDistanceM = snapshot.LeftEncoderDistanceM();
             result.expectedForwardM = Vehicle::DriveEncoderDistanceFromCounts(encoderState.leftTotalCounts);
             result.expectedYawRad = expectedYawRad;
             result.expectedArcXM = expectedArcXM;
@@ -180,13 +173,13 @@ namespace MazeMap
             result.expectedYawRateRadps = expectedYawRateRadps;
             result.actualEncoderYawRateRadps =
                 Vehicle::BodyYawRateFromWheelLinear(
-                    Vehicle::WheelLinearVelocityFromOmega(snapshot.encoderObservation.omegaLeftRadps),
-                    Vehicle::WheelLinearVelocityFromOmega(snapshot.encoderObservation.omegaRightRadps));
+                    Vehicle::WheelLinearVelocityFromWheelSpeed(snapshot.EncoderObservation().LeftWheelSpeedRadps()),
+                    Vehicle::WheelLinearVelocityFromWheelSpeed(snapshot.EncoderObservation().RightWheelSpeedRadps()));
             result.positionXM = state.GetPositionX();
             result.positionYM = state.GetPositionY();
-            result.yawRad = state.GetOrientation();
-            result.velocityMps = state.GetVelocity();
-            result.yawRateRadps = state.GetRotationalVelocity();
+            result.yawRad = state.GetHeading();
+            result.velocityMps = state.GetForwardVelocity();
+            result.yawRateRadps = state.GetYawRate();
             return result;
         }
 

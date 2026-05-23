@@ -616,7 +616,7 @@ Current names are misleading. Suggested replacements:
 - `pre_sensing_start_us`
 - `wall_dark_done_us`
 - `encoder_sample_us`
-- `ukf_predict_start_us`
+- `estimator_predict_start_us`
 
 If preserving the old fields for compatibility is required, then at least add new correctly named fields and stop interpreting the old pair as encoder timing.
 

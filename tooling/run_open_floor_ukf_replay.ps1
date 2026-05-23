@@ -8,6 +8,7 @@ param(
     [string]$CompetitionArchiveRoot = "",
     [string]$Metrics = "",
     [switch]$KnownStationarySeed,
+    [switch]$EncoderPseudoMeasurement,
     [switch]$SkipCompetitionArchive,
     [switch]$SkipToolBuild
 )
@@ -31,13 +32,14 @@ $competitionAnalyzerPath = Join-Path $repoRoot "tooling\analyze_competition_feed
 $mazeMapBinDir = Join-Path $repoRoot "MazeMap\MazeMap\x64\Release"
 $mazeMapDllPath = Join-Path $mazeMapBinDir "MazeMap.dll"
 $mazeMapLibPath = Join-Path $mazeMapBinDir "MazeMap.lib"
-$mazeMapFreshnessInputs = @(
+$estimatorFreshnessInputs = @(
     (Join-Path $repoRoot "MazeMap\MazeMap\Estimator.h"),
     (Join-Path $repoRoot "MazeMap\MazeMap\Estimator.cpp"),
     (Join-Path $repoRoot "MazeMap\MazeMap\PlantModel.h"),
     (Join-Path $repoRoot "MazeMap\MazeMap\PlantModel.cpp"),
-    (Join-Path $repoRoot "MazeMap\MazeMap\SrUkfCore.h"),
-    (Join-Path $repoRoot "MazeMap\MazeMap\SrUkfCore.cpp")
+    (Join-Path $repoRoot "MazeMap\MazeMap\Vehicle.h"),
+    (Join-Path $repoRoot "MazeMap\MazeMap\Vehicle.cpp"),
+    (Join-Path $repoRoot "MazeMap\MazeMap\LSM6DSV16X_IMU.h")
 )
 
 $msbuild = (Get-Command msbuild.exe -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -First 1)
@@ -71,10 +73,14 @@ if (-not (Test-Path $mazeMapLibPath)) {
     throw "MazeMap.lib was not found at '$mazeMapLibPath'. Build MazeMap separately before running this tool."
 }
 
+if (-not [string]::IsNullOrWhiteSpace($Tuning)) {
+    throw "-Tuning is no longer supported by the canonical Estimator configuration."
+}
+
 $mazeMapBinaryTimeUtc = (Get-Item -LiteralPath $mazeMapDllPath).LastWriteTimeUtc
 
 $staleSources = @(
-    $mazeMapFreshnessInputs |
+    $estimatorFreshnessInputs |
         Where-Object {
             (Test-Path -LiteralPath $_) -and
             ((Get-Item -LiteralPath $_).LastWriteTimeUtc -gt $mazeMapBinaryTimeUtc)
@@ -98,7 +104,7 @@ if ($staleSources.Count -gt 0) {
 }
 
 if ($staleSources.Count -gt 0) {
-    throw "MazeMap runtime appears stale relative to UKF sources. Rebuild MazeMap separately before replaying. Newer changed files: $($staleSources -join ', ')"
+    throw "MazeMap runtime appears stale relative to Estimator sources. Rebuild MazeMap separately before replaying. Newer changed files: $($staleSources -join ', ')"
 }
 
 if (-not $SkipToolBuild) {
@@ -114,9 +120,6 @@ if (Test-Path $mazeMapDllPath) {
 
 $arguments = @("--root", $Root)
 $arguments += @("--output", $Output)
-if (-not [string]::IsNullOrWhiteSpace($Tuning)) {
-    $arguments += @("--tuning", $Tuning)
-}
 if (-not [string]::IsNullOrWhiteSpace($RunId)) {
     $arguments += @("--run-id", $RunId)
 }
@@ -131,6 +134,9 @@ if (-not [string]::IsNullOrWhiteSpace($Metrics)) {
 }
 if ($KnownStationarySeed) {
     $arguments += "--known-stationary-seed"
+}
+if ($EncoderPseudoMeasurement) {
+    $arguments += "--encoder-pseudo-measurement"
 }
 
 & $exePath @arguments

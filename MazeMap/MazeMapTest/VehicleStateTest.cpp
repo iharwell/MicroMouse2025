@@ -36,13 +36,14 @@ namespace MazeMap
 #define VEHICLE_STATE_LOG_TEST_FLATTENED_ROW_FIELDS(X) \
     X(float, ukf_state_px_m) \
     X(float, ukf_state_py_m) \
-    X(float, ukf_state_psi_rad) \
-    X(float, ukf_state_u_mps) \
-    X(float, ukf_state_v_mps) \
-    X(float, ukf_state_r_radps) \
-    X(float, ukf_state_omega_l_radps) \
-    X(float, ukf_state_omega_r_radps) \
-    X(float, ukf_state_bgz_radps)
+    X(float, ukf_state_heading_rad) \
+    X(float, ukf_state_vf_mps) \
+    X(float, ukf_state_vr_mps) \
+    X(float, ukf_state_yaw_rate_radps) \
+    X(float, ukf_state_delta_af_mps2) \
+    X(float, ukf_state_delta_ar_mps2) \
+    X(float, ukf_state_delta_yaw_accel_radps2) \
+    X(float, ukf_state_gyro_bias_z_radps)
 
         MMLOG_DEFINE_ROW(
             VehicleStateLogTestFlattenedRow,
@@ -55,21 +56,21 @@ namespace MazeMap
     TEST_CLASS(VehicleStateTest)
     {
     public:
-        TEST_METHOD(VehicleWheelOmegasFromBodyVelocityMatchesBodyKinematics)
+        TEST_METHOD(VehicleWheelSpeedsFromBodyVelocityMatchesBodyKinematics)
         {
             constexpr float forwardMps = 0.72f;
             constexpr float yawRateRadps = 1.35f;
 
-            float leftOmegaRadps = 0.0f;
-            float rightOmegaRadps = 0.0f;
-            Vehicle::WheelOmegasFromBodyVelocity(
+            float leftWheelSpeedRadps = 0.0f;
+            float rightWheelSpeedRadps = 0.0f;
+            Vehicle::WheelSpeedsFromBodyVelocity(
                 forwardMps,
                 yawRateRadps,
-                leftOmegaRadps,
-                rightOmegaRadps);
+                leftWheelSpeedRadps,
+                rightWheelSpeedRadps);
 
-            const float leftWheelMps = Vehicle::WheelLinearVelocityFromOmega(leftOmegaRadps);
-            const float rightWheelMps = Vehicle::WheelLinearVelocityFromOmega(rightOmegaRadps);
+            const float leftWheelMps = Vehicle::WheelLinearVelocityFromWheelSpeed(leftWheelSpeedRadps);
+            const float rightWheelMps = Vehicle::WheelLinearVelocityFromWheelSpeed(rightWheelSpeedRadps);
 
             Assert::AreEqual(
                 Vehicle::LeftWheelLinearVelocityFromBody(forwardMps, yawRateRadps),
@@ -92,25 +93,25 @@ namespace MazeMap
         TEST_METHOD(VehicleStateIsStationaryUsesCurrentUkfThresholds)
         {
             const float wheelSpeedThresholdRadps =
-                Vehicle::WheelOmegaFromLinearVelocity(kStationaryEncoderVelocitySigmaMps);
+                Vehicle::WheelSpeedFromLinearVelocity(kStationaryEncoderVelocitySigmaMps);
 
             VehicleState stationaryState;
             stationaryState.SetPosition(Eigen::Vector2f(0.40f, -0.18f));
-            stationaryState.SetOrientation(0.35f);
-            stationaryState.SetVelocity(0.0f);
-            stationaryState.SetLateralVelocity(0.0f);
-            stationaryState.SetRotationalVelocity(0.5f * (3.0f * kImuYawRateSigmaRadps));
+            stationaryState.SetHeading(0.35f);
+            stationaryState.SetForwardVelocity(0.0f);
+            stationaryState.SetRightwardVelocity(0.0f);
+            stationaryState.SetYawRate(0.5f * (3.0f * kImuYawRateSigmaRadps));
             stationaryState.SetWheelSpeedLeft(0.5f * wheelSpeedThresholdRadps);
             stationaryState.SetWheelSpeedRight(-0.5f * wheelSpeedThresholdRadps);
             stationaryState.SetGyroBiasZ(0.12f);
             Assert::IsTrue(stationaryState.IsStationary());
 
             VehicleState movingState = stationaryState;
-            movingState.SetVelocity(2.0f * kStationaryEncoderVelocitySigmaMps);
+            movingState.SetForwardVelocity(2.0f * kStationaryEncoderVelocitySigmaMps);
             Assert::IsFalse(movingState.IsStationary());
 
             movingState = stationaryState;
-            movingState.SetRotationalVelocity(3.1f * kImuYawRateSigmaRadps);
+            movingState.SetYawRate(3.1f * kImuYawRateSigmaRadps);
             Assert::IsFalse(movingState.IsStationary());
 
             movingState = stationaryState;
@@ -136,7 +137,7 @@ namespace MazeMap
             const PlantModel plantModel(vehicle, runtimeState);
             float plantModelSupplyVoltageV = std::numeric_limits<float>::quiet_NaN();
 
-            const bool wrotePlantDump = plantModel.WriteUkfPlantDebugTextDump(
+            const bool wrotePlantDump = plantModel.WritePlantDebugTextDump(
                 &plantModelSupplyVoltageV,
                 [](
                     void* context,
@@ -144,7 +145,7 @@ namespace MazeMap
                     const char* format,
                     std::va_list args) noexcept
                 {
-                    if (std::strcmp(type, "ukf_dump_params_drive_electrical") != 0)
+                    if (std::strcmp(type, "plant_dump_params_drive_electrical") != 0)
                     {
                         return true;
                     }
@@ -179,13 +180,14 @@ namespace MazeMap
         {
             VehicleState state;
             state.SetPosition(Eigen::Vector2f(1.25f, -2.5f));
-            state.SetOrientation(3.75f);
-            state.SetVelocity(-4.125f);
-            state.SetLateralVelocity(5.5f);
-            state.SetRotationalVelocity(-6.625f);
-            state.SetWheelSpeedLeft(7.875f);
-            state.SetWheelSpeedRight(-8.25f);
-            state.SetGyroBiasZ(9.5f);
+            state.SetHeading(3.75f);
+            state.SetForwardVelocity(-4.125f);
+            state.SetRightwardVelocity(5.5f);
+            state.SetYawRate(-6.625f);
+            state.SetForwardAccelerationResidual(7.875f);
+            state.SetRightwardAccelerationResidual(-8.25f);
+            state.SetYawAccelResidual(9.5f);
+            state.SetGyroBiasZ(-10.25f);
 
             VehicleStateLogTestRow projected{};
             projected.Set(state);
@@ -193,19 +195,20 @@ namespace MazeMap
             VehicleStateLogTestFlattenedRow flattened{};
             flattened.ukf_state_px_m = state.GetPositionX();
             flattened.ukf_state_py_m = state.GetPositionY();
-            flattened.ukf_state_psi_rad = state.GetOrientation();
-            flattened.ukf_state_u_mps = state.GetVelocity();
-            flattened.ukf_state_v_mps = state.GetLateralVelocity();
-            flattened.ukf_state_r_radps = state.GetRotationalVelocity();
-            flattened.ukf_state_omega_l_radps = state.GetWheelSpeedLeft();
-            flattened.ukf_state_omega_r_radps = state.GetWheelSpeedRight();
-            flattened.ukf_state_bgz_radps = state.GetGyroBiasZ();
+            flattened.ukf_state_heading_rad = state.GetHeading();
+            flattened.ukf_state_vf_mps = state.GetForwardVelocity();
+            flattened.ukf_state_vr_mps = state.GetRightwardVelocity();
+            flattened.ukf_state_yaw_rate_radps = state.GetYawRate();
+            flattened.ukf_state_delta_af_mps2 = state.GetForwardAccelerationResidual();
+            flattened.ukf_state_delta_ar_mps2 = state.GetRightwardAccelerationResidual();
+            flattened.ukf_state_delta_yaw_accel_radps2 = state.GetYawAccelResidual();
+            flattened.ukf_state_gyro_bias_z_radps = state.GetGyroBiasZ();
 
             const std::string expectedHeader =
-                "f32_ukf_state_px_m,f32_ukf_state_py_m,f32_ukf_state_psi_rad,"
-                "f32_ukf_state_u_mps,f32_ukf_state_v_mps,f32_ukf_state_r_radps,"
-                "f32_ukf_state_omega_l_radps,f32_ukf_state_omega_r_radps,"
-                "f32_ukf_state_bgz_radps";
+                "f32_ukf_state_px_m,f32_ukf_state_py_m,f32_ukf_state_heading_rad,"
+                "f32_ukf_state_vf_mps,f32_ukf_state_vr_mps,f32_ukf_state_yaw_rate_radps,"
+                "f32_ukf_state_delta_af_mps2,f32_ukf_state_delta_ar_mps2,"
+                "f32_ukf_state_delta_yaw_accel_radps2,f32_ukf_state_gyro_bias_z_radps";
 
             Assert::AreEqual(expectedHeader, std::string(VehicleStateLogTestRow::header_cstr()));
             Assert::AreEqual(sizeof(flattened), sizeof(projected));

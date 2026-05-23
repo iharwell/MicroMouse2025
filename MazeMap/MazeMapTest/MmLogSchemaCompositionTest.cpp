@@ -15,25 +15,25 @@ namespace
     {
         float pxM{};
         float pyM{};
-        float psiRad{};
-        float uMps{};
-        float vMps{};
-        float rRadps{};
-        float omegaLRadps{};
-        float omegaRRadps{};
-        float bgzRadps{};
+        float headingRad{};
+        float forwardSpeedMps{};
+        float rightwardSpeedMps{};
+        float yawRateRadps{};
+        float leftWheelSpeedRadps{};
+        float rightWheelSpeedRadps{};
+        float gyroBiasZRadps{};
     };
 
 #define MMLOG_TEST_VECTOR_ENTRY_FIELDS(X) \
     X(float, px_m) \
     X(float, py_m) \
-    X(float, psi_rad) \
-    X(float, u_mps) \
-    X(float, v_mps) \
-    X(float, r_radps) \
-    X(float, omega_l_radps) \
-    X(float, omega_r_radps) \
-    X(float, bgz_radps)
+    X(float, heading_rad) \
+    X(float, vf_mps) \
+    X(float, vr_mps) \
+    X(float, yaw_rate_radps) \
+    X(float, left_wheel_speed_radps) \
+    X(float, right_wheel_speed_radps) \
+    X(float, gyro_bias_z_radps)
 
     MMLOG_DEFINE_PRIVATE_ENTRY_WITH_BODY(
         MmLogTestVectorEntry,
@@ -42,13 +42,13 @@ namespace
         {
             px_m = source.pxM;
             py_m = source.pyM;
-            psi_rad = source.psiRad;
-            u_mps = source.uMps;
-            v_mps = source.vMps;
-            r_radps = source.rRadps;
-            omega_l_radps = source.omegaLRadps;
-            omega_r_radps = source.omegaRRadps;
-            bgz_radps = source.bgzRadps;
+            heading_rad = source.headingRad;
+            vf_mps = source.forwardSpeedMps;
+            vr_mps = source.rightwardSpeedMps;
+            yaw_rate_radps = source.yawRateRadps;
+            left_wheel_speed_radps = source.leftWheelSpeedRadps;
+            right_wheel_speed_radps = source.rightWheelSpeedRadps;
+            gyro_bias_z_radps = source.gyroBiasZRadps;
         });
 
 #define MMLOG_TEST_HIERARCHICAL_ROW_FIELDS(X) \
@@ -70,13 +70,13 @@ namespace
     X(std::uint8_t, mode_id) \
     X(float, state_px_m) \
     X(float, state_py_m) \
-    X(float, state_psi_rad) \
-    X(float, state_u_mps) \
-    X(float, state_v_mps) \
-    X(float, state_r_radps) \
-    X(float, state_omega_l_radps) \
-    X(float, state_omega_r_radps) \
-    X(float, state_bgz_radps) \
+    X(float, state_heading_rad) \
+    X(float, state_vf_mps) \
+    X(float, state_vr_mps) \
+    X(float, state_yaw_rate_radps) \
+    X(float, state_left_wheel_speed_radps) \
+    X(float, state_right_wheel_speed_radps) \
+    X(float, state_gyro_bias_z_radps) \
     X(float, command_mps)
 
     MMLOG_DEFINE_ROW(MmLogTestFlattenedRow, MMLOG_TEST_FLATTENED_ROW_FIELDS);
@@ -95,9 +95,10 @@ namespace MazeMap
         {
             const std::string expected =
                 "u32_tick_us,u8_mode_id,"
-                "f32_state_px_m,f32_state_py_m,f32_state_psi_rad,"
-                "f32_state_u_mps,f32_state_v_mps,f32_state_r_radps,"
-                "f32_state_omega_l_radps,f32_state_omega_r_radps,f32_state_bgz_radps,"
+                "f32_state_px_m,f32_state_py_m,f32_state_heading_rad,"
+                "f32_state_vf_mps,f32_state_vr_mps,f32_state_yaw_rate_radps,"
+                "f32_state_left_wheel_speed_radps,f32_state_right_wheel_speed_radps,"
+                "f32_state_gyro_bias_z_radps,"
                 "f32_command_mps";
 
             Assert::AreEqual(expected, std::string(MmLogTestHierarchicalRow::header_cstr()));
@@ -145,13 +146,13 @@ namespace MazeMap
             flattened.mode_id = 0x7BU;
             flattened.state_px_m = source.pxM;
             flattened.state_py_m = source.pyM;
-            flattened.state_psi_rad = source.psiRad;
-            flattened.state_u_mps = source.uMps;
-            flattened.state_v_mps = source.vMps;
-            flattened.state_r_radps = source.rRadps;
-            flattened.state_omega_l_radps = source.omegaLRadps;
-            flattened.state_omega_r_radps = source.omegaRRadps;
-            flattened.state_bgz_radps = source.bgzRadps;
+            flattened.state_heading_rad = source.headingRad;
+            flattened.state_vf_mps = source.forwardSpeedMps;
+            flattened.state_vr_mps = source.rightwardSpeedMps;
+            flattened.state_yaw_rate_radps = source.yawRateRadps;
+            flattened.state_left_wheel_speed_radps = source.leftWheelSpeedRadps;
+            flattened.state_right_wheel_speed_radps = source.rightWheelSpeedRadps;
+            flattened.state_gyro_bias_z_radps = source.gyroBiasZRadps;
             flattened.command_mps = -10.75f;
 
             Assert::AreEqual(sizeof(flattened), sizeof(hierarchical));

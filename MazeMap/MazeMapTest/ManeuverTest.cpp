@@ -75,15 +75,15 @@ namespace MazeMap
 		static Vehicle MakeTestVehicle(
 			float maxForwardAcceleration,
 			float maxLateralAcceleration,
-			float maxAngularAcceleration,
-			float maxRotationalVelocity,
+			float maxYawAccel,
+			float maxYawRate,
 			float maxSpeed)
 		{
 			Vehicle vehicle;
 			vehicle.SetMaxForwardAcceleration(maxForwardAcceleration);
 			vehicle.SetMaxLateralAcceleration(maxLateralAcceleration);
-			vehicle.SetMaxAngularAcceleration(maxAngularAcceleration);
-			vehicle.SetMaxRotationalVelocity(maxRotationalVelocity);
+			vehicle.SetMaxYawAccel(maxYawAccel);
+			vehicle.SetMaxYawRate(maxYawRate);
 			vehicle.SetMaxSpeed(maxSpeed);
 			return vehicle;
 		}

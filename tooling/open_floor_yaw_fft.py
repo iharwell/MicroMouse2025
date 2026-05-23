@@ -162,7 +162,7 @@ def _extract_mass_geometry_fields(path: Path | None) -> dict[str, float] | None:
         return None
 
     blob = path.read_bytes()
-    marker = b"ukf_dump_params_mass_geometry:"
+    marker = b"plant_dump_params_mass_geometry:"
     start = blob.find(marker)
     if start < 0:
         return None
@@ -251,8 +251,8 @@ def summarize_yaw_fft(
         sample_times_s: list[float] = []
         elapsed_time_s = 0.0
         for row in phase_rows:
-            left_wheel_speed_radps = float(row["left_encoder_omega_radps"])
-            right_wheel_speed_radps = float(row["right_encoder_omega_radps"])
+            left_wheel_speed_radps = float(row["left_encoder_wheel_speed_radps"])
+            right_wheel_speed_radps = float(row["right_encoder_wheel_speed_radps"])
             left_command = float(row["left_drive_command"])
             right_command = float(row["right_drive_command"])
 
@@ -269,7 +269,7 @@ def summarize_yaw_fft(
             elapsed_time_s += 1.0e-6 * int(row["dt_us"])
             sample_times_s.append(elapsed_time_s)
 
-        omega_high_passed = [
+        wheel_speed_high_passed = [
             raw - baseline
             for raw, baseline in zip(
                 wheel_differential_speed_radps,
@@ -320,7 +320,7 @@ def summarize_yaw_fft(
             padded.extend([0.0j] * (fft_size - sample_count))
             return _fft(padded)
 
-        omega_spectrum = spectrum(omega_high_passed)
+        wheel_speed_spectrum = spectrum(wheel_speed_high_passed)
         yaw_spectrum = spectrum(yaw_high_passed)
         torque_spectrum = spectrum(torque_high_passed)
         sample_rate_hz = 1.0 / average_dt_s
@@ -330,7 +330,7 @@ def summarize_yaw_fft(
         for bin_index in range(1, fft_size // 2):
             frequency_hz = bin_index * frequency_resolution_hz
             if FFT_MIN_FREQUENCY_HZ <= frequency_hz <= FFT_MAX_FREQUENCY_HZ:
-                band_bins.append((abs(omega_spectrum[bin_index]), bin_index, frequency_hz))
+                band_bins.append((abs(wheel_speed_spectrum[bin_index]), bin_index, frequency_hz))
         if not band_bins:
             continue
 
@@ -340,12 +340,12 @@ def summarize_yaw_fft(
         oscillation_prominence = peak_amplitude / max(median_band_amplitude, 1.0e-12)
 
         torque_bin = torque_spectrum[peak_bin_index]
-        omega_bin = omega_spectrum[peak_bin_index]
-        if abs(torque_bin) <= 1.0e-12 or abs(omega_bin) <= 1.0e-12:
+        wheel_speed_bin = wheel_speed_spectrum[peak_bin_index]
+        if abs(torque_bin) <= 1.0e-12 or abs(wheel_speed_bin) <= 1.0e-12:
             continue
 
-        wheel_speed_over_torque = omega_bin / torque_bin
-        yaw_over_rigid_wheel = yaw_spectrum[peak_bin_index] / (turn_gain * omega_bin)
+        wheel_speed_over_torque = wheel_speed_bin / torque_bin
+        yaw_over_rigid_wheel = yaw_spectrum[peak_bin_index] / (turn_gain * wheel_speed_bin)
         angular_frequency_radps = 2.0 * math.pi * dominant_frequency_hz
         torque_over_wheel_speed = 1.0 / wheel_speed_over_torque
         phase_corrected_torque_over_wheel_speed = (

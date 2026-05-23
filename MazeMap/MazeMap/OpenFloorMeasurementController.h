@@ -49,12 +49,12 @@ namespace MazeMap::App::Internal::Runtime
     X(std::uint32_t, pwm_latch_us)              \
     X(std::uint32_t, encoder_latch_us)          \
     X(std::uint32_t, encoder_read_done_us)      \
-    X(std::uint32_t, ukf_predict_start_us)      \
-    X(std::uint32_t, ukf_predict_end_us)        \
-    X(std::uint32_t, ukf_predict_duration_us)   \
-    X(std::uint32_t, ukf_update_start_us)       \
-    X(std::uint32_t, ukf_update_end_us)         \
-    X(std::uint32_t, ukf_update_duration_us)    \
+    X(std::uint32_t, estimator_predict_start_us)      \
+    X(std::uint32_t, estimator_predict_end_us)        \
+    X(std::uint32_t, estimator_predict_duration_us)   \
+    X(std::uint32_t, estimator_update_start_us)       \
+    X(std::uint32_t, estimator_update_end_us)         \
+    X(std::uint32_t, estimator_update_duration_us)    \
     X(std::uint32_t, imu_drdy_us)               \
     X(std::uint32_t, imu_read_start_us)         \
     X(std::uint32_t, imu_read_done_us)          \
@@ -97,9 +97,9 @@ namespace MazeMap::App::Internal::Runtime
     X(float,         nhc_residual_mps)             \
     X(float,         nhc_residual_sigma)           \
     X(float,         measured_linear_speed_mps)    \
-    X(float,         measured_angular_speed_radps) \
+    X(float,         measured_yaw_rate_radps)      \
     X(float,         cmd_linear_mps)               \
-    X(float,         cmd_angular_radps)            \
+    X(float,         cmd_yaw_rate_radps)           \
     X(float,         left_drive_command)           \
     X(float,         right_drive_command)          \
     X(float,         left_plant_command)           \
@@ -111,8 +111,8 @@ namespace MazeMap::App::Internal::Runtime
     X(std::uint32_t, encoder_timestamp_us)         \
     X(std::int32_t,  left_encoder_count)           \
     X(std::int32_t,  right_encoder_count)          \
-    X(float,         left_encoder_omega_radps)     \
-    X(float,         right_encoder_omega_radps)    \
+    X(float,         left_encoder_wheel_speed_radps)     \
+    X(float,         right_encoder_wheel_speed_radps)    \
     X(float,         left_encoder_distance_m)      \
     X(float,         right_encoder_distance_m)     \
     X(float,         left_encoder_velocity_mps)    \
@@ -130,8 +130,8 @@ namespace MazeMap::App::Internal::Runtime
     X(float,         gyro_raw_radps)               \
     X(float,         gyro_bias_radps)              \
     X(float,         gyro_radps)                   \
-    X(float,         accel_body_x_mps2)            \
-    X(float,         accel_body_y_mps2)            \
+    X(float,         accel_body_right_mps2)        \
+    X(float,         accel_body_forward_mps2)      \
     X(float,         planar_accel_mps2)            \
     X(std::uint32_t, front_timestamp_us)           \
     X(std::uint32_t, left_timestamp_us)            \
@@ -534,7 +534,6 @@ namespace MazeMap::App::Internal
         static MainStage BuildRegisteredMainStage() noexcept;
         static void TeardownOnRuntimeFault(void* context, const char* reason) noexcept;
 
-        LoopController::SessionOptions BuildLoopOptions() const noexcept;
         void PopulateTimingRowFromState(
             const MazeMap::VehicleState& state,
             Runtime::OpenFloorTimingRow& row) const noexcept;

@@ -169,7 +169,7 @@ class LaunchMagnitudeSummary:
     active_row_count: int
     nonzero_encoder_fraction: float
     peak_abs_linear_speed_mps: float
-    peak_abs_wheel_omega_radps: float
+    peak_abs_wheel_speed_radps: float
     peak_abs_gyro_radps: float
     peak_abs_accel_mps2: float
     max_pose_drift_mm: float
@@ -854,7 +854,7 @@ def analyze_main_csv(
             "row_count": 0,
             "nonzero_encoder_rows": 0,
             "peak_abs_linear_speed_mps": 0.0,
-            "peak_abs_wheel_omega_radps": 0.0,
+            "peak_abs_wheel_speed_radps": 0.0,
             "peak_abs_gyro_radps": 0.0,
             "peak_abs_accel_mps2": 0.0,
             "max_pose_drift_mm": 0.0,
@@ -1048,19 +1048,19 @@ def analyze_main_csv(
             repeat_ids.add(repeat_index)
             bucket["row_count"] = int(bucket["row_count"]) + 1
 
-            left_omega = float(row["left_encoder_omega_radps"])
-            right_omega = float(row["right_encoder_omega_radps"])
-            peak_abs_wheel_omega = max(abs(left_omega), abs(right_omega))
-            if peak_abs_wheel_omega > 0.0:
+            left_wheel_speed_radps = float(row["left_encoder_wheel_speed_radps"])
+            right_wheel_speed_radps = float(row["right_encoder_wheel_speed_radps"])
+            peak_abs_wheel_speed = max(abs(left_wheel_speed_radps), abs(right_wheel_speed_radps))
+            if peak_abs_wheel_speed > 0.0:
                 bucket["nonzero_encoder_rows"] = int(bucket["nonzero_encoder_rows"]) + 1
 
             bucket["peak_abs_linear_speed_mps"] = max(
                 float(bucket["peak_abs_linear_speed_mps"]),
                 abs(float(row["measured_linear_speed_mps"])),
             )
-            bucket["peak_abs_wheel_omega_radps"] = max(
-                float(bucket["peak_abs_wheel_omega_radps"]),
-                peak_abs_wheel_omega,
+            bucket["peak_abs_wheel_speed_radps"] = max(
+                float(bucket["peak_abs_wheel_speed_radps"]),
+                peak_abs_wheel_speed,
             )
             bucket["peak_abs_gyro_radps"] = max(
                 float(bucket["peak_abs_gyro_radps"]),
@@ -1136,7 +1136,7 @@ def analyze_main_csv(
                 active_row_count=row_count,
                 nonzero_encoder_fraction=(nonzero_encoder_rows / row_count) if row_count else 0.0,
                 peak_abs_linear_speed_mps=float(bucket["peak_abs_linear_speed_mps"]),
-                peak_abs_wheel_omega_radps=float(bucket["peak_abs_wheel_omega_radps"]),
+                peak_abs_wheel_speed_radps=float(bucket["peak_abs_wheel_speed_radps"]),
                 peak_abs_gyro_radps=float(bucket["peak_abs_gyro_radps"]),
                 peak_abs_accel_mps2=float(bucket["peak_abs_accel_mps2"]),
                 max_pose_drift_mm=float(bucket["max_pose_drift_mm"]),
@@ -1287,11 +1287,11 @@ def analyze_timing_csv(
             ):
                 continue
             dt_values.append(int(row["dt_us"]))
-            predict_values.append(int(row["ukf_predict_duration_us"]))
-            update_values.append(int(row["ukf_update_duration_us"]))
+            predict_values.append(int(row["estimator_predict_duration_us"]))
+            update_values.append(int(row["estimator_update_duration_us"]))
             control_duration_values.append(float(int(row["control_end_us"]) - int(row["control_start_us"])))
             encoder_window_values.append(float(int(row["encoder_read_done_us"]) - int(row["encoder_latch_us"])))
-            encoder_to_predict_values.append(float(int(row["ukf_predict_start_us"]) - int(row["encoder_read_done_us"])))
+            encoder_to_predict_values.append(float(int(row["estimator_predict_start_us"]) - int(row["encoder_read_done_us"])))
             imu_read_duration_values.append(float(int(row["imu_read_done_us"]) - int(row["imu_read_start_us"])))
             imu_drdy_us = int(row["imu_drdy_us"])
             if imu_drdy_us > 0:
@@ -1486,7 +1486,7 @@ def main() -> int:
             f"abs_cmd={summary.abs_command:.2f}: repeats={summary.repeat_count}, active_rows={summary.active_row_count}, "
             f"nonzero_encoder_rows={summary.nonzero_encoder_fraction * 100.0:.1f}%, "
             f"peak_u={summary.peak_abs_linear_speed_mps:.4f} m/s, "
-            f"peak_wheel_omega={summary.peak_abs_wheel_omega_radps:.4f} rad/s, "
+            f"peak_wheel_speed={summary.peak_abs_wheel_speed_radps:.4f} rad/s, "
             f"peak_gyro={summary.peak_abs_gyro_radps:.4f} rad/s, "
             f"peak_accel={summary.peak_abs_accel_mps2:.4f} m/s^2, "
             f"max_drift={summary.max_pose_drift_mm:.3f} mm"
@@ -1891,12 +1891,12 @@ def main() -> int:
             f"dt_max_us={timing.dt_max_us}"
         )
         print(
-            f"ukf_predict_mean_us={timing.predict_mean_us:.2f}, ukf_predict_p95_us={timing.predict_p95_us:.2f}, "
-            f"ukf_predict_max_us={timing.predict_max_us}"
+            f"estimator_predict_mean_us={timing.predict_mean_us:.2f}, estimator_predict_p95_us={timing.predict_p95_us:.2f}, "
+            f"estimator_predict_max_us={timing.predict_max_us}"
         )
         print(
-            f"ukf_update_mean_us={timing.update_mean_us:.2f}, ukf_update_p95_us={timing.update_p95_us:.2f}, "
-            f"ukf_update_max_us={timing.update_max_us}"
+            f"estimator_update_mean_us={timing.update_mean_us:.2f}, estimator_update_p95_us={timing.update_p95_us:.2f}, "
+            f"estimator_update_max_us={timing.update_max_us}"
         )
         if timing_breakdown is not None:
             print("Timing breakdown summary")

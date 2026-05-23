@@ -3,7 +3,7 @@
 #include "Defines.h"
 #include "WallDetectionThresholds.h"
 
-struct SensorSnapshot;
+class SensorSnapshot;
 
 namespace MazeMap
 {

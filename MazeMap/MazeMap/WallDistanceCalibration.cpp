@@ -677,8 +677,8 @@ bool WallDistanceCalibration::TryComputeFrontWallDistanceThresholds(
     float& offDistanceThresholdM) const
 {
     const float forwardSensorOffsetM = (std::min)(
-        vehicle.FrontLeft.GetPosition().y(),
-        vehicle.FrontRight.GetPosition().y());
+        vehicle.FrontLeftWallSensor().GetPosition().y(),
+        vehicle.FrontRightWallSensor().GetPosition().y());
     if (!MazeMap::TryComputeFrontWallHalfwayIntoAdjacentDistanceM(
             MazeMap::Config::kCellSizeM,
             MazeMap::Config::kMazeWallThicknessM,

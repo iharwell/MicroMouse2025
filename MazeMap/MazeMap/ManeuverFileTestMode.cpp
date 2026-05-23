@@ -167,7 +167,11 @@ namespace MazeMap::App::Internal
                 "Loaded maneuver test queue with %u maneuvers",
                 static_cast<unsigned>(_queue.size()));
             _phase = Phase::LaunchStartupCalibration;
-            _loopController.StageNextSessionState(BuildLoopOptions());
+            const auto& runtimeState = _runtime.RuntimeState();
+            _loopController.StageNextSessionState(
+                Config::kControlPeriodUs,
+                runtimeState.GetPositionX(),
+                runtimeState.GetPositionY());
         }
 
         CommandVector RunTick(
@@ -344,16 +348,6 @@ namespace MazeMap::App::Internal
             RunCompletionHold,
             Complete
         };
-
-        LoopController::SessionOptions BuildLoopOptions() const noexcept
-        {
-            LoopController::SessionOptions options{};
-            const auto& runtimeState = _runtime.RuntimeState();
-            options.controlPeriodUs = Config::kControlPeriodUs;
-            options.SessionStartPointX = runtimeState.GetPositionX();
-            options.SessionStartPointY = runtimeState.GetPositionY();
-            return options;
-        }
 
         void ResetState() noexcept
         {

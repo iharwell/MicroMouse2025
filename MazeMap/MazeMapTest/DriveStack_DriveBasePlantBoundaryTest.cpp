@@ -27,15 +27,15 @@ namespace MazeMap
 
         void SetRollingWheelState(Vehicle& vehicle, VehicleState& runtimeState)
         {
-            float leftOmegaRadps = 0.0f;
-            float rightOmegaRadps = 0.0f;
-            vehicle.WheelOmegasFromBodyVelocity(
-                runtimeState.GetVelocity(),
-                runtimeState.GetRotationalVelocity(),
-                leftOmegaRadps,
-                rightOmegaRadps);
-            runtimeState.SetWheelSpeedLeft(leftOmegaRadps);
-            runtimeState.SetWheelSpeedRight(rightOmegaRadps);
+            float leftWheelSpeedRadps = 0.0f;
+            float rightWheelSpeedRadps = 0.0f;
+            vehicle.WheelSpeedsFromBodyVelocity(
+                runtimeState.GetForwardVelocity(),
+                runtimeState.GetYawRate(),
+                leftWheelSpeedRadps,
+                rightWheelSpeedRadps);
+            runtimeState.SetWheelSpeedLeft(leftWheelSpeedRadps);
+            runtimeState.SetWheelSpeedRight(rightWheelSpeedRadps);
         }
 
         bool IsFlagSet(const std::uint16_t flags, const std::uint16_t flag) noexcept
@@ -88,10 +88,10 @@ namespace MazeMap
             {
                 DriveBasePlantHarness harness;
                 harness.runtimeState.SetPosition(Eigen::Vector2f(0.012f, -0.034f));
-                harness.runtimeState.SetOrientation(0.21f);
-                harness.runtimeState.SetVelocity(0.37f);
-                harness.runtimeState.SetLateralVelocity(-0.025f);
-                harness.runtimeState.SetRotationalVelocity(0.18f);
+                harness.runtimeState.SetHeading(0.21f);
+                harness.runtimeState.SetForwardVelocity(0.37f);
+                harness.runtimeState.SetRightwardVelocity(-0.025f);
+                harness.runtimeState.SetYawRate(0.18f);
                 SetRollingWheelState(harness.vehicle, harness.runtimeState);
 
                 command = harness.drive.ProposeBodyTick(0.55f, 0.25f, 1.10f, 2.50f, 0.40f);
@@ -110,9 +110,9 @@ namespace MazeMap
             FeedbackScenario()
             {
                 DriveBasePlantHarness harness;
-                harness.runtimeState.SetVelocity(0.20f);
-                harness.runtimeState.SetRotationalVelocity(-0.15f);
-                harness.runtimeState.SetOrientation(0.10f);
+                harness.runtimeState.SetForwardVelocity(0.20f);
+                harness.runtimeState.SetYawRate(-0.15f);
+                harness.runtimeState.SetHeading(0.10f);
                 SetRollingWheelState(harness.vehicle, harness.runtimeState);
 
                 (void)harness.drive.ProposeBodyTick(0.80f, 0.25f, 0.30f, 0.40f, 0.18f);
@@ -168,7 +168,7 @@ namespace MazeMap
             AccelerationLongRunScenario()
             {
                 DriveBasePlantHarness harness;
-                initialVelocityMps = harness.runtimeState.GetVelocity();
+                initialVelocityMps = harness.runtimeState.GetForwardVelocity();
                 velocityAtMinimumHorizonMps = initialVelocityMps;
                 minimumVelocityMps = initialVelocityMps;
 
@@ -192,14 +192,14 @@ namespace MazeMap
                     finalComposedForwardAccelMps2 = telemetry.composedForwardAccelMps2;
                     finalTelemetryValidFlags = telemetry.telemetryValidFlags;
 
-                    minimumVelocityMps = (std::min)(minimumVelocityMps, harness.runtimeState.GetVelocity());
+                    minimumVelocityMps = (std::min)(minimumVelocityMps, harness.runtimeState.GetForwardVelocity());
                     if (tick + 1 == kMinimumDiagnosticTicks)
                     {
-                        velocityAtMinimumHorizonMps = harness.runtimeState.GetVelocity();
+                        velocityAtMinimumHorizonMps = harness.runtimeState.GetForwardVelocity();
                     }
                 }
 
-                finalVelocityMps = harness.runtimeState.GetVelocity();
+                finalVelocityMps = harness.runtimeState.GetForwardVelocity();
             }
         };
 
@@ -222,11 +222,11 @@ namespace MazeMap
             VelocityLongRunScenario()
             {
                 DriveBasePlantHarness harness;
-                harness.runtimeState.SetVelocity(0.1f);
+                harness.runtimeState.SetForwardVelocity(0.1f);
                 SetRollingWheelState(harness.vehicle, harness.runtimeState);
 
-                minimumVelocityMps = harness.runtimeState.GetVelocity();
-                maximumVelocityMps = harness.runtimeState.GetVelocity();
+                minimumVelocityMps = harness.runtimeState.GetForwardVelocity();
+                maximumVelocityMps = harness.runtimeState.GetForwardVelocity();
 
                 for (int tick = 0; tick < kVelocityTicks; ++tick)
                 {
@@ -245,7 +245,7 @@ namespace MazeMap
                         requestedYawRatePreserved &&
                         std::fabs(telemetry.requestedYawRateRadps) <= 1.0e-6f;
 
-                    const float velocityMps = harness.runtimeState.GetVelocity();
+                    const float velocityMps = harness.runtimeState.GetForwardVelocity();
                     minimumVelocityMps = (std::min)(minimumVelocityMps, velocityMps);
                     maximumVelocityMps = (std::max)(maximumVelocityMps, velocityMps);
                 }
@@ -253,7 +253,7 @@ namespace MazeMap
 				finalRequestedAccelMps2 = harness.drive.LastTelemetry().composedForwardAccelMps2;
                 finalRequestedYawRateRadps = harness.drive.LastTelemetry().requestedYawRateRadps;
                 finalTelemetryValidFlags = harness.drive.LastTelemetry().telemetryValidFlags;
-                finalVelocityMps = harness.runtimeState.GetVelocity();
+                finalVelocityMps = harness.runtimeState.GetForwardVelocity();
             }
         };
 
@@ -282,7 +282,7 @@ namespace MazeMap
             YawRateLongRunScenario()
             {
                 DriveBasePlantHarness harness;
-                initialYawRateRadps = harness.runtimeState.GetRotationalVelocity();
+                initialYawRateRadps = harness.runtimeState.GetYawRate();
 
                 for (int tick = 0; tick < kYawRateTicks; ++tick)
                 {
@@ -299,17 +299,17 @@ namespace MazeMap
                         std::fabs(telemetry.requestedYawRateRadps - kTargetYawRateRadps) <= 1.0e-6f;
                     forwardVelocityStayedBounded =
                         forwardVelocityStayedBounded &&
-                        std::fabs(harness.runtimeState.GetVelocity()) < 0.10f;
+                        std::fabs(harness.runtimeState.GetForwardVelocity()) < 0.10f;
                     maxAbsForwardVelocityMps =
-                        (std::max)(maxAbsForwardVelocityMps, std::fabs(harness.runtimeState.GetVelocity()));
+                        (std::max)(maxAbsForwardVelocityMps, std::fabs(harness.runtimeState.GetForwardVelocity()));
                     maximumYawRateRadps =
-                        (std::max)(maximumYawRateRadps, harness.runtimeState.GetRotationalVelocity());
+                        (std::max)(maximumYawRateRadps, harness.runtimeState.GetYawRate());
                     finalRequestedYawRateRadps = telemetry.requestedYawRateRadps;
                     finalTelemetryValidFlags = telemetry.telemetryValidFlags;
                 }
 
-                finalYawRateRadps = harness.runtimeState.GetRotationalVelocity();
-                finalYawRad = harness.runtimeState.GetOrientation();
+                finalYawRateRadps = harness.runtimeState.GetYawRate();
+                finalYawRad = harness.runtimeState.GetHeading();
             }
         };
 
@@ -334,8 +334,8 @@ namespace MazeMap
             HeadingHoldLongRunScenario()
             {
                 DriveBasePlantHarness harness;
-                harness.runtimeState.SetOrientation(kInitialYawRad);
-                initialHeadingErrorRad = AbsYawErrorRad(kTargetYawRad, harness.runtimeState.GetOrientation());
+                harness.runtimeState.SetHeading(kInitialYawRad);
+                initialHeadingErrorRad = AbsYawErrorRad(kTargetYawRad, harness.runtimeState.GetHeading());
                 maxAbsHeadingErrorRad = initialHeadingErrorRad;
 
                 for (int tick = 0; tick < kHeadingTicks; ++tick)
@@ -344,7 +344,7 @@ namespace MazeMap
                         harness.ProposeAndIntegrate(kNaN, 0.0f, kNaN, 0.0f, kTargetYawRad);
                     const DriveTelemetry telemetry = harness.drive.LastTelemetry();
                     const float headingErrorRad =
-                        AbsYawErrorRad(kTargetYawRad, harness.runtimeState.GetOrientation());
+                        AbsYawErrorRad(kTargetYawRad, harness.runtimeState.GetHeading());
 
                     commandsFinite = commandsFinite && command.IsFinite();
                     commandEvidenceValid =
@@ -359,11 +359,11 @@ namespace MazeMap
                         (headingErrorRad <= initialHeadingErrorRad + 0.08f);
                     finalRequestedYawRad = telemetry.requestedYawRad;
                     finalTelemetryValidFlags = telemetry.telemetryValidFlags;
-					totalHeadingDelta += (NormalizeAngle(harness.runtimeState.GetRotationalVelocity() * 0.001f));
+					totalHeadingDelta += (NormalizeAngle(harness.runtimeState.GetYawRate() * 0.001f));
                 }
 
-                finalHeadingErrorRad = AbsYawErrorRad(kTargetYawRad, harness.runtimeState.GetOrientation());
-                finalYawRateRadps = harness.runtimeState.GetRotationalVelocity();
+                finalHeadingErrorRad = AbsYawErrorRad(kTargetYawRad, harness.runtimeState.GetHeading());
+                finalYawRateRadps = harness.runtimeState.GetYawRate();
             }
         };
     }

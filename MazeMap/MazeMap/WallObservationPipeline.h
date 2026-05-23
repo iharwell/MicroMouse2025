@@ -24,105 +24,6 @@ namespace MazeMap
         CharacterizationUnavailable
     };
 
-    struct WallEvidenceConfig
-    {
-        float hitWeight = 0.55f;
-        float missWeight = 0.55f;
-        float transitionMissWeight = 0.35f;
-        float unknownDecay = 0.08f;
-        float commitThreshold = 1.00f;
-    };
-
-    class WallDecisionAccumulator
-    {
-    public:
-        void Reset() noexcept
-        {
-            _score = 0.0f;
-            _hitCount = 0U;
-            _missCount = 0U;
-            _unknownCount = 0U;
-        }
-
-        void Update(
-            WallSampleClassification classification,
-            float hitWeight,
-            float missWeight,
-            float unknownDecay) noexcept
-        {
-            switch (classification)
-            {
-            case WallSampleClassification::WallHit:
-                if (std::isfinite(hitWeight) && hitWeight > 0.0f)
-                {
-                    _score += hitWeight;
-                }
-                ++_hitCount;
-                break;
-            case WallSampleClassification::WallMiss:
-                if (std::isfinite(missWeight) && missWeight > 0.0f)
-                {
-                    _score -= missWeight;
-                }
-                ++_missCount;
-                break;
-            case WallSampleClassification::Unknown:
-            default:
-                if (std::isfinite(unknownDecay) && unknownDecay > 0.0f)
-                {
-                    if (_score > 0.0f)
-                    {
-                        _score = (std::max)(0.0f, _score - unknownDecay);
-                    }
-                    else if (_score < 0.0f)
-                    {
-                        _score = (std::min)(0.0f, _score + unknownDecay);
-                    }
-                }
-                ++_unknownCount;
-                break;
-            }
-        }
-
-        void InjectMissImpulse(float missWeight) noexcept
-        {
-            if (std::isfinite(missWeight) && missWeight > 0.0f)
-            {
-                _score -= missWeight;
-            }
-        }
-
-        WallSampleClassification FinalClassification(float commitThreshold) const noexcept
-        {
-            if (!(std::isfinite(commitThreshold) && commitThreshold > 0.0f))
-            {
-                return WallSampleClassification::Unknown;
-            }
-
-            if (_score >= commitThreshold)
-            {
-                return WallSampleClassification::WallHit;
-            }
-            if (_score <= -commitThreshold)
-            {
-                return WallSampleClassification::WallMiss;
-            }
-
-            return WallSampleClassification::Unknown;
-        }
-
-        float Score() const noexcept { return _score; }
-        uint8_t HitCount() const noexcept { return _hitCount; }
-        uint8_t MissCount() const noexcept { return _missCount; }
-        uint8_t UnknownCount() const noexcept { return _unknownCount; }
-
-    private:
-        float _score = 0.0f;
-        uint8_t _hitCount = 0U;
-        uint8_t _missCount = 0U;
-        uint8_t _unknownCount = 0U;
-    };
-
     inline const char* WallMeasurementRejectReasonName(WallMeasurementRejectReason reason) noexcept
     {
         switch (reason)
@@ -154,35 +55,82 @@ namespace MazeMap
 
     // One canonical wall observation emitted by the pipeline. It survives as a value type because
     // preprocessing, estimation, and map evidence all consume the same validated observation shape.
-    struct WallObs
+    class WallObs final
     {
-        bool valid = false;
-        float rho = 0.0f;
-        float confidence = 0.0f;
-        ObsClass cls = ObsClass::Ambiguous;
+    public:
+        WallObs() noexcept = default;
+        WallObs(
+            float rho,
+            float confidence,
+            ObsClass cls,
+            float measurementNoiseSigmaM = 0.0f) noexcept
+            : _valid(true),
+            _rho(rho),
+            _confidence(confidence),
+            _measurementNoiseSigmaM(measurementNoiseSigmaM),
+            _class(cls)
+        {
+        }
+
+        bool IsValid() const noexcept { return _valid; }
+        float Rho() const noexcept { return _rho; }
+        float Confidence() const noexcept { return _confidence; }
+        float MeasurementNoiseSigmaM() const noexcept { return _measurementNoiseSigmaM; }
+        ObsClass Class() const noexcept { return _class; }
+
+        static void BuildFrontWallObservations(
+            bool frontWallObservationValid,
+            bool frontWall,
+            bool frontWallUsesFallbackDetection,
+            bool frontWallUsesCharacterizationDetection,
+            float frontLeftDistanceM,
+            float frontRightDistanceM,
+            float maxRangeM,
+            WallObs& left,
+            WallObs& right,
+            float frontLeftMeasurementNoiseSigmaM = 0.0f,
+            float frontRightMeasurementNoiseSigmaM = 0.0f,
+            float frontLeftConfidence = -1.0f,
+            float frontRightConfidence = -1.0f,
+            ObsClass frontLeftClass = ObsClass::WallLike,
+            ObsClass frontRightClass = ObsClass::WallLike) noexcept;
+
+        static WallObs BuildSideWallObservation(
+            bool distanceValidForControl,
+            bool transitionDetected,
+            bool wallObservation,
+            float sideDistanceM,
+            float maxRangeM,
+            float measurementNoiseSigmaM = 0.0f,
+            float confidence = 0.80f,
+            ObsClass observationClass = ObsClass::WallLike) noexcept;
+
+    private:
+        bool _valid = false;
+        float _rho = 0.0f;
+        float _confidence = 0.0f;
+        float _measurementNoiseSigmaM = 0.0f;
+        ObsClass _class = ObsClass::Ambiguous;
     };
 
-    inline WallObs MakeWallObs(float rho, float confidence, ObsClass cls) noexcept
-    {
-        WallObs observation{};
-        observation.valid = true;
-        observation.rho = rho;
-        observation.confidence = confidence;
-        observation.cls = cls;
-        return observation;
-    }
-
-    inline void BuildFrontWallObservations(
-        bool frontWallObservationValid,
-        bool frontWall,
-        bool frontWallUsesFallbackDetection,
-        bool frontWallUsesCharacterizationDetection,
-        float frontLeftDistanceM,
-        float frontRightDistanceM,
-        float maxRangeM,
+    inline void WallObs::BuildFrontWallObservations(
+        const bool frontWallObservationValid,
+        const bool frontWall,
+        const bool frontWallUsesFallbackDetection,
+        const bool frontWallUsesCharacterizationDetection,
+        const float frontLeftDistanceM,
+        const float frontRightDistanceM,
+        const float maxRangeM,
         WallObs& left,
-        WallObs& right) noexcept
+        WallObs& right,
+        const float frontLeftMeasurementNoiseSigmaM,
+        const float frontRightMeasurementNoiseSigmaM,
+        const float frontLeftConfidence,
+        const float frontRightConfidence,
+        const ObsClass frontLeftClass,
+        const ObsClass frontRightClass) noexcept
     {
+        (void)maxRangeM;
         left = WallObs{};
         right = WallObs{};
         if (!frontWallObservationValid ||
@@ -196,27 +144,55 @@ namespace MazeMap
         const float confidence =
             frontWallUsesCharacterizationDetection ? 0.90f :
             (frontWallUsesFallbackDetection ? 0.60f : 0.80f);
-        left = MakeWallObs((std::clamp)(frontLeftDistanceM, 0.01f, maxRangeM), confidence, ObsClass::WallLike);
-        right = MakeWallObs((std::clamp)(frontRightDistanceM, 0.01f, maxRangeM), confidence, ObsClass::WallLike);
+        const float leftConfidence =
+            std::isfinite(frontLeftConfidence) && (frontLeftConfidence >= 0.0f) ?
+            (std::clamp)(frontLeftConfidence, 0.0f, 1.0f) :
+            confidence;
+        const float rightConfidence =
+            std::isfinite(frontRightConfidence) && (frontRightConfidence >= 0.0f) ?
+            (std::clamp)(frontRightConfidence, 0.0f, 1.0f) :
+            confidence;
+        left = WallObs(
+            frontLeftDistanceM,
+            leftConfidence,
+            frontLeftClass,
+            frontLeftMeasurementNoiseSigmaM);
+        right = WallObs(
+            frontRightDistanceM,
+            rightConfidence,
+            frontRightClass,
+            frontRightMeasurementNoiseSigmaM);
     }
 
-    inline WallObs BuildSideWallObservation(
-        bool distanceValidForControl,
-        bool transitionDetected,
-        bool wallObservation,
-        float sideDistanceM,
-        float maxRangeM) noexcept
+    inline WallObs WallObs::BuildSideWallObservation(
+        const bool distanceValidForControl,
+        const bool transitionDetected,
+        const bool wallObservation,
+        const float sideDistanceM,
+        const float maxRangeM,
+        const float measurementNoiseSigmaM,
+        const float confidence,
+        const ObsClass observationClass) noexcept
     {
+        (void)maxRangeM;
         WallObs observation{};
         if (!distanceValidForControl ||
             transitionDetected ||
-            !wallObservation ||
+            (!wallObservation && (observationClass != ObsClass::OpenLike)) ||
             !(std::isfinite(sideDistanceM) && (sideDistanceM > 0.0f)))
         {
             return observation;
         }
 
-        observation = MakeWallObs((std::clamp)(sideDistanceM, 0.01f, maxRangeM), 0.80f, ObsClass::WallLike);
+        const float resolvedConfidence =
+            std::isfinite(confidence) ?
+            (std::clamp)(confidence, 0.0f, 1.0f) :
+            0.80f;
+        observation = WallObs(
+            sideDistanceM,
+            resolvedConfidence,
+            observationClass,
+            measurementNoiseSigmaM);
         return observation;
     }
 }

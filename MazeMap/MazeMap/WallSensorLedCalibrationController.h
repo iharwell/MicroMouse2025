@@ -41,7 +41,6 @@ namespace MazeMap::App::Internal
         static void SetSideLeds(bool enabled);
         static void SetAllLeds(bool enabled);
 
-        LoopController::SessionOptions BuildLoopOptions() const noexcept;
         CommandVector OnModeWork(LoopController& loopController);
         void OnPauseGranted(LoopController& loopController);
         void ToggleActiveLeds();

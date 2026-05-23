@@ -4,6 +4,7 @@
 #include "..\MazeMap\LoopController.h"
 
 #include <cmath>
+#include <type_traits>
 
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
@@ -19,11 +20,25 @@ namespace MazeMap
                 MazeMap::App::Internal::LoopController::kInitialModeCallbackTick);
         }
 
-        TEST_METHOD(SessionOptionsRequireExplicitSessionStartPoint)
+        TEST_METHOD(StageNextSessionStateRequiresExplicitSessionStartPoint)
         {
-            MazeMap::App::Internal::LoopController::SessionOptions options{};
-            Assert::IsFalse(std::isfinite(options.SessionStartPointX));
-            Assert::IsFalse(std::isfinite(options.SessionStartPointY));
+            Assert::IsFalse((
+                std::is_invocable_v<
+                    decltype(&MazeMap::App::Internal::LoopController::StageNextSessionState),
+                    MazeMap::App::Internal::LoopController*,
+                    std::uint32_t>));
+            Assert::IsTrue((
+                std::is_invocable_v<
+                    decltype(&MazeMap::App::Internal::LoopController::StageNextSessionState),
+                    MazeMap::App::Internal::LoopController*,
+                    std::uint32_t,
+                    float,
+                    float,
+                    MazeMap::App::Internal::LoopController::WallMask,
+                    bool,
+                    bool,
+                    bool,
+                    bool>));
         }
     };
 }

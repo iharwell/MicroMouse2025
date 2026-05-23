@@ -54,9 +54,9 @@ namespace MazeMap
                 targetYawAccelRadps2,
                 targetYawRad);
 
-        const float observedForwardMps = _runtimeState.GetVelocity();
-        const float observedYawRateRadps = _runtimeState.GetRotationalVelocity();
-        const float observedYawRad = _runtimeState.GetOrientation();
+        const float observedForwardMps = _runtimeState.GetForwardVelocity();
+        const float observedYawRateRadps = _runtimeState.GetYawRate();
+        const float observedYawRad = _runtimeState.GetHeading();
 
         float forwardFeedbackAccelMps2 = (std::numeric_limits<float>::quiet_NaN)();
         if (std::isfinite(targetForwardMps) && std::isfinite(observedForwardMps))

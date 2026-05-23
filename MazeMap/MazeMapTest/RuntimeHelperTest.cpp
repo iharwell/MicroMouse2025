@@ -288,10 +288,10 @@ namespace MazeMap::App
 
         TEST_METHOD(Lsm6Dsv16xGyroProjectYawConversionFlipsSensorCounterclockwiseSign)
         {
-            MazeMap::Vehicle::ImuBackLeft imu;
+            MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13> imu;
             constexpr int16_t rawSample = 3200;
 
-            Assert::AreEqual(-1.0f, MazeMap::Vehicle::ImuBackLeft::ClockwiseYawFromSensorZSign(), 1.0e-6f);
+            Assert::AreEqual(-1.0f, MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::ClockwiseYawFromSensorZSign(), 1.0e-6f);
             Assert::AreEqual(
                 -imu.GyroRawToDps(rawSample),
                 imu.GyroRawToClockwiseYawDps(rawSample),

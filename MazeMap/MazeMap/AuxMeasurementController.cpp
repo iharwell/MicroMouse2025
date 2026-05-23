@@ -26,8 +26,8 @@ namespace MazeMap
         limits.SetMaxSpeedMps(vehicle.GetMaxSpeed());
         limits.SetAccelMps2(vehicle.GetMaxForwardAcceleration());
         limits.SetDecelMps2(vehicle.GetMaxForwardAcceleration());
-        limits.SetMaxAngularSpeedRadps(vehicle.GetMaxRotationalVelocity());
-        limits.SetAngularAccelRadps2(vehicle.GetMaxAngularAcceleration());
+        limits.SetMaxAngularSpeedRadps(vehicle.GetMaxYawRate());
+        limits.SetAngularAccelRadps2(vehicle.GetMaxYawAccel());
         return limits;
     }
 
@@ -42,6 +42,7 @@ namespace MazeMap
     {
         const SensorSnapshot& sensors = state.GetSensorSnapshot();
         const DriveTelemetry driveTelemetry = drive.LastTelemetry();
+        const auto& currentCommand = state.GetCurrentCommand();
         row = {};
         row.sample = sample;
         row.phase_id = phaseId;
@@ -49,28 +50,28 @@ namespace MazeMap
         row.fan_enabled = fanEnabled ? 1U : 0U;
         row.pose_x_m = state.GetPositionX();
         row.pose_y_m = state.GetPositionY();
-        row.yaw_rad = state.GetOrientation();
-        row.linear_speed_mps = state.GetVelocity();
-        row.angular_speed_radps = state.GetRotationalVelocity();
-        row.planar_accel_mps2 = sensors.planarAccelMps2;
+        row.heading_rad = state.GetHeading();
+        row.linear_speed_mps = state.GetForwardVelocity();
+        row.yaw_rate_radps = state.GetYawRate();
+        row.planar_accel_mps2 = sensors.PlanarAccelerationMps2();
         row.cmd_linear_mps = driveTelemetry.requestedForwardMps;
-        row.cmd_angular_radps = driveTelemetry.requestedYawRateRadps;
-        row.left_drive_cmd = driveTelemetry.leftDriveCommand;
-        row.right_drive_cmd = driveTelemetry.rightDriveCommand;
-        row.left_encoder_count = static_cast<std::int32_t>(sensors.leftEncoderTotalCounts);
-        row.right_encoder_count = static_cast<std::int32_t>(sensors.rightEncoderTotalCounts);
-        row.left_distance_m = sensors.leftEncoderDistanceM;
-        row.right_distance_m = sensors.rightEncoderDistanceM;
-        row.left_velocity_mps = sensors.encoderObservation.leftVelocityMps;
-        row.right_velocity_mps = sensors.encoderObservation.rightVelocityMps;
-        row.front_wall = sensors.frontWall ? 1U : 0U;
-        row.left_wall = sensors.leftWall ? 1U : 0U;
-        row.right_wall = sensors.rightWall ? 1U : 0U;
-        row.corridor_error_m = sensors.corridorErrorM;
-        row.front_skew_m = sensors.frontSkewM;
-        row.gyro_bias_radps = sensors.gyroBiasRadps;
-        row.gyro_raw_radps = sensors.gyroRawRadps;
-        row.gyro_radps = sensors.gyroRadps;
+        row.cmd_yaw_rate_radps = driveTelemetry.requestedYawRateRadps;
+        row.left_drive_cmd = currentCommand.LeftCommand();
+        row.right_drive_cmd = currentCommand.RightCommand();
+        row.left_encoder_count = static_cast<std::int32_t>(sensors.LeftEncoderTotalCounts());
+        row.right_encoder_count = static_cast<std::int32_t>(sensors.RightEncoderTotalCounts());
+        row.left_distance_m = sensors.LeftEncoderDistanceM();
+        row.right_distance_m = sensors.RightEncoderDistanceM();
+        row.left_velocity_mps = sensors.EncoderObservation().LeftVelocityMps();
+        row.right_velocity_mps = sensors.EncoderObservation().RightVelocityMps();
+        row.front_wall = sensors.HasFrontWall() ? 1U : 0U;
+        row.left_wall = sensors.HasLeftWall() ? 1U : 0U;
+        row.right_wall = sensors.HasRightWall() ? 1U : 0U;
+        row.corridor_error_m = sensors.CorridorErrorM();
+        row.front_skew_m = sensors.FrontSkewM();
+        row.gyro_bias_radps = sensors.YawRateBiasRadps();
+        row.gyro_raw_radps = sensors.RawYawRateRadps();
+        row.gyro_radps = sensors.YawRateRadps();
     }
 
     class AuxMeasurementController final : public IApplicationMode
@@ -161,7 +162,11 @@ namespace MazeMap
             {
                 _phase = Phase::LaunchStartupCalibration;
             }
-            _loopController.StageNextSessionState(BuildLoopOptions());
+            const auto& runtimeState = _runtime.RuntimeState();
+            _loopController.StageNextSessionState(
+                AuxMeasurementConfig::kControlPeriodUs,
+                runtimeState.GetPositionX(),
+                runtimeState.GetPositionY());
         }
 
     private:
@@ -179,16 +184,6 @@ namespace MazeMap
             self->_startupCalibration.Cancel();
             self->_drive.ClearCommandEvidence();
             self->SetFanEnabled(false);
-        }
-
-        LoopController::SessionOptions BuildLoopOptions() const noexcept
-        {
-            LoopController::SessionOptions options{};
-            const auto& runtimeState = _runtime.RuntimeState();
-            options.controlPeriodUs = AuxMeasurementConfig::kControlPeriodUs;
-            options.SessionStartPointX = runtimeState.GetPositionX();
-            options.SessionStartPointY = runtimeState.GetPositionY();
-            return options;
         }
 
         void ResetState() noexcept
@@ -257,9 +252,8 @@ namespace MazeMap
         {
             if (_logRowBuffered)
             {
-                const LoopController::TimingDiagnostics& timing = _loopController.LastDiagnostics();
-                _logRow.t_us = timing.tickStartUs;
-                _logRow.dt_us = timing.dtUs;
+                _logRow.t_us = _loopController.LastTimingTickStartUs();
+                _logRow.dt_us = _loopController.LastTimingDtUs();
                 if (!_runtime.LogUtilityDataRow(_logRow))
                 {
                     return false;
@@ -306,9 +300,8 @@ namespace MazeMap
 
                     if (self->_logRowBuffered)
                     {
-                        const LoopController::TimingDiagnostics& timing = self->_loopController.LastDiagnostics();
-                        self->_logRow.t_us = timing.tickStartUs;
-                        self->_logRow.dt_us = timing.dtUs;
+                        self->_logRow.t_us = self->_loopController.LastTimingTickStartUs();
+                        self->_logRow.dt_us = self->_loopController.LastTimingDtUs();
                         if (!self->_runtime.LogUtilityDataRow(self->_logRow))
                         {
                             self->_runtime.FailActiveMode(
@@ -363,7 +356,7 @@ namespace MazeMap
 
             _turningTractionCommandedSpeedMps +=
                 AuxMeasurementConfig::kTurningTractionSweepAccelMps2 *
-                (std::max)(0.0f, static_cast<float>(_loopController.LastDiagnostics().dtUs) * 1.0e-6f);
+                (std::max)(0.0f, static_cast<float>(_loopController.LastTimingDtUs()) * 1.0e-6f);
             if constexpr (AuxMeasurementConfig::kTurningTractionSweepMaxSpeedMps > 0.0f)
             {
                 _turningTractionCommandedSpeedMps =
@@ -379,7 +372,7 @@ namespace MazeMap
                 yawRateRadps,
                 0.0f,
                 0.0f,
-                state.GetOrientation());
+                state.GetHeading());
         }
 
         CommandVector RunTick(

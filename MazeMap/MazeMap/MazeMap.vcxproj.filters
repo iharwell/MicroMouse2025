@@ -351,9 +351,6 @@
     <ClInclude Include="ImuAccelObs.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="PlanarAccelLateralUpdate.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="RollingAverageWindow.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -385,9 +382,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="StartupWaitProfile.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="SrUkfCore.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="SensorMount.h">
@@ -629,16 +623,10 @@
     <ClCompile Include="PlantModel.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="PlanarAccelLateralUpdate.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="SigmaPointSetSimplex.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="SoftOdometryAid.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="SrUkfCore.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="WallGeometryModel.cpp">

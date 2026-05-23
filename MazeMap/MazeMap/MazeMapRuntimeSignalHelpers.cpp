@@ -178,14 +178,14 @@ namespace MazeMap::App::Internal::Runtime
         if (TryResolveMapQualifiedSideWallReference(
                 maze,
                 state,
-                vehicle.SideLeft,
-                snapshot.leftDistanceValidForControl,
+                vehicle.SideLeftWallSensor(),
+                snapshot.LeftDistanceValidForControl(),
                 leftReference))
         {
             haveLeftCoordinate = TryComputePoseAxisFromObservedWall(
                 state,
-                vehicle.SideLeft,
-                snapshot.sideLeftDistanceM,
+                vehicle.SideLeftWallSensor(),
+                snapshot.SideLeftDistanceM(),
                 leftReference.cell,
                 leftReference.wallDirection,
                 leftCoordinateM);
@@ -194,14 +194,14 @@ namespace MazeMap::App::Internal::Runtime
         if (TryResolveMapQualifiedSideWallReference(
                 maze,
                 state,
-                vehicle.SideRight,
-                snapshot.rightDistanceValidForControl,
+                vehicle.SideRightWallSensor(),
+                snapshot.RightDistanceValidForControl(),
                 rightReference))
         {
             haveRightCoordinate = TryComputePoseAxisFromObservedWall(
                 state,
-                vehicle.SideRight,
-                snapshot.sideRightDistanceM,
+                vehicle.SideRightWallSensor(),
+                snapshot.SideRightDistanceM(),
                 rightReference.cell,
                 rightReference.wallDirection,
                 rightCoordinateM);

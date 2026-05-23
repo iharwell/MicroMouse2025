@@ -18,12 +18,11 @@ namespace MazeMap
     namespace
     {
         constexpr float kZeroLinearVelocityToleranceMps = 0.008f;
-        constexpr float kRadiansToDegrees = 180.0f / PI_F;
-        constexpr float kInPlaceSlipContextDegrees = 22.6f;
         constexpr float kSymmetricFrontLoadFraction = 0.5f;
         constexpr float kStopEnterSpeedMps = 0.02f;
         constexpr float kStopEnterYawRateRadps = 0.20f;
         constexpr float kStopEnterWheelSpeedRadps = 2.0f;
+        constexpr float kPlantResidualDecayTauS = 0.075f;
     }
 
     TEST_CLASS(PlantModelDynamicsTest)
@@ -49,24 +48,24 @@ namespace MazeMap
             constexpr float forwardVelocityMps = 2.5f;
             VehicleState state;
             state.SetPosition(Eigen::Vector2f(0.0f, 0.0f));
-            state.SetOrientation(0.0f);
-            state.SetVelocity(forwardVelocityMps);
-            state.SetLateralVelocity(0.0f);
-            state.SetRotationalVelocity(0.0f);
-            state.SetWheelSpeedLeft(Vehicle::WheelOmegaFromLinearVelocity(forwardVelocityMps));
-            state.SetWheelSpeedRight(Vehicle::WheelOmegaFromLinearVelocity(forwardVelocityMps));
+            state.SetHeading(0.0f);
+            state.SetForwardVelocity(forwardVelocityMps);
+            state.SetRightwardVelocity(0.0f);
+            state.SetYawRate(0.0f);
+            state.SetWheelSpeedLeft(Vehicle::WheelSpeedFromLinearVelocity(forwardVelocityMps));
+            state.SetWheelSpeedRight(Vehicle::WheelSpeedFromLinearVelocity(forwardVelocityMps));
             PlantModel plant(vehicle, state);
-            const float initialYawRateRadps = state.GetRotationalVelocity();
+            const float initialYawRateRadps = state.GetYawRate();
 
             App::Internal::CommandVector control;
             control.SetLeftCommand(0.55f);
             control.SetRightCommand(0.55f);
 
             plant.integrate(control, 0.001f);
-            Assert::IsTrue(std::isfinite(state.GetRotationalVelocity()));
+            Assert::IsTrue(std::isfinite(state.GetYawRate()));
             Assert::AreEqual(
                 initialYawRateRadps,
-                state.GetRotationalVelocity(),
+                state.GetYawRate(),
                 1.0e-6f);
         }
 
@@ -77,10 +76,10 @@ namespace MazeMap
 
             VehicleState state;
             state.SetPosition(Eigen::Vector2f(0.0f, 0.0f));
-            state.SetOrientation(0.0f);
-            state.SetVelocity(0.05f);
-            state.SetLateralVelocity(0.0f);
-            state.SetRotationalVelocity(0.0f);
+            state.SetHeading(0.0f);
+            state.SetForwardVelocity(0.05f);
+            state.SetRightwardVelocity(0.0f);
+            state.SetYawRate(0.0f);
             state.SetWheelSpeedLeft(45.0f);
             state.SetWheelSpeedRight(43.0f);
             PlantModel plant(vehicle, state);
@@ -108,10 +107,10 @@ namespace MazeMap
 
             VehicleState state;
             state.SetPosition(Eigen::Vector2f(0.0f, 0.0f));
-            state.SetOrientation(0.0f);
-            state.SetVelocity(0.05f);
-            state.SetLateralVelocity(0.0f);
-            state.SetRotationalVelocity(0.0f);
+            state.SetHeading(0.0f);
+            state.SetForwardVelocity(0.05f);
+            state.SetRightwardVelocity(0.0f);
+            state.SetYawRate(0.0f);
             state.SetWheelSpeedLeft(55.0f);
             state.SetWheelSpeedRight(55.0f);
             PlantModel plant(vehicle, state);
@@ -159,10 +158,10 @@ namespace MazeMap
 
             VehicleState state;
             state.SetPosition(Eigen::Vector2f(0.0f, 0.0f));
-            state.SetOrientation(0.0f);
-            state.SetVelocity(0.05f);
-            state.SetLateralVelocity(0.0f);
-            state.SetRotationalVelocity(0.0f);
+            state.SetHeading(0.0f);
+            state.SetForwardVelocity(0.05f);
+            state.SetRightwardVelocity(0.0f);
+            state.SetYawRate(0.0f);
             state.SetWheelSpeedLeft(45.0f);
             state.SetWheelSpeedRight(43.0f);
             PlantModel plant(vehicle, state);
@@ -177,19 +176,19 @@ namespace MazeMap
                 L"criterion=all state fields finite\n"
                 L"x_m=" << state.GetPositionX() << L"\n"
                 L"y_m=" << state.GetPositionY() << L"\n"
-                L"yaw_rad=" << state.GetOrientation() << L"\n"
-                L"forward_velocity_mps=" << state.GetVelocity() << L"\n"
-                L"lateral_velocity_mps=" << state.GetLateralVelocity() << L"\n"
-                L"yaw_rate_radps=" << state.GetRotationalVelocity() << L"\n"
+                L"yaw_rad=" << state.GetHeading() << L"\n"
+                L"forward_velocity_mps=" << state.GetForwardVelocity() << L"\n"
+                L"lateral_velocity_mps=" << state.GetRightwardVelocity() << L"\n"
+                L"yaw_rate_radps=" << state.GetYawRate() << L"\n"
                 L"left_wheel_speed_radps=" << state.GetWheelSpeedLeft() << L"\n"
                 L"right_wheel_speed_radps=" << state.GetWheelSpeedRight();
             Assert::IsTrue(
                 std::isfinite(state.GetPositionX()) &&
                 std::isfinite(state.GetPositionY()) &&
-                std::isfinite(state.GetOrientation()) &&
-                std::isfinite(state.GetVelocity()) &&
-                std::isfinite(state.GetLateralVelocity()) &&
-                std::isfinite(state.GetRotationalVelocity()) &&
+                std::isfinite(state.GetHeading()) &&
+                std::isfinite(state.GetForwardVelocity()) &&
+                std::isfinite(state.GetRightwardVelocity()) &&
+                std::isfinite(state.GetYawRate()) &&
                 std::isfinite(state.GetWheelSpeedLeft()) &&
                 std::isfinite(state.GetWheelSpeedRight()) &&
                 std::isfinite(state.GetGyroBiasZ()),
@@ -201,29 +200,29 @@ namespace MazeMap
             auto vehicle = Vehicle{};
             VehicleState state;
             state.SetPosition(Eigen::Vector2f(0.0f, 0.0f));
-            state.SetOrientation(0.0f);
-            state.SetVelocity(0.05f);
-            state.SetLateralVelocity(0.0f);
-            state.SetRotationalVelocity(0.0f);
+            state.SetHeading(0.0f);
+            state.SetForwardVelocity(0.05f);
+            state.SetRightwardVelocity(0.0f);
+            state.SetYawRate(0.0f);
             state.SetWheelSpeedLeft(45.0f);
             state.SetWheelSpeedRight(43.0f);
             auto plant = PlantModel(vehicle, state);
 
             const App::Internal::CommandVector control{};
             const float initialSlipMps =
-                Vehicle::WheelLinearVelocityFromOmega(state.GetWheelSpeedLeft()) -
+                Vehicle::WheelLinearVelocityFromWheelSpeed(state.GetWheelSpeedLeft()) -
                 Vehicle::LeftWheelLinearVelocityFromBody(
-                    state.GetVelocity(),
-                    state.GetRotationalVelocity());
+                    state.GetForwardVelocity(),
+                    state.GetYawRate());
             const float initialSlipAbsMps = std::fabs(initialSlipMps);
             const float initialWheelSpeedRadps = state.GetWheelSpeedLeft();
             plant.integrate(control, 0.001f);
 
             const float finalSlipMps =
-                Vehicle::WheelLinearVelocityFromOmega(state.GetWheelSpeedLeft()) -
+                Vehicle::WheelLinearVelocityFromWheelSpeed(state.GetWheelSpeedLeft()) -
                 Vehicle::LeftWheelLinearVelocityFromBody(
-                    state.GetVelocity(),
-                    state.GetRotationalVelocity());
+                    state.GetForwardVelocity(),
+                    state.GetYawRate());
             const float finalSlipAbsMps = std::fabs(finalSlipMps);
             const float finalWheelSpeedRadps = state.GetWheelSpeedLeft();
             std::wstringstream message;
@@ -247,10 +246,10 @@ namespace MazeMap
             auto vehicle = Vehicle{};
             VehicleState state;
             state.SetPosition(Eigen::Vector2f(0.0f, 0.0f));
-            state.SetOrientation(0.0f);
-            state.SetVelocity(0.05f);
-            state.SetLateralVelocity(0.0f);
-            state.SetRotationalVelocity(0.0f);
+            state.SetHeading(0.0f);
+            state.SetForwardVelocity(0.05f);
+            state.SetRightwardVelocity(0.0f);
+            state.SetYawRate(0.0f);
             state.SetWheelSpeedLeft(45.0f);
             state.SetWheelSpeedRight(43.0f);
             auto plant = PlantModel(vehicle, state);
@@ -258,19 +257,19 @@ namespace MazeMap
 
             const App::Internal::CommandVector control{};
             const float initialSlipMps =
-                Vehicle::WheelLinearVelocityFromOmega(state.GetWheelSpeedRight()) -
+                Vehicle::WheelLinearVelocityFromWheelSpeed(state.GetWheelSpeedRight()) -
                 Vehicle::RightWheelLinearVelocityFromBody(
-                    state.GetVelocity(),
-                    state.GetRotationalVelocity());
+                    state.GetForwardVelocity(),
+                    state.GetYawRate());
             const float initialSlipAbsMps = std::fabs(initialSlipMps);
             const float initialWheelSpeedRadps = state.GetWheelSpeedRight();
             plant.integrate(control, 0.001f);
 
             const float finalSlipMps =
-                Vehicle::WheelLinearVelocityFromOmega(state.GetWheelSpeedRight()) -
+                Vehicle::WheelLinearVelocityFromWheelSpeed(state.GetWheelSpeedRight()) -
                 Vehicle::RightWheelLinearVelocityFromBody(
-                    state.GetVelocity(),
-                    state.GetRotationalVelocity());
+                    state.GetForwardVelocity(),
+                    state.GetYawRate());
             const float finalSlipAbsMps = std::fabs(finalSlipMps);
             const float finalWheelSpeedRadps = state.GetWheelSpeedRight();
             std::wstringstream message;
@@ -294,10 +293,10 @@ namespace MazeMap
             auto vehicle = Vehicle{};
             VehicleState state;
             state.SetPosition(Eigen::Vector2f(0.0f, 0.0f));
-            state.SetOrientation(0.0f);
-            state.SetVelocity(0.05f);
-            state.SetLateralVelocity(0.0f);
-            state.SetRotationalVelocity(0.0f);
+            state.SetHeading(0.0f);
+            state.SetForwardVelocity(0.05f);
+            state.SetRightwardVelocity(0.0f);
+            state.SetYawRate(0.0f);
             state.SetWheelSpeedLeft(55.0f);
             state.SetWheelSpeedRight(55.0f);
 			auto plant = PlantModel(vehicle, state);
@@ -309,10 +308,10 @@ namespace MazeMap
 
             Assert::IsTrue(std::isfinite(state.GetPositionX()));
             Assert::IsTrue(std::isfinite(state.GetPositionY()));
-            Assert::IsTrue(std::isfinite(state.GetOrientation()));
-            Assert::IsTrue(std::isfinite(state.GetVelocity()));
-            Assert::IsTrue(std::isfinite(state.GetLateralVelocity()));
-            Assert::IsTrue(std::isfinite(state.GetRotationalVelocity()));
+            Assert::IsTrue(std::isfinite(state.GetHeading()));
+            Assert::IsTrue(std::isfinite(state.GetForwardVelocity()));
+            Assert::IsTrue(std::isfinite(state.GetRightwardVelocity()));
+            Assert::IsTrue(std::isfinite(state.GetYawRate()));
             Assert::IsTrue(std::isfinite(state.GetWheelSpeedLeft()));
             Assert::IsTrue(std::isfinite(state.GetWheelSpeedRight()));
             Assert::IsTrue(std::isfinite(state.GetGyroBiasZ()));
@@ -332,12 +331,12 @@ namespace MazeMap
             auto vehicle = Vehicle{};
             VehicleState state;
             state.SetPosition(Eigen::Vector2f(0.0f, 0.0f));
-            state.SetOrientation(0.0f);
-            state.SetVelocity(1.0f);
-            state.SetLateralVelocity(0.0f);
-            state.SetRotationalVelocity(0.0f);
-            state.SetWheelSpeedLeft(Vehicle::WheelOmegaFromLinearVelocity(1.0f));
-            state.SetWheelSpeedRight(Vehicle::WheelOmegaFromLinearVelocity(1.0f));
+            state.SetHeading(0.0f);
+            state.SetForwardVelocity(1.0f);
+            state.SetRightwardVelocity(0.0f);
+            state.SetYawRate(0.0f);
+            state.SetWheelSpeedLeft(Vehicle::WheelSpeedFromLinearVelocity(1.0f));
+            state.SetWheelSpeedRight(Vehicle::WheelSpeedFromLinearVelocity(1.0f));
             state.SetGyroBiasZ(0.0f);
             auto plant = PlantModel(vehicle, state);
             constexpr float dtSeconds = 0.001f;
@@ -379,20 +378,20 @@ namespace MazeMap
 
             VehicleState highSlipState;
             highSlipState.SetPosition(Eigen::Vector2f(0.0f, 0.0f));
-            highSlipState.SetOrientation(0.0f);
-            highSlipState.SetVelocity(1.0f);
-            highSlipState.SetLateralVelocity(1.25f);
-            highSlipState.SetRotationalVelocity(0.0f);
-            highSlipState.SetWheelSpeedLeft(Vehicle::WheelOmegaFromLinearVelocity(1.0f));
-            highSlipState.SetWheelSpeedRight(Vehicle::WheelOmegaFromLinearVelocity(1.0f));
+            highSlipState.SetHeading(0.0f);
+            highSlipState.SetForwardVelocity(1.0f);
+            highSlipState.SetRightwardVelocity(1.25f);
+            highSlipState.SetYawRate(0.0f);
+            highSlipState.SetWheelSpeedLeft(Vehicle::WheelSpeedFromLinearVelocity(1.0f));
+            highSlipState.SetWheelSpeedRight(Vehicle::WheelSpeedFromLinearVelocity(1.0f));
             highSlipState.SetGyroBiasZ(0.0f);
             PlantModel highSlipPlant(vehicle, highSlipState);
             float highSlipAccelMps2 = 0.0f;
             for (int tick = 0; tick < 5; ++tick)
             {
-                const float beforeLateralVelocityMps = highSlipState.GetLateralVelocity();
+                const float beforeLateralVelocityMps = highSlipState.GetRightwardVelocity();
                 highSlipPlant.integrate(control, dtSeconds);
-                const float afterLateralVelocityMps = highSlipState.GetLateralVelocity();
+                const float afterLateralVelocityMps = highSlipState.GetRightwardVelocity();
                 highSlipAccelMps2 =
                     (std::max)(
                         highSlipAccelMps2,
@@ -401,20 +400,20 @@ namespace MazeMap
 
             VehicleState extremeSlipState;
             extremeSlipState.SetPosition(Eigen::Vector2f(0.0f, 0.0f));
-            extremeSlipState.SetOrientation(0.0f);
-            extremeSlipState.SetVelocity(1.0f);
-            extremeSlipState.SetLateralVelocity(3.50f);
-            extremeSlipState.SetRotationalVelocity(0.0f);
-            extremeSlipState.SetWheelSpeedLeft(Vehicle::WheelOmegaFromLinearVelocity(1.0f));
-            extremeSlipState.SetWheelSpeedRight(Vehicle::WheelOmegaFromLinearVelocity(1.0f));
+            extremeSlipState.SetHeading(0.0f);
+            extremeSlipState.SetForwardVelocity(1.0f);
+            extremeSlipState.SetRightwardVelocity(3.50f);
+            extremeSlipState.SetYawRate(0.0f);
+            extremeSlipState.SetWheelSpeedLeft(Vehicle::WheelSpeedFromLinearVelocity(1.0f));
+            extremeSlipState.SetWheelSpeedRight(Vehicle::WheelSpeedFromLinearVelocity(1.0f));
             extremeSlipState.SetGyroBiasZ(0.0f);
             PlantModel extremeSlipPlant(vehicle, extremeSlipState);
             float extremeSlipAccelMps2 = 0.0f;
             for (int tick = 0; tick < 5; ++tick)
             {
-                const float beforeLateralVelocityMps = extremeSlipState.GetLateralVelocity();
+                const float beforeLateralVelocityMps = extremeSlipState.GetRightwardVelocity();
                 extremeSlipPlant.integrate(control, dtSeconds);
-                const float afterLateralVelocityMps = extremeSlipState.GetLateralVelocity();
+                const float afterLateralVelocityMps = extremeSlipState.GetRightwardVelocity();
                 extremeSlipAccelMps2 =
                     (std::max)(
                         extremeSlipAccelMps2,
@@ -431,7 +430,7 @@ namespace MazeMap
             Vehicle vehicle;
             vehicle.SetFanDuty(0.80f);
             const float halfTrackM = 0.5f * vehicle.GetTrackWidth();
-            const float contactY = std::fabs(Vehicle::GetPhysicalModel().driveWheelLongitudinalOffsetM);
+            const float contactY = std::fabs(Vehicle::GetDriveWheelLongitudinalOffsetM());
 
             App::Internal::CommandVector control{};
             control.SetLeftCommand(0.0f);
@@ -440,12 +439,12 @@ namespace MazeMap
             constexpr float yawRateRadps = 30.0f;
             VehicleState state;
             state.SetPosition(Eigen::Vector2f(0.0f, 0.0f));
-            state.SetOrientation(0.0f);
-            state.SetVelocity(0.0f);
-            state.SetLateralVelocity(0.0f);
-            state.SetRotationalVelocity(yawRateRadps);
-            state.SetWheelSpeedLeft(Vehicle::WheelOmegaFromLinearVelocity(halfTrackM * yawRateRadps));
-            state.SetWheelSpeedRight(Vehicle::WheelOmegaFromLinearVelocity(-halfTrackM * yawRateRadps));
+            state.SetHeading(0.0f);
+            state.SetForwardVelocity(0.0f);
+            state.SetRightwardVelocity(0.0f);
+            state.SetYawRate(yawRateRadps);
+            state.SetWheelSpeedLeft(Vehicle::WheelSpeedFromLinearVelocity(halfTrackM * yawRateRadps));
+            state.SetWheelSpeedRight(Vehicle::WheelSpeedFromLinearVelocity(-halfTrackM * yawRateRadps));
             PlantModel plant(vehicle, state);
 
             const float totalSustainedLateralForceN =
@@ -455,34 +454,26 @@ namespace MazeMap
             const float rearContactLimitN =
                 0.5f * (1.0f - kSymmetricFrontLoadFraction) * totalSustainedLateralForceN;
 
-            Assert::AreEqual(
-                kInPlaceSlipContextDegrees,
-                std::fabs(plant.contactLateralSlipAngleRad(0U)) * kRadiansToDegrees,
-                0.5f);
-            Assert::AreEqual(
-                kInPlaceSlipContextDegrees,
-                std::fabs(plant.contactLateralSlipAngleRad(1U)) * kRadiansToDegrees,
-                0.5f);
-            Assert::AreEqual(
-                kInPlaceSlipContextDegrees,
-                std::fabs(plant.contactLateralSlipAngleRad(2U)) * kRadiansToDegrees,
-                0.5f);
-            Assert::AreEqual(
-                kInPlaceSlipContextDegrees,
-                std::fabs(plant.contactLateralSlipAngleRad(3U)) * kRadiansToDegrees,
-                0.5f);
+            Assert::AreEqual(0.0f, plant.contactForwardRelativeVelocityMps(0U), 1.0e-6f);
+            Assert::AreEqual(0.0f, plant.contactForwardRelativeVelocityMps(1U), 1.0e-6f);
+            Assert::AreEqual(0.0f, plant.contactForwardRelativeVelocityMps(2U), 1.0e-6f);
+            Assert::AreEqual(0.0f, plant.contactForwardRelativeVelocityMps(3U), 1.0e-6f);
+            Assert::AreEqual(-contactY * yawRateRadps, plant.contactRightRelativeVelocityMps(0U), 1.0e-6f);
+            Assert::AreEqual(-contactY * yawRateRadps, plant.contactRightRelativeVelocityMps(1U), 1.0e-6f);
+            Assert::AreEqual(contactY * yawRateRadps, plant.contactRightRelativeVelocityMps(2U), 1.0e-6f);
+            Assert::AreEqual(contactY * yawRateRadps, plant.contactRightRelativeVelocityMps(3U), 1.0e-6f);
             Assert::AreEqual(-frontContactLimitN, plant.contactRightForceN(control, 0U), 1.0e-4f);
             Assert::AreEqual(-frontContactLimitN, plant.contactRightForceN(control, 1U), 1.0e-4f);
             Assert::AreEqual(rearContactLimitN, plant.contactRightForceN(control, 2U), 1.0e-4f);
             Assert::AreEqual(rearContactLimitN, plant.contactRightForceN(control, 3U), 1.0e-4f);
 
             constexpr float dtSeconds = 0.001f;
-            const float initialYawRateRadps = state.GetRotationalVelocity();
+            const float initialYawRateRadps = state.GetYawRate();
             plant.integrate(control, dtSeconds);
             const float observedYawAccelRadps2 =
-                state.GetYawAcceleration();
+                state.GetYawAccel();
             const float actualYawRateRadps =
-                state.GetRotationalVelocity();
+                state.GetYawRate();
             const float saturatedYawDecelRadps2 =
                 (2.0f * contactY * (frontContactLimitN + rearContactLimitN)) /
                 vehicle.GetYawInertia();
@@ -510,51 +501,51 @@ namespace MazeMap
             constexpr float dtSeconds = 0.001f;
             VehicleState belowState;
             belowState.SetPosition(Eigen::Vector2f(0.0f, 0.0f));
-            belowState.SetOrientation(0.0f);
-            belowState.SetVelocity(referenceForwardSpeedMps - nearbyDeltaMps);
-            belowState.SetLateralVelocity(0.0f);
-            belowState.SetRotationalVelocity(yawRateRadps);
+            belowState.SetHeading(0.0f);
+            belowState.SetForwardVelocity(referenceForwardSpeedMps - nearbyDeltaMps);
+            belowState.SetRightwardVelocity(0.0f);
+            belowState.SetYawRate(yawRateRadps);
             belowState.SetWheelSpeedLeft(
-                Vehicle::WheelOmegaFromLinearVelocity(
-                    belowState.GetVelocity() + (halfTrackM * yawRateRadps)));
+                Vehicle::WheelSpeedFromLinearVelocity(
+                    belowState.GetForwardVelocity() + (halfTrackM * yawRateRadps)));
             belowState.SetWheelSpeedRight(
-                Vehicle::WheelOmegaFromLinearVelocity(
-                    belowState.GetVelocity() - (halfTrackM * yawRateRadps)));
+                Vehicle::WheelSpeedFromLinearVelocity(
+                    belowState.GetForwardVelocity() - (halfTrackM * yawRateRadps)));
             PlantModel belowPlant(vehicle, belowState);
             belowPlant.integrate(control, dtSeconds);
-            const float belowYawAccelRadps2 = belowState.GetYawAcceleration();
+            const float belowYawAccelRadps2 = belowState.GetYawAccel();
 
             VehicleState centerState;
             centerState.SetPosition(Eigen::Vector2f(0.0f, 0.0f));
-            centerState.SetOrientation(0.0f);
-            centerState.SetVelocity(referenceForwardSpeedMps);
-            centerState.SetLateralVelocity(0.0f);
-            centerState.SetRotationalVelocity(yawRateRadps);
+            centerState.SetHeading(0.0f);
+            centerState.SetForwardVelocity(referenceForwardSpeedMps);
+            centerState.SetRightwardVelocity(0.0f);
+            centerState.SetYawRate(yawRateRadps);
             centerState.SetWheelSpeedLeft(
-                Vehicle::WheelOmegaFromLinearVelocity(
-                    centerState.GetVelocity() + (halfTrackM * yawRateRadps)));
+                Vehicle::WheelSpeedFromLinearVelocity(
+                    centerState.GetForwardVelocity() + (halfTrackM * yawRateRadps)));
             centerState.SetWheelSpeedRight(
-                Vehicle::WheelOmegaFromLinearVelocity(
-                    centerState.GetVelocity() - (halfTrackM * yawRateRadps)));
+                Vehicle::WheelSpeedFromLinearVelocity(
+                    centerState.GetForwardVelocity() - (halfTrackM * yawRateRadps)));
             PlantModel centerPlant(vehicle, centerState);
             centerPlant.integrate(control, dtSeconds);
-            const float centerYawAccelRadps2 = centerState.GetYawAcceleration();
+            const float centerYawAccelRadps2 = centerState.GetYawAccel();
 
             VehicleState aboveState;
             aboveState.SetPosition(Eigen::Vector2f(0.0f, 0.0f));
-            aboveState.SetOrientation(0.0f);
-            aboveState.SetVelocity(referenceForwardSpeedMps + nearbyDeltaMps);
-            aboveState.SetLateralVelocity(0.0f);
-            aboveState.SetRotationalVelocity(yawRateRadps);
+            aboveState.SetHeading(0.0f);
+            aboveState.SetForwardVelocity(referenceForwardSpeedMps + nearbyDeltaMps);
+            aboveState.SetRightwardVelocity(0.0f);
+            aboveState.SetYawRate(yawRateRadps);
             aboveState.SetWheelSpeedLeft(
-                Vehicle::WheelOmegaFromLinearVelocity(
-                    aboveState.GetVelocity() + (halfTrackM * yawRateRadps)));
+                Vehicle::WheelSpeedFromLinearVelocity(
+                    aboveState.GetForwardVelocity() + (halfTrackM * yawRateRadps)));
             aboveState.SetWheelSpeedRight(
-                Vehicle::WheelOmegaFromLinearVelocity(
-                    aboveState.GetVelocity() - (halfTrackM * yawRateRadps)));
+                Vehicle::WheelSpeedFromLinearVelocity(
+                    aboveState.GetForwardVelocity() - (halfTrackM * yawRateRadps)));
             PlantModel abovePlant(vehicle, aboveState);
             abovePlant.integrate(control, dtSeconds);
-            const float aboveYawAccelRadps2 = aboveState.GetYawAcceleration();
+            const float aboveYawAccelRadps2 = aboveState.GetYawAccel();
             const float maxNeighborDeltaRadps2 =
                 (std::max)(
                     std::fabs(centerYawAccelRadps2 - belowYawAccelRadps2),
@@ -594,7 +585,7 @@ namespace MazeMap
             Vehicle vehicle;
             vehicle.SetFanDuty(0.80f);
             const float halfTrackM = 0.5f * vehicle.GetTrackWidth();
-            const float contactY = std::fabs(Vehicle::GetPhysicalModel().driveWheelLongitudinalOffsetM);
+            const float contactY = std::fabs(Vehicle::GetDriveWheelLongitudinalOffsetM());
 
             App::Internal::CommandVector control{};
             control.SetLeftCommand(0.0f);
@@ -620,15 +611,15 @@ namespace MazeMap
 
             VehicleState state;
             state.SetPosition(Eigen::Vector2f(0.0f, 0.0f));
-            state.SetOrientation(0.0f);
-            state.SetVelocity(0.0f);
-            state.SetLateralVelocity(0.0f);
-            state.SetRotationalVelocity(initialYawRateRadps);
-            state.SetWheelSpeedLeft(Vehicle::WheelOmegaFromLinearVelocity(halfTrackM * initialYawRateRadps));
-            state.SetWheelSpeedRight(Vehicle::WheelOmegaFromLinearVelocity(-halfTrackM * initialYawRateRadps));
+            state.SetHeading(0.0f);
+            state.SetForwardVelocity(0.0f);
+            state.SetRightwardVelocity(0.0f);
+            state.SetYawRate(initialYawRateRadps);
+            state.SetWheelSpeedLeft(Vehicle::WheelSpeedFromLinearVelocity(halfTrackM * initialYawRateRadps));
+            state.SetWheelSpeedRight(Vehicle::WheelSpeedFromLinearVelocity(-halfTrackM * initialYawRateRadps));
             PlantModel plant(vehicle, state);
 
-            float previousYawRateAbsRadps = std::fabs(state.GetRotationalVelocity());
+            float previousYawRateAbsRadps = std::fabs(state.GetYawRate());
             float minYawRateAfterInitialDecayAbsRadps = previousYawRateAbsRadps;
             float maxYawRateAbsRadps = previousYawRateAbsRadps;
             float maxReboundRadps = 0.0f;
@@ -638,7 +629,7 @@ namespace MazeMap
             {
                 plant.integrate(control, dtSeconds);
                 const float yawRateAbsRadps =
-                    std::fabs(state.GetRotationalVelocity());
+                    std::fabs(state.GetYawRate());
 
                 Assert::IsTrue(yawRateAbsRadps <= previousYawRateAbsRadps + 1.0e-4f);
                 maxYawRateAbsRadps = (std::max)(maxYawRateAbsRadps, yawRateAbsRadps);
@@ -692,7 +683,7 @@ namespace MazeMap
             Vehicle vehicle;
             vehicle.SetFanDuty(0.80f);
             const float halfTrackM = 0.5f * vehicle.GetTrackWidth();
-            const float contactY = std::fabs(Vehicle::GetPhysicalModel().driveWheelLongitudinalOffsetM);
+            const float contactY = std::fabs(Vehicle::GetDriveWheelLongitudinalOffsetM());
 
             App::Internal::CommandVector control{};
             control.SetLeftCommand(0.0f);
@@ -718,25 +709,25 @@ namespace MazeMap
 
             VehicleState state;
             state.SetPosition(Eigen::Vector2f(0.0f, 0.0f));
-            state.SetOrientation(0.0f);
-            state.SetVelocity(0.0f);
-            state.SetLateralVelocity(0.0f);
-            state.SetRotationalVelocity(initialYawRateRadps);
-            state.SetWheelSpeedLeft(Vehicle::WheelOmegaFromLinearVelocity(halfTrackM * initialYawRateRadps));
-            state.SetWheelSpeedRight(Vehicle::WheelOmegaFromLinearVelocity(-halfTrackM * initialYawRateRadps));
+            state.SetHeading(0.0f);
+            state.SetForwardVelocity(0.0f);
+            state.SetRightwardVelocity(0.0f);
+            state.SetYawRate(initialYawRateRadps);
+            state.SetWheelSpeedLeft(Vehicle::WheelSpeedFromLinearVelocity(halfTrackM * initialYawRateRadps));
+            state.SetWheelSpeedRight(Vehicle::WheelSpeedFromLinearVelocity(-halfTrackM * initialYawRateRadps));
             PlantModel plant(vehicle, state);
 
             int stopStep = -1;
-            float previousYawRateAbsRadps = std::fabs(state.GetRotationalVelocity());
+            float previousYawRateAbsRadps = std::fabs(state.GetYawRate());
             float minYawRateAfterInitialDecayAbsRadps = previousYawRateAbsRadps;
             float maxReboundRadps = 0.0f;
             int maxReboundStep = -1;
-            float finalYawRateAbsRadps = std::fabs(state.GetRotationalVelocity());
+            float finalYawRateAbsRadps = std::fabs(state.GetYawRate());
             for (int step = 0; step < maxSteps; ++step)
             {
                 plant.integrate(control, dtSeconds);
                 finalYawRateAbsRadps =
-                    std::fabs(state.GetRotationalVelocity());
+                    std::fabs(state.GetYawRate());
 
                 if (finalYawRateAbsRadps < minYawRateAfterInitialDecayAbsRadps)
                 {
@@ -797,13 +788,13 @@ namespace MazeMap
             Vehicle vehicle;
             vehicle.SetFanDuty(0.80f);
             const float zeroWheelSpeedToleranceRadps =
-                Vehicle::WheelOmegaFromLinearVelocity(kZeroLinearVelocityToleranceMps);
+                Vehicle::WheelSpeedFromLinearVelocity(kZeroLinearVelocityToleranceMps);
             VehicleState state;
             state.SetPosition(Eigen::Vector2f(0.03f, 0.09f));
-            state.SetOrientation(0.21f);
-            state.SetVelocity(0.0f);
-            state.SetLateralVelocity(0.0f);
-            state.SetRotationalVelocity(0.0f);
+            state.SetHeading(0.21f);
+            state.SetForwardVelocity(0.0f);
+            state.SetRightwardVelocity(0.0f);
+            state.SetYawRate(0.0f);
             state.SetWheelSpeedLeft(0.0f);
             state.SetWheelSpeedRight(0.0f);
             state.SetGyroBiasZ(0.12f);
@@ -818,11 +809,11 @@ namespace MazeMap
 
             Assert::AreEqual(0.03f, state.GetPositionX(), 1.0e-7f);
             Assert::AreEqual(0.09f, state.GetPositionY(), 1.0e-7f);
-            Assert::AreEqual(0.21f, state.GetOrientation(), 1.0e-7f);
+            Assert::AreEqual(0.21f, state.GetHeading(), 1.0e-7f);
             Assert::AreEqual(0.12f, state.GetGyroBiasZ(), 1.0e-7f);
-            Assert::AreEqual(0.0f, state.GetVelocity(), kZeroLinearVelocityToleranceMps);
-            Assert::AreEqual(0.0f, state.GetLateralVelocity(), kZeroLinearVelocityToleranceMps);
-            Assert::AreEqual(0.0f, state.GetRotationalVelocity(), 1.0e-7f);
+            Assert::AreEqual(0.0f, state.GetForwardVelocity(), kZeroLinearVelocityToleranceMps);
+            Assert::AreEqual(0.0f, state.GetRightwardVelocity(), kZeroLinearVelocityToleranceMps);
+            Assert::AreEqual(0.0f, state.GetYawRate(), 1.0e-7f);
             Assert::AreEqual(0.0f, state.GetWheelSpeedLeft(), zeroWheelSpeedToleranceRadps);
             Assert::AreEqual(0.0f, state.GetWheelSpeedRight(), zeroWheelSpeedToleranceRadps);
         }
@@ -832,13 +823,13 @@ namespace MazeMap
             Vehicle vehicle;
             vehicle.SetFanDuty(0.80f);
             const float zeroWheelSpeedToleranceRadps =
-                Vehicle::WheelOmegaFromLinearVelocity(kZeroLinearVelocityToleranceMps);
+                Vehicle::WheelSpeedFromLinearVelocity(kZeroLinearVelocityToleranceMps);
             VehicleState state;
             state.SetPosition(Eigen::Vector2f(0.0f, 0.09f));
-            state.SetOrientation(0.0f);
-            state.SetVelocity(0.0f);
-            state.SetLateralVelocity(0.0f);
-            state.SetRotationalVelocity(0.05f);
+            state.SetHeading(0.0f);
+            state.SetForwardVelocity(0.0f);
+            state.SetRightwardVelocity(0.0f);
+            state.SetYawRate(0.05f);
             state.SetWheelSpeedLeft(0.8f);
             state.SetWheelSpeedRight(-0.7f);
             PlantModel plant(vehicle, state);
@@ -850,9 +841,9 @@ namespace MazeMap
 				plant.integrate(control, dt);
             }
 
-            Assert::AreEqual(0.0f, state.GetVelocity(), kZeroLinearVelocityToleranceMps);
-            Assert::AreEqual(0.0f, state.GetLateralVelocity(), kZeroLinearVelocityToleranceMps);
-            Assert::AreEqual(0.0f, state.GetRotationalVelocity(), 1.0e-7f);
+            Assert::AreEqual(0.0f, state.GetForwardVelocity(), kZeroLinearVelocityToleranceMps);
+            Assert::AreEqual(0.0f, state.GetRightwardVelocity(), kZeroLinearVelocityToleranceMps);
+            Assert::AreEqual(0.0f, state.GetYawRate(), 1.0e-7f);
             Assert::AreEqual(0.0f, state.GetWheelSpeedLeft(), zeroWheelSpeedToleranceRadps);
             Assert::AreEqual(0.0f, state.GetWheelSpeedRight(), zeroWheelSpeedToleranceRadps);
         }
@@ -863,10 +854,10 @@ namespace MazeMap
             vehicle.SetFanDuty(0.80f);
             VehicleState initialState;
             initialState.SetPosition(Eigen::Vector2f(0.0f, 0.09f));
-            initialState.SetOrientation(0.0f);
-            initialState.SetVelocity(0.0f);
-            initialState.SetLateralVelocity(0.001f);
-            initialState.SetRotationalVelocity(0.05f);
+            initialState.SetHeading(0.0f);
+            initialState.SetForwardVelocity(0.0f);
+            initialState.SetRightwardVelocity(0.001f);
+            initialState.SetYawRate(0.05f);
             initialState.SetWheelSpeedLeft(0.8f);
             initialState.SetWheelSpeedRight(-0.7f);
             VehicleState state = initialState;
@@ -879,14 +870,42 @@ namespace MazeMap
                 plant.integrate(control, dt);
             }
 
-            Assert::IsTrue(std::fabs(state.GetVelocity()) < kStopEnterSpeedMps);
-            Assert::IsTrue(std::fabs(state.GetLateralVelocity()) < kStopEnterSpeedMps);
-            Assert::IsTrue(std::fabs(state.GetRotationalVelocity()) < kStopEnterYawRateRadps);
+            Assert::IsTrue(std::fabs(state.GetForwardVelocity()) < kStopEnterSpeedMps);
+            Assert::IsTrue(std::fabs(state.GetRightwardVelocity()) < kStopEnterSpeedMps);
+            Assert::IsTrue(std::fabs(state.GetYawRate()) < kStopEnterYawRateRadps);
             Assert::IsTrue(std::fabs(state.GetWheelSpeedLeft()) < kStopEnterWheelSpeedRadps);
             Assert::IsTrue(std::fabs(state.GetWheelSpeedRight()) < kStopEnterWheelSpeedRadps);
-            Assert::IsTrue(std::fabs(state.GetRotationalVelocity()) < std::fabs(initialState.GetRotationalVelocity()));
+            Assert::IsTrue(std::fabs(state.GetYawRate()) < std::fabs(initialState.GetYawRate()));
             Assert::IsTrue(std::fabs(state.GetWheelSpeedLeft()) < std::fabs(initialState.GetWheelSpeedLeft()));
             Assert::IsTrue(std::fabs(state.GetWheelSpeedRight()) < std::fabs(initialState.GetWheelSpeedRight()));
+        }
+
+        TEST_METHOD(PlantModelResidualAccelerationStatesUseExactDeterministicOuDecay)
+        {
+            Vehicle vehicle;
+            vehicle.SetFanDuty(0.80f);
+
+            VehicleState state;
+            state.SetPosition(Eigen::Vector2f(0.0f, 0.0f));
+            state.SetHeading(0.0f);
+            state.SetForwardVelocity(0.0f);
+            state.SetRightwardVelocity(0.0f);
+            state.SetYawRate(0.0f);
+            state.SetWheelSpeedLeft(0.0f);
+            state.SetWheelSpeedRight(0.0f);
+            state.SetForwardAccelerationResidual(0.75f);
+            state.SetRightwardAccelerationResidual(-1.25f);
+            state.SetYawAccelResidual(2.50f);
+            PlantModel plant(vehicle, state);
+
+            App::Internal::CommandVector control{};
+            constexpr float dtSeconds = 0.010f;
+            const float decay = std::exp(-dtSeconds / kPlantResidualDecayTauS);
+            plant.integrate(control, dtSeconds);
+
+            Assert::AreEqual(0.75f * decay, state.GetForwardAccelerationResidual(), 1.0e-6f);
+            Assert::AreEqual(-1.25f * decay, state.GetRightwardAccelerationResidual(), 1.0e-6f);
+            Assert::AreEqual(2.50f * decay, state.GetYawAccelResidual(), 1.0e-6f);
         }
 
         TEST_METHOD(PlantModelMixedSlipCommandIntegratesFiniteState)
@@ -897,12 +916,12 @@ namespace MazeMap
             constexpr float forwardVelocityMps = 2.0f;
             VehicleState state;
             state.SetPosition(Eigen::Vector2f(0.0f, 0.0f));
-            state.SetOrientation(0.0f);
-            state.SetVelocity(forwardVelocityMps);
-            state.SetLateralVelocity(0.15f);
-            state.SetRotationalVelocity(1.8f);
-            state.SetWheelSpeedLeft(1.05f * Vehicle::WheelOmegaFromLinearVelocity(forwardVelocityMps));
-            state.SetWheelSpeedRight(0.95f * Vehicle::WheelOmegaFromLinearVelocity(forwardVelocityMps));
+            state.SetHeading(0.0f);
+            state.SetForwardVelocity(forwardVelocityMps);
+            state.SetRightwardVelocity(0.15f);
+            state.SetYawRate(1.8f);
+            state.SetWheelSpeedLeft(1.05f * Vehicle::WheelSpeedFromLinearVelocity(forwardVelocityMps));
+            state.SetWheelSpeedRight(0.95f * Vehicle::WheelSpeedFromLinearVelocity(forwardVelocityMps));
             PlantModel plant(vehicle, state);
 
             App::Internal::CommandVector control;
@@ -910,26 +929,30 @@ namespace MazeMap
             control.SetRightCommand(0.60f);
 
             const float leftLongitudinalSlipMps =
-                Vehicle::WheelLinearVelocityFromOmega(state.GetWheelSpeedLeft()) -
+                Vehicle::WheelLinearVelocityFromWheelSpeed(state.GetWheelSpeedLeft()) -
                 Vehicle::LeftWheelLinearVelocityFromBody(
-                    state.GetVelocity(),
-                    state.GetRotationalVelocity());
+                    state.GetForwardVelocity(),
+                    state.GetYawRate());
             const float rightLongitudinalSlipMps =
-                Vehicle::WheelLinearVelocityFromOmega(state.GetWheelSpeedRight()) -
+                Vehicle::WheelLinearVelocityFromWheelSpeed(state.GetWheelSpeedRight()) -
                 Vehicle::RightWheelLinearVelocityFromBody(
-                    state.GetVelocity(),
-                    state.GetRotationalVelocity());
+                    state.GetForwardVelocity(),
+                    state.GetYawRate());
             Assert::IsTrue(std::isfinite(leftLongitudinalSlipMps));
             Assert::IsTrue(std::isfinite(rightLongitudinalSlipMps));
             for (uint8_t contactIndex = 0U; contactIndex < 4U; ++contactIndex)
             {
-                const float lateralSlipAngleRad = plant.contactLateralSlipAngleRad(contactIndex);
+                const float forwardRelativeVelocityMps =
+                    plant.contactForwardRelativeVelocityMps(contactIndex);
+                const float rightRelativeVelocityMps =
+                    plant.contactRightRelativeVelocityMps(contactIndex);
                 const float rightForceN = plant.contactRightForceN(control, contactIndex);
                 const float forwardForceN = plant.contactForwardForceN(control, contactIndex);
                 const float saturation = plant.contactSaturation(control, contactIndex);
                 const float preProjectionUtilization =
                     plant.contactPreProjectionUtilization(control, contactIndex);
-                Assert::IsTrue(std::isfinite(lateralSlipAngleRad));
+                Assert::IsTrue(std::isfinite(forwardRelativeVelocityMps));
+                Assert::IsTrue(std::isfinite(rightRelativeVelocityMps));
                 Assert::IsTrue(std::isfinite(rightForceN));
                 Assert::IsTrue(std::isfinite(forwardForceN));
                 Assert::IsTrue(saturation >= 0.0f);
@@ -943,18 +966,18 @@ namespace MazeMap
 
             Assert::IsTrue(std::isfinite(state.GetPositionX()));
             Assert::IsTrue(std::isfinite(state.GetPositionY()));
-            Assert::IsTrue(std::isfinite(state.GetOrientation()));
-            Assert::IsTrue(std::isfinite(state.GetVelocity()));
-            Assert::IsTrue(std::isfinite(state.GetLateralVelocity()));
-            Assert::IsTrue(std::isfinite(state.GetRotationalVelocity()));
+            Assert::IsTrue(std::isfinite(state.GetHeading()));
+            Assert::IsTrue(std::isfinite(state.GetForwardVelocity()));
+            Assert::IsTrue(std::isfinite(state.GetRightwardVelocity()));
+            Assert::IsTrue(std::isfinite(state.GetYawRate()));
             Assert::IsTrue(std::isfinite(state.GetWheelSpeedLeft()));
             Assert::IsTrue(std::isfinite(state.GetWheelSpeedRight()));
             Assert::IsTrue(std::isfinite(state.GetGyroBiasZ()));
-            Assert::IsTrue(state.GetOrientation() <= PI_F);
-            Assert::IsTrue(state.GetOrientation() >= -PI_F);
-            Assert::IsTrue(std::fabs(state.GetVelocity()) < 10.0f);
-            Assert::IsTrue(std::fabs(state.GetLateralVelocity()) < 10.0f);
-            Assert::IsTrue(std::fabs(state.GetRotationalVelocity()) < 50.0f);
+            Assert::IsTrue(state.GetHeading() <= PI_F);
+            Assert::IsTrue(state.GetHeading() >= -PI_F);
+            Assert::IsTrue(std::fabs(state.GetForwardVelocity()) < 10.0f);
+            Assert::IsTrue(std::fabs(state.GetRightwardVelocity()) < 10.0f);
+            Assert::IsTrue(std::fabs(state.GetYawRate()) < 50.0f);
             Assert::IsTrue(std::fabs(state.GetWheelSpeedLeft()) < 1000.0f);
             Assert::IsTrue(std::fabs(state.GetWheelSpeedRight()) < 1000.0f);
         }
@@ -967,12 +990,12 @@ namespace MazeMap
             constexpr float initialYawRateRadps = 5.0f;
             VehicleState state;
             state.SetPosition(Eigen::Vector2f(0.0f, 0.0f));
-            state.SetOrientation(0.0f);
-            state.SetVelocity(1.4f);
-            state.SetLateralVelocity(0.2f);
-            state.SetRotationalVelocity(initialYawRateRadps);
-            state.SetWheelSpeedLeft(0.9f * Vehicle::WheelOmegaFromLinearVelocity(1.4f));
-            state.SetWheelSpeedRight(1.1f * Vehicle::WheelOmegaFromLinearVelocity(1.4f));
+            state.SetHeading(0.0f);
+            state.SetForwardVelocity(1.4f);
+            state.SetRightwardVelocity(0.2f);
+            state.SetYawRate(initialYawRateRadps);
+            state.SetWheelSpeedLeft(0.9f * Vehicle::WheelSpeedFromLinearVelocity(1.4f));
+            state.SetWheelSpeedRight(1.1f * Vehicle::WheelSpeedFromLinearVelocity(1.4f));
             PlantModel plant(vehicle, state);
 
             App::Internal::CommandVector control;
@@ -990,17 +1013,17 @@ namespace MazeMap
             const float yawRateSquaredRadps2 =
                 initialYawRateRadps * initialYawRateRadps;
             const float expectedRightAccelerationMps2 =
-                state.GetLateralAcceleration() -
+                state.GetRightAcceleration() -
                 (yawRateSquaredRadps2 * imuLeverArmBodyM.x()) +
-                (state.GetYawAcceleration() * imuLeverArmBodyM.y());
+                (state.GetYawAccel() * imuLeverArmBodyM.y());
             const float expectedForwardAccelerationMps2 =
-                state.GetLongitudinalAcceleration() -
+                state.GetForwardAcceleration() -
                 (yawRateSquaredRadps2 * imuLeverArmBodyM.y()) -
-                (state.GetYawAcceleration() * imuLeverArmBodyM.x());
+                (state.GetYawAccel() * imuLeverArmBodyM.x());
             const float rightLeverContributionMps2 =
-                predictedImuRightAccelerationMps2 - state.GetLateralAcceleration();
+                predictedImuRightAccelerationMps2 - state.GetRightAcceleration();
             const float forwardLeverContributionMps2 =
-                predictedImuForwardAccelerationMps2 - state.GetLongitudinalAcceleration();
+                predictedImuForwardAccelerationMps2 - state.GetForwardAcceleration();
 
             Assert::IsTrue(
                 std::fabs(rightLeverContributionMps2) > 1.0e-3f ||
@@ -1023,12 +1046,12 @@ namespace MazeMap
             constexpr float initialYawRateRadps = 4.0f;
             VehicleState state;
             state.SetPosition(Eigen::Vector2f(0.0f, 0.0f));
-            state.SetOrientation(0.0f);
-            state.SetVelocity(1.1f);
-            state.SetLateralVelocity(-0.3f);
-            state.SetRotationalVelocity(initialYawRateRadps);
-            state.SetWheelSpeedLeft(0.95f * Vehicle::WheelOmegaFromLinearVelocity(1.1f));
-            state.SetWheelSpeedRight(1.05f * Vehicle::WheelOmegaFromLinearVelocity(1.1f));
+            state.SetHeading(0.0f);
+            state.SetForwardVelocity(1.1f);
+            state.SetRightwardVelocity(-0.3f);
+            state.SetYawRate(initialYawRateRadps);
+            state.SetWheelSpeedLeft(0.95f * Vehicle::WheelSpeedFromLinearVelocity(1.1f));
+            state.SetWheelSpeedRight(1.05f * Vehicle::WheelSpeedFromLinearVelocity(1.1f));
             PlantModel plant(vehicle, state);
 
             App::Internal::CommandVector control;
@@ -1046,13 +1069,13 @@ namespace MazeMap
             const float yawRateSquaredRadps2 =
                 initialYawRateRadps * initialYawRateRadps;
             const float expectedRightAccelerationMps2 =
-                state.GetLateralAcceleration() -
+                state.GetRightAcceleration() -
                 (yawRateSquaredRadps2 * imuLeverArmBodyM.x()) +
-                (state.GetYawAcceleration() * imuLeverArmBodyM.y());
+                (state.GetYawAccel() * imuLeverArmBodyM.y());
             const float expectedForwardAccelerationMps2 =
-                state.GetLongitudinalAcceleration() -
+                state.GetForwardAcceleration() -
                 (yawRateSquaredRadps2 * imuLeverArmBodyM.y()) -
-                (state.GetYawAcceleration() * imuLeverArmBodyM.x());
+                (state.GetYawAccel() * imuLeverArmBodyM.x());
 
             Assert::AreEqual(
                 expectedRightAccelerationMps2,
@@ -1070,10 +1093,10 @@ namespace MazeMap
             vehicle.SetFanDuty(0.80f);
             VehicleState state;
             state.SetPosition(Eigen::Vector2f(0.0f, 0.09f));
-            state.SetOrientation(0.0f);
-            state.SetVelocity(0.0f);
-            state.SetLateralVelocity(0.0f);
-            state.SetRotationalVelocity(0.0f);
+            state.SetHeading(0.0f);
+            state.SetForwardVelocity(0.0f);
+            state.SetRightwardVelocity(0.0f);
+            state.SetYawRate(0.0f);
             state.SetWheelSpeedLeft(0.0f);
             state.SetWheelSpeedRight(0.0f);
             PlantModel plant(vehicle, state);
@@ -1090,25 +1113,25 @@ namespace MazeMap
             }
 
             const float totalTimeS = dt * static_cast<float>(kSteps);
-            const float averageAccelMps2 = state.GetVelocity() / totalTimeS;
+            const float averageAccelMps2 = state.GetForwardVelocity() / totalTimeS;
 
             Assert::IsTrue(std::isfinite(state.GetPositionX()));
             Assert::IsTrue(std::isfinite(state.GetPositionY()));
-            Assert::IsTrue(std::isfinite(state.GetOrientation()));
-            Assert::IsTrue(std::isfinite(state.GetVelocity()));
-            Assert::IsTrue(std::isfinite(state.GetLateralVelocity()));
-            Assert::IsTrue(std::isfinite(state.GetRotationalVelocity()));
+            Assert::IsTrue(std::isfinite(state.GetHeading()));
+            Assert::IsTrue(std::isfinite(state.GetForwardVelocity()));
+            Assert::IsTrue(std::isfinite(state.GetRightwardVelocity()));
+            Assert::IsTrue(std::isfinite(state.GetYawRate()));
             Assert::IsTrue(std::isfinite(state.GetWheelSpeedLeft()));
             Assert::IsTrue(std::isfinite(state.GetWheelSpeedRight()));
             Assert::IsTrue(std::isfinite(state.GetGyroBiasZ()));
-            Assert::IsTrue(state.GetVelocity() > 0.0f);
+            Assert::IsTrue(state.GetForwardVelocity() > 0.0f);
             Assert::IsTrue(state.GetPositionY() > 0.09f);
             Assert::IsTrue(averageAccelMps2 > 0.0f);
             Assert::IsTrue(averageAccelMps2 < 60.0f);
             Assert::IsTrue(std::fabs(state.GetPositionX()) < 0.002f);
-            Assert::IsTrue(std::fabs(state.GetLateralVelocity()) < 0.02f);
-            Assert::IsTrue(std::fabs(state.GetRotationalVelocity()) < 0.10f);
-            Assert::IsTrue(std::fabs(state.GetOrientation()) < 0.01f);
+            Assert::IsTrue(std::fabs(state.GetRightwardVelocity()) < 0.02f);
+            Assert::IsTrue(std::fabs(state.GetYawRate()) < 0.10f);
+            Assert::IsTrue(std::fabs(state.GetHeading()) < 0.01f);
         }
 
         TEST_METHOD(PlantModelStaticFrictionHoldsSubthresholdDriveAtRest)
@@ -1121,10 +1144,10 @@ namespace MazeMap
 
             VehicleState state;
             state.SetPosition(Eigen::Vector2f(0.0f, 0.09f));
-            state.SetOrientation(0.0f);
-            state.SetVelocity(0.0f);
-            state.SetLateralVelocity(0.0f);
-            state.SetRotationalVelocity(0.0f);
+            state.SetHeading(0.0f);
+            state.SetForwardVelocity(0.0f);
+            state.SetRightwardVelocity(0.0f);
+            state.SetYawRate(0.0f);
             state.SetWheelSpeedLeft(0.0f);
             state.SetWheelSpeedRight(0.0f);
             PlantModel plant(vehicle, state);
@@ -1152,9 +1175,9 @@ namespace MazeMap
                 plant.integrate(control, 0.001f);
             }
 
-            Assert::AreEqual(0.0f, state.GetVelocity(), kZeroLinearVelocityToleranceMps);
-            Assert::AreEqual(0.0f, state.GetLateralVelocity(), kZeroLinearVelocityToleranceMps);
-            Assert::AreEqual(0.0f, state.GetRotationalVelocity(), 1.0e-7f);
+            Assert::AreEqual(0.0f, state.GetForwardVelocity(), kZeroLinearVelocityToleranceMps);
+            Assert::AreEqual(0.0f, state.GetRightwardVelocity(), kZeroLinearVelocityToleranceMps);
+            Assert::AreEqual(0.0f, state.GetYawRate(), 1.0e-7f);
             Assert::AreEqual(0.0f, state.GetWheelSpeedLeft(), 1.0e-6f);
             Assert::AreEqual(0.0f, state.GetWheelSpeedRight(), 1.0e-6f);
         }
@@ -1166,10 +1189,10 @@ namespace MazeMap
 
             VehicleState state;
             state.SetPosition(Eigen::Vector2f(0.0f, 0.09f));
-            state.SetOrientation(0.0f);
-            state.SetVelocity(0.0f);
-            state.SetLateralVelocity(0.0f);
-            state.SetRotationalVelocity(0.0f);
+            state.SetHeading(0.0f);
+            state.SetForwardVelocity(0.0f);
+            state.SetRightwardVelocity(0.0f);
+            state.SetYawRate(0.0f);
             state.SetWheelSpeedLeft(0.0f);
             state.SetWheelSpeedRight(0.0f);
             PlantModel plant(vehicle, state);
@@ -1182,21 +1205,21 @@ namespace MazeMap
 
             Assert::IsTrue(std::isfinite(state.GetPositionX()));
             Assert::IsTrue(std::isfinite(state.GetPositionY()));
-            Assert::IsTrue(std::isfinite(state.GetOrientation()));
-            Assert::IsTrue(std::isfinite(state.GetVelocity()));
-            Assert::IsTrue(std::isfinite(state.GetLateralVelocity()));
-            Assert::IsTrue(std::isfinite(state.GetRotationalVelocity()));
+            Assert::IsTrue(std::isfinite(state.GetHeading()));
+            Assert::IsTrue(std::isfinite(state.GetForwardVelocity()));
+            Assert::IsTrue(std::isfinite(state.GetRightwardVelocity()));
+            Assert::IsTrue(std::isfinite(state.GetYawRate()));
             Assert::IsTrue(std::isfinite(state.GetWheelSpeedLeft()));
             Assert::IsTrue(std::isfinite(state.GetWheelSpeedRight()));
             Assert::IsTrue(std::isfinite(state.GetGyroBiasZ()));
-            Assert::IsTrue(std::isfinite(state.GetVelocity()));
+            Assert::IsTrue(std::isfinite(state.GetForwardVelocity()));
             Assert::IsTrue(std::isfinite(state.GetWheelSpeedLeft()));
             Assert::IsTrue(std::isfinite(state.GetWheelSpeedRight()));
             Assert::IsTrue(
                 std::fabs(state.GetWheelSpeedLeft() -
                     state.GetWheelSpeedRight()) < 1.0f);
             Assert::IsTrue(std::fabs(state.GetPositionX()) < 0.005f);
-            Assert::IsTrue(std::fabs(state.GetRotationalVelocity()) < 0.10f);
+            Assert::IsTrue(std::fabs(state.GetYawRate()) < 0.10f);
         }
 
         TEST_METHOD(PlantModelIntegratePreservesHeadingNormalization)
@@ -1205,19 +1228,19 @@ namespace MazeMap
             vehicle.SetFanDuty(0.80f);
             VehicleState state;
             state.SetPosition(Eigen::Vector2f(0.0f, 0.09f));
-            state.SetOrientation(PI_F - 0.01f);
-            state.SetVelocity(0.5f);
-            state.SetLateralVelocity(0.0f);
-            state.SetRotationalVelocity(6.0f);
-            state.SetWheelSpeedLeft(Vehicle::WheelOmegaFromLinearVelocity(0.5f));
-            state.SetWheelSpeedRight(Vehicle::WheelOmegaFromLinearVelocity(0.5f));
+            state.SetHeading(PI_F - 0.01f);
+            state.SetForwardVelocity(0.5f);
+            state.SetRightwardVelocity(0.0f);
+            state.SetYawRate(6.0f);
+            state.SetWheelSpeedLeft(Vehicle::WheelSpeedFromLinearVelocity(0.5f));
+            state.SetWheelSpeedRight(Vehicle::WheelSpeedFromLinearVelocity(0.5f));
             PlantModel plant(vehicle, state);
 
             App::Internal::CommandVector control{};
             plant.integrate(control, 0.01f);
 
-            Assert::IsTrue(state.GetOrientation() <= PI_F);
-            Assert::IsTrue(state.GetOrientation() >= -PI_F);
+            Assert::IsTrue(state.GetHeading() <= PI_F);
+            Assert::IsTrue(state.GetHeading() >= -PI_F);
         }
 
     };

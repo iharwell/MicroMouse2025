@@ -87,7 +87,7 @@ namespace MazeMap
     inline constexpr std::uint8_t kOpenFloorSpeedBinLogIdHigh = 3U;
 
     inline constexpr std::array<float, 3U> kOpenFloorStraightSpeedBinsMps = { { 0.1f, 0.30f, 0.55f } };
-    inline constexpr std::array<float, 3U> kOpenFloorYawOmegaBinsRadps = { { 9.0f, 18.0f, 27.0f } };
+    inline constexpr std::array<float, 3U> kOpenFloorYawRateBinsRadps = { { 9.0f, 18.0f, 27.0f } };
     inline constexpr std::array<ManeuverCode, 4U> kOpenFloorYawManeuverCodes = { {
         IP90,
         IP90_M,

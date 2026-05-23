@@ -1,7 +1,7 @@
 #include "pch.h"
 #include "CppUnitTest.h"
 
-#include "SrUkfCoreTestSupport.h"
+#include "EstimatorFilterTestSupport.h"
 
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
@@ -21,12 +21,12 @@ namespace MazeMap
             float rightDriveCommand = 0.0f;
             int32_t leftEncoderCount = 0;
             int32_t rightEncoderCount = 0;
-            float leftEncoderOmegaRadps = 0.0f;
-            float rightEncoderOmegaRadps = 0.0f;
+            float leftEncoderWheelSpeedRadps = 0.0f;
+            float rightEncoderWheelSpeedRadps = 0.0f;
             float gyroRawRadps = 0.0f;
             float gyroBiasRadps = 0.0f;
-            float accelBodyXMps2 = 0.0f;
-            float accelBodyYMps2 = 0.0f;
+            float accelBodyRightMps2 = 0.0f;
+            float accelBodyForwardMps2 = 0.0f;
         };
 
         // D:\open_floor_main.csv rows 10714..10721 from the April 8, 2026 run_id=ofm_13260055 launch fault.
@@ -106,28 +106,32 @@ namespace MazeMap
         };
     }
 
-    TEST_CLASS(SrUkfCoreReplayRegressionTest)
+    TEST_CLASS(EstimatorReplayRegressionTest)
     {
     public:
-        TEST_METHOD(SrUkfCoreReplayOfLatestOpenFloorLaunchLogDoesNotProduceXPoseBoundaryJump)
+        TEST_METHOD(EstimatorReplayOfLatestOpenFloorLaunchLogDoesNotProduceXPoseBoundaryJump)
         {
             const float distancePerCountM = Vehicle::DriveEncoderDistanceFromCounts(1);
             constexpr int sampleCount =
                 static_cast<int>(sizeof(kLatestLoggedOpenFloorPoseJumpWindow) / sizeof(kLatestLoggedOpenFloorPoseJumpWindow[0]));
             const LoggedOpenFloorPoseJumpSample& first = kLatestLoggedOpenFloorPoseJumpWindow[0];
 
-            SrUkfCore core = MakeDefaultSrUkfCore();
-            VehicleState::StateVector initialState = VehicleState::StateVector::Zero();
+            EstimatorTestRuntime runtime;
+            runtime.runtimeState.SetGyroBiasZ(first.gyroBiasRadps);
+            runtime.runtimeState.SetWheelSpeedLeft(first.leftEncoderWheelSpeedRadps);
+            runtime.runtimeState.SetWheelSpeedRight(first.rightEncoderWheelSpeedRadps);
+            Estimator core(runtime.vehicle, runtime.plantModel, runtime.runtimeState);
+            Eigen::Matrix<float, VehicleState::kDimension, 1> initialState = Eigen::Matrix<float, VehicleState::kDimension, 1>::Zero();
             initialState(0) = first.poseXM;
             initialState(1) = first.poseYM;
             initialState(2) = NormalizeAngle(first.poseYawRad);
             initialState(3) = first.measuredLinearSpeedMps;
             initialState(4) = 0.0f;
             initialState(5) = first.gyroRawRadps - first.gyroBiasRadps;
-            initialState(6) = first.leftEncoderOmegaRadps;
-            initialState(7) = first.rightEncoderOmegaRadps;
-            initialState(8) = first.gyroBiasRadps;
-            Assert::IsTrue(core.reset(initialState, SrUkfCore::BuildDefaultInitialCovariance()));
+            initialState(6) = 0.0f;
+            initialState(7) = 0.0f;
+            initialState(8) = 0.0f;
+            Assert::IsTrue(core.reset(initialState, Estimator::BuildDefaultInitialCovariance()));
 
             float maxStepDxM = 0.0f;
             float maxAbsDxFromStartM = 0.0f;
@@ -145,22 +149,23 @@ namespace MazeMap
                 Assert::IsTrue(core.predict(sample.dtSeconds, control));
 
                 EncoderObs encoderObservation{};
-                encoderObservation.totalLeftCounts = sample.leftEncoderCount;
-                encoderObservation.totalRightCounts = sample.rightEncoderCount;
-                encoderObservation.omegaLeftRadps = sample.leftEncoderOmegaRadps;
-                encoderObservation.omegaRightRadps = sample.rightEncoderOmegaRadps;
-                const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoderObservation, sample.dtSeconds);
-                Assert::IsTrue(encoderResult.attempted);
+                encoderObservation.SetTotalLeftCounts(sample.leftEncoderCount);
+                encoderObservation.SetTotalRightCounts(sample.rightEncoderCount);
+                encoderObservation.SetLeftWheelSpeedRadps(sample.leftEncoderWheelSpeedRadps);
+                encoderObservation.SetRightWheelSpeedRadps(sample.rightEncoderWheelSpeedRadps);
+                (void)core.updateEncoderPair(encoderObservation, sample.dtSeconds, true);
+                Assert::IsTrue(core.LastUpdateAttempted());
 
-                const MeasurementUpdateResult yawResult = core.updateYawRate(sample.gyroRawRadps);
-                Assert::IsTrue(yawResult.attempted);
+                (void)core.updateYawRate(sample.gyroRawRadps);
+                Assert::IsTrue(core.LastUpdateAttempted());
 
-                ImuAccelObs accelObservation{};
-                accelObservation.valid =
-                    std::isfinite(sample.accelBodyXMps2) &&
-                    std::isfinite(sample.accelBodyYMps2);
-                accelObservation.accelBodyXMps2 = sample.accelBodyXMps2;
-                accelObservation.accelBodyYMps2 = sample.accelBodyYMps2;
+                const bool accelObservationValid =
+                    std::isfinite(sample.accelBodyRightMps2) &&
+                    std::isfinite(sample.accelBodyForwardMps2);
+                const ImuAccelObs accelObservation(
+                    accelObservationValid,
+                    sample.accelBodyForwardMps2,
+                    sample.accelBodyRightMps2);
                 (void)core.updatePlanarAccel(accelObservation);
 
                 const float currentXM = core.workingState()(0);

@@ -8,107 +8,36 @@
 #include "PlantModel.h"
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <limits>
 #include "math.h"
 
-namespace
-{
-    // Forward acceleration and max speed remain provisional until the direct forward-traction and top-speed
-    // characterization runs are completed. The maneuver planner only uses the shared lateral limit here;
-    // runtime yaw-rate ceilings are applied separately by the motion controller.
-    constexpr float kVehiclePeakForwardAccelerationMps2 = 15.0f;
-    constexpr float kVehiclePeakRotationalVelocityRadps = 27.0f;
-    constexpr float kVehiclePeakAngularAccelerationRadps2 = 645.0f;
-    constexpr float kVehicleMaxSpeedMps = 4.0f;
+// Forward acceleration and max speed remain provisional until the direct forward-traction and top-speed
+// characterization runs are completed. The maneuver planner only uses the shared lateral limit here;
+// runtime yaw-rate ceilings are applied separately by the motion controller.
+static constexpr float kVehiclePeakForwardAccelerationMps2 = 15.0f;
+static constexpr float kVehiclePeakYawRateRadps = 27.0f;
+static constexpr float kVehiclePeakYawAccelRadps2 = 645.0f;
+static constexpr float kVehicleMaxSpeedMps = 4.0f;
 
-    constexpr uint8_t kFrontRightWallSensorPin = 23U;
-    constexpr uint8_t kFrontRightWallSensorLedPin = 19U;
-    constexpr uint8_t kFrontLeftWallSensorPin = 22U;
-    constexpr uint8_t kFrontLeftWallSensorLedPin = 18U;
-    constexpr uint8_t kSideRightWallSensorPin = 21U;
-    constexpr uint8_t kSideRightWallSensorLedPin = 17U;
-    constexpr uint8_t kSideLeftWallSensorPin = 20U;
-    constexpr uint8_t kSideLeftWallSensorLedPin = 16U;
-    constexpr float kArcTrackWidthLinearSpeedEpsilonMps = 1.0e-4f;
-    constexpr float kArcTrackWidthAngularSpeedEpsilonRadps = 1.0e-4f;
+static constexpr std::uint8_t kFrontRightWallSensorPin = 23U;
+static constexpr std::uint8_t kFrontRightWallSensorLedPin = 19U;
+static constexpr std::uint8_t kFrontLeftWallSensorPin = 22U;
+static constexpr std::uint8_t kFrontLeftWallSensorLedPin = 18U;
+static constexpr std::uint8_t kSideRightWallSensorPin = 21U;
+static constexpr std::uint8_t kSideRightWallSensorLedPin = 17U;
+static constexpr std::uint8_t kSideLeftWallSensorPin = 20U;
+static constexpr std::uint8_t kSideLeftWallSensorLedPin = 16U;
+// Placeholder table until measured calibration data is loaded for the chassis.
+static constexpr std::array<float, 8> kDefaultWallSensorAdcToLightTable =
+{ { 0.0f, 0.1f, 0.2f, 0.35f, 0.55f, 0.8f, 1.1f, 1.5f } };
 
-    uint16_t FanPwmCode(float dutyCycle) noexcept
-    {
-#if defined(ARDUINO_TEENSY41)
-        const float clampedDutyCycle = (std::clamp)(dutyCycle, 0.0f, 1.0f);
-        const uint32_t maxPwmCode = (1UL << MazeMap::HardwareConfig::kPwmBits) - 1UL;
-        return static_cast<uint16_t>(clampedDutyCycle * static_cast<float>(maxPwmCode) + 0.5f);
-#else
-        (void)dutyCycle;
-        return 0U;
-#endif
-    }
-
-    const std::array<float, 8>& GetDefaultWallSensorAdcToLightTable()
-    {
-        // Placeholder table until measured calibration data is loaded for the chassis.
-        static const std::array<float, 8> kTable = { 0.0f, 0.1f, 0.2f, 0.35f, 0.55f, 0.8f, 1.1f, 1.5f };
-        return kTable;
-    }
-
-    const MazeMap::WallSensor::DistanceModel& GetDefaultWallSensorDistanceModel()
-    {
-        static const MazeMap::WallSensor::DistanceModel kModel = {
-            0.06f,
-            0.9f,
-            0.01f,
-            0.20f
-        };
-        return kModel;
-    }
-
-    MazeMap::WallSensor MakeWallSensor(
-        uint8_t wallSensorInPin,
-        uint8_t ledOutPin,
-        const MazeMap::SensorMount& mount)
-    {
-        return MazeMap::WallSensor(
-            wallSensorInPin,
-            ledOutPin,
-            mount.positionBodyM(),
-            mount.SensorForwardBody(),
-            GetDefaultWallSensorAdcToLightTable(),
-            GetDefaultWallSensorDistanceModel());
-    }
-
-    MazeMap::WallSensor MakeFrontLeftWallSensor()
-    {
-        return MakeWallSensor(
-            kFrontLeftWallSensorPin,
-            kFrontLeftWallSensorLedPin,
-            MazeMap::Vehicle::GetFrontLeftSensorMount());
-    }
-
-    MazeMap::WallSensor MakeFrontRightWallSensor()
-    {
-        return MakeWallSensor(
-            kFrontRightWallSensorPin,
-            kFrontRightWallSensorLedPin,
-            MazeMap::Vehicle::GetFrontRightSensorMount());
-    }
-
-    MazeMap::WallSensor MakeSideLeftWallSensor()
-    {
-        return MakeWallSensor(
-            kSideLeftWallSensorPin,
-            kSideLeftWallSensorLedPin,
-            MazeMap::Vehicle::GetSideLeftSensorMount());
-    }
-
-    MazeMap::WallSensor MakeSideRightWallSensor()
-    {
-        return MakeWallSensor(
-            kSideRightWallSensorPin,
-            kSideRightWallSensorLedPin,
-            MazeMap::Vehicle::GetSideRightSensorMount());
-    }
-
-}
+static constexpr MazeMap::WallSensor::DistanceModel kDefaultWallSensorDistanceModel = {
+    0.06f,
+    0.9f,
+    0.01f,
+    0.20f
+};
 
 namespace MazeMap
 {
@@ -147,18 +76,42 @@ namespace MazeMap
             kRightDriveInvertMotorDirection,
             kRightDriveInvertEncoderDirection,
             1.0f)
+        , _frontLeftWallSensor(
+            kFrontLeftWallSensorPin,
+            kFrontLeftWallSensorLedPin,
+            GetFrontLeftSensorMount().positionBodyM(),
+            GetFrontLeftSensorMount().SensorForwardBody(),
+            kDefaultWallSensorAdcToLightTable,
+            kDefaultWallSensorDistanceModel)
+        , _frontRightWallSensor(
+            kFrontRightWallSensorPin,
+            kFrontRightWallSensorLedPin,
+            GetFrontRightSensorMount().positionBodyM(),
+            GetFrontRightSensorMount().SensorForwardBody(),
+            kDefaultWallSensorAdcToLightTable,
+            kDefaultWallSensorDistanceModel)
+        , _sideLeftWallSensor(
+            kSideLeftWallSensorPin,
+            kSideLeftWallSensorLedPin,
+            GetSideLeftSensorMount().positionBodyM(),
+            GetSideLeftSensorMount().SensorForwardBody(),
+            kDefaultWallSensorAdcToLightTable,
+            kDefaultWallSensorDistanceModel)
+        , _sideRightWallSensor(
+            kSideRightWallSensorPin,
+            kSideRightWallSensorLedPin,
+            GetSideRightSensorMount().positionBodyM(),
+            GetSideRightSensorMount().SensorForwardBody(),
+            kDefaultWallSensorAdcToLightTable,
+            kDefaultWallSensorDistanceModel)
+        , _frontRightImu()
+        , _backLeftImu()
         , _fanDuty(0.0f)
         , _peakForwardAcceleration(kVehiclePeakForwardAccelerationMps2)
         , _peakLateralAcceleration(GetSustainedLateralAccelerationReferenceMps2())
-        , _peakRotationalVelocity(kVehiclePeakRotationalVelocityRadps)
-        , _peakAngularAcceleration(kVehiclePeakAngularAccelerationRadps2)
+        , _peakYawRate(kVehiclePeakYawRateRadps)
+        , _peakYawAccel(kVehiclePeakYawAccelRadps2)
         , _maxSpeed(kVehicleMaxSpeedMps)
-        , FrontLeft(MakeFrontLeftWallSensor())
-        , FrontRight(MakeFrontRightWallSensor())
-        , SideLeft(MakeSideLeftWallSensor())
-        , SideRight(MakeSideRightWallSensor())
-        , IMU_FR()
-        , IMU_BL()
     {
     }
 
@@ -184,19 +137,19 @@ namespace MazeMap
     EncoderObs Vehicle::CaptureEncoderObservation(const float dtSeconds) noexcept
     {
         EncoderObs observation{};
-        observation.totalLeftCounts = _leftMotor.consumeEncoderCount();
-        observation.totalRightCounts = _rightMotor.consumeEncoderCount();
-        observation.leftDistanceDeltaM = _leftMotor.pulsesToDistance(observation.totalLeftCounts);
-        observation.rightDistanceDeltaM = _rightMotor.pulsesToDistance(observation.totalRightCounts);
+        observation.SetTotalLeftCounts(_leftMotor.consumeEncoderCount());
+        observation.SetTotalRightCounts(_rightMotor.consumeEncoderCount());
+        observation.SetLeftDistanceDeltaM(_leftMotor.pulsesToDistance(observation.TotalLeftCounts()));
+        observation.SetRightDistanceDeltaM(_rightMotor.pulsesToDistance(observation.TotalRightCounts()));
 
         if ((dtSeconds > 0.0f) && std::isfinite(dtSeconds))
         {
             const float invWheelRadiusM = 2.0f / kDriveWheelDiameterM;
             const float invDtSeconds = 1.0f / dtSeconds;
-            observation.leftVelocityMps = observation.leftDistanceDeltaM * invDtSeconds;
-            observation.rightVelocityMps = observation.rightDistanceDeltaM * invDtSeconds;
-            observation.omegaLeftRadps = observation.leftVelocityMps * invWheelRadiusM;
-            observation.omegaRightRadps = observation.rightVelocityMps * invWheelRadiusM;
+            observation.SetLeftVelocityMps(observation.LeftDistanceDeltaM() * invDtSeconds);
+            observation.SetRightVelocityMps(observation.RightDistanceDeltaM() * invDtSeconds);
+            observation.SetLeftWheelSpeedRadps(observation.LeftVelocityMps() * invWheelRadiusM);
+            observation.SetRightWheelSpeedRadps(observation.RightVelocityMps() * invWheelRadiusM);
         }
 
         return observation;
@@ -348,31 +301,34 @@ namespace MazeMap
     float Vehicle::GetInPlaceTurnTime(float radians) const
     {
         const float angle = fabsf(radians);
-        const float maxAngularAcceleration = GetMaxAngularAcceleration();
-        if (!(angle > 0.0f) || !(maxAngularAcceleration > 0.0f))
+        const float maxYawAccel = GetMaxYawAccel();
+        if (!(angle > 0.0f) || !(maxYawAccel > 0.0f))
         {
             return 0.0f;
         }
 
-        return 2.0f * sqrtf(angle / maxAngularAcceleration);
+        return 2.0f * sqrtf(angle / maxYawAccel);
     }
     float Vehicle::GetMaxForwardAcceleration() { return const_cast<const Vehicle*>(this)->GetMaxForwardAcceleration(); }
     float Vehicle::GetMaxForwardAcceleration() const { return _peakForwardAcceleration; }
     float Vehicle::GetMaxLateralAcceleration() { return const_cast<const Vehicle*>(this)->GetMaxLateralAcceleration(); }
     float Vehicle::GetMaxLateralAcceleration() const { return _peakLateralAcceleration; }
-    float Vehicle::GetMaxRotationalVelocity() { return const_cast<const Vehicle*>(this)->GetMaxRotationalVelocity(); }
-    float Vehicle::GetMaxRotationalVelocity() const { return _peakRotationalVelocity; }
-    float Vehicle::GetMaxAngularAcceleration() { return const_cast<const Vehicle*>(this)->GetMaxAngularAcceleration(); }
-    float Vehicle::GetMaxAngularAcceleration() const { return _peakAngularAcceleration; }
-    float Vehicle::GetMass() const { return GetPhysicalModel().massKg; }
-    float Vehicle::GetTrackWidth() const { return GetPhysicalModel().trackWidthM; }
-    float Vehicle::GetYawInertia() const { return GetPhysicalModel().yawInertiaKgM2; }
+    float Vehicle::GetMaxYawRate() { return const_cast<const Vehicle*>(this)->GetMaxYawRate(); }
+    float Vehicle::GetMaxYawRate() const { return _peakYawRate; }
+    float Vehicle::GetMaxYawAccel() { return const_cast<const Vehicle*>(this)->GetMaxYawAccel(); }
+    float Vehicle::GetMaxYawAccel() const { return _peakYawAccel; }
+    float Vehicle::GetMass() const { return GetPhysicalMassKg(); }
+    float Vehicle::GetTrackWidth() const { return GetPhysicalTrackWidthM(); }
+    float Vehicle::GetYawInertia() const { return GetPhysicalYawInertiaKgM2(); }
     float Vehicle::GetBatteryVoltage() const noexcept { return kDriveSupplyVoltageV; }
     void Vehicle::SetFanDuty(float dutyCycle) noexcept
     {
         _fanDuty = (std::clamp)(dutyCycle, 0.0f, 1.0f);
 #if defined(ARDUINO_TEENSY41)
-        analogWrite(Pins::Fan_CTRL, FanPwmCode(_fanDuty));
+        const std::uint32_t maxPwmCode = (1UL << HardwareConfig::kPwmBits) - 1UL;
+        const std::uint16_t fanPwmCode =
+            static_cast<std::uint16_t>(_fanDuty * static_cast<float>(maxPwmCode) + 0.5f);
+        analogWrite(Pins::Fan_CTRL, fanPwmCode);
 #endif
     }
     float Vehicle::GetFanDuty() const noexcept { return _fanDuty; }
@@ -381,50 +337,43 @@ namespace MazeMap
     float Vehicle::GetPeakCombinedAcceleration() const noexcept { return kPeakCombinedAccelerationMps2; }
     float Vehicle::GetArcEffectiveTrackWidth(float turningRadiusM) noexcept
     {
-        const ArcTrackWidthInterpolation& interpolation = GetPhysicalModel().arcTrackWidthInterpolation;
         if (!std::isfinite(turningRadiusM) || !(turningRadiusM > 0.0f))
         {
-            return GetPhysicalModel().trackWidthM;
+            return GetPhysicalTrackWidthM();
         }
 
-        if (!(interpolation.tightRadiusM > 0.0f) ||
-            !(interpolation.wideRadiusM > interpolation.tightRadiusM) ||
-            !std::isfinite(interpolation.tightTrackWidthM) ||
-            !std::isfinite(interpolation.wideTrackWidthM))
+        if (!(GetArcTrackWidthTightRadiusM() > 0.0f) ||
+            !(GetArcTrackWidthWideRadiusM() > GetArcTrackWidthTightRadiusM()) ||
+            !std::isfinite(GetArcTrackWidthTightTrackWidthM()) ||
+            !std::isfinite(GetArcTrackWidthWideTrackWidthM()))
         {
-            return GetPhysicalModel().trackWidthM;
+            return GetPhysicalTrackWidthM();
         }
 
-        if (turningRadiusM <= interpolation.tightRadiusM)
+        if (turningRadiusM <= GetArcTrackWidthTightRadiusM())
         {
-            return interpolation.tightTrackWidthM;
+            return GetArcTrackWidthTightTrackWidthM();
         }
 
-        if (turningRadiusM >= interpolation.wideRadiusM)
+        if (turningRadiusM >= GetArcTrackWidthWideRadiusM())
         {
-            return interpolation.wideTrackWidthM;
+            return GetArcTrackWidthWideTrackWidthM();
         }
 
         const float blend =
-            (turningRadiusM - interpolation.tightRadiusM) /
-            (interpolation.wideRadiusM - interpolation.tightRadiusM);
-        return interpolation.tightTrackWidthM +
-            (blend * (interpolation.wideTrackWidthM - interpolation.tightTrackWidthM));
+            (turningRadiusM - GetArcTrackWidthTightRadiusM()) /
+            (GetArcTrackWidthWideRadiusM() - GetArcTrackWidthTightRadiusM());
+        return GetArcTrackWidthTightTrackWidthM() +
+            (blend * (GetArcTrackWidthWideTrackWidthM() - GetArcTrackWidthTightTrackWidthM()));
     }
-    float Vehicle::GetEffectiveTrackWidthForMotion(float linearSpeedMps, float angularSpeedRadps) noexcept
+    float Vehicle::GetEffectiveTrackWidthForMotion(float linearSpeedMps, float yawRateRadps) noexcept
     {
-        if (!std::isfinite(linearSpeedMps) ||
-            !std::isfinite(angularSpeedRadps) ||
-            std::fabs(linearSpeedMps) <= kArcTrackWidthLinearSpeedEpsilonMps ||
-            std::fabs(angularSpeedRadps) <= kArcTrackWidthAngularSpeedEpsilonRadps)
-        {
-            return GetPhysicalModel().trackWidthM;
-        }
-
-        return GetArcEffectiveTrackWidth(std::fabs(linearSpeedMps / angularSpeedRadps));
+        (void)linearSpeedMps;
+        (void)yawRateRadps;
+        return GetPhysicalTrackWidthM();
     }
-    float Vehicle::GetLength() const { return GetPhysicalModel().lengthM; }
-    float Vehicle::GetFrontWallContactOffset() const { return GetPhysicalModel().frontWallContactOffsetM; }
+    float Vehicle::GetLength() const { return GetPhysicalLengthM(); }
+    float Vehicle::GetFrontWallContactOffset() const { return GetPhysicalFrontWallContactOffsetM(); }
     float Vehicle::GetRearWallContactOffset() const { return GetLength() - GetFrontWallContactOffset(); }
     void Vehicle::SetMaxForwardAcceleration(float maxForwardAcceleration)
     {
@@ -434,13 +383,13 @@ namespace MazeMap
     {
         _peakLateralAcceleration = maxLateralAcceleration;
     }
-    void Vehicle::SetMaxRotationalVelocity(float maxRotationalVelocity)
+    void Vehicle::SetMaxYawRate(float maxYawRate)
     {
-        _peakRotationalVelocity = maxRotationalVelocity;
+        _peakYawRate = maxYawRate;
     }
-    void Vehicle::SetMaxAngularAcceleration(float maxAngularAcceleration)
+    void Vehicle::SetMaxYawAccel(float maxYawAccel)
     {
-        _peakAngularAcceleration = maxAngularAcceleration;
+        _peakYawAccel = maxYawAccel;
     }
     void Vehicle::SetMaxSpeed(float maxSpeed)
     {
@@ -449,13 +398,7 @@ namespace MazeMap
     float Vehicle::GetMaxSpeed() { return const_cast<const Vehicle*>(this)->GetMaxSpeed(); }
     float Vehicle::GetMaxSpeed() const { return _maxSpeed; }
     float Vehicle::GetWidth() { return const_cast<const Vehicle*>(this)->GetWidth(); }
-    float Vehicle::GetWidth() const { return GetPhysicalModel().widthM; }
+    float Vehicle::GetWidth() const { return GetPhysicalWidthM(); }
 
-    void DirectStateUpdate(const VehicleState& previousState, VehicleState& result, float timeDelta)
-    {
-        result.SetTime(previousState.GetTime() + timeDelta);
-
-        //result.SetAcceleration(previousState.GetAcceleration() + )
-    }
 }
 
