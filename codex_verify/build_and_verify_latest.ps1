@@ -15,8 +15,13 @@ $ErrorActionPreference = 'Stop'
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Split-Path -Parent $scriptRoot
+$scriptPath = $MyInvocation.MyCommand.Path
 $runStamp = Get-Date -Format 'yyyyMMdd_HHmmss_fff'
 $defaultLogDirectory = Join-Path $scriptRoot 'logs'
+$buildStateDirectory = Join-Path $scriptRoot 'build_state'
+$buildRunLockPath = Join-Path $buildStateDirectory 'active_build.lock'
+$buildRunStatusPath = Join-Path $buildStateDirectory 'active_build_status.json'
+$buildRunTestStageTimeout = New-TimeSpan -Minutes 5
 $requiresBuild = $Mode -ne 'VerifyOnly'
 $requiresTests = $Mode -ne 'BuildOnly'
 $artifactVerb = if ($requiresBuild) { 'Built' } else { 'Verified' }
@@ -361,6 +366,8 @@ if (($invocationContext.Elevated -or $invocationContext.Caller -eq 'Unknown') -a
 
 $script:SuppressTerminalErrorSummary = $false
 $scriptExitCode = 0
+$script:BuildRunLockStream = $null
+$script:BuildRunStatus = $null
 
 function Write-Step {
     param(
@@ -370,6 +377,442 @@ function Write-Step {
 
     Write-LogLine ''
     Write-LogLine "==> $Message" 'Cyan'
+}
+
+function ConvertTo-BuildStatusTimeText {
+    param(
+        [Parameter(Mandatory = $true)]
+        [datetime]$Value
+    )
+
+    return $Value.ToUniversalTime().ToString('o', [System.Globalization.CultureInfo]::InvariantCulture)
+}
+
+function ConvertFrom-BuildStatusTimeText {
+    param(
+        [AllowNull()]
+        [string]$Value
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return $null
+    }
+
+    try {
+        return ([datetime]::Parse(
+            $Value,
+            [System.Globalization.CultureInfo]::InvariantCulture,
+            [System.Globalization.DateTimeStyles]::RoundtripKind)).ToUniversalTime()
+    }
+    catch {
+        return $null
+    }
+}
+
+function Format-BuildStatusDuration {
+    param(
+        [AllowNull()]
+        [timespan]$Duration
+    )
+
+    if ($null -eq $Duration) {
+        return 'unknown'
+    }
+
+    if ($Duration.TotalHours -ge 1.0) {
+        return ('{0:n1}h' -f $Duration.TotalHours)
+    }
+
+    if ($Duration.TotalMinutes -ge 1.0) {
+        return ('{0:n1}m' -f $Duration.TotalMinutes)
+    }
+
+    return ('{0:n0}s' -f [Math]::Max(0.0, $Duration.TotalSeconds))
+}
+
+function ConvertTo-OptionalInt {
+    param(
+        [AllowNull()]
+        [object]$Value
+    )
+
+    if ($null -eq $Value) {
+        return $null
+    }
+
+    $text = Get-NormalizedSingleLineText -Value ([string]$Value)
+    if ([string]::IsNullOrWhiteSpace($text)) {
+        return $null
+    }
+
+    $result = 0
+    if ([int]::TryParse($text, [ref]$result)) {
+        return $result
+    }
+
+    return $null
+}
+
+function Write-BuildRunStatusFile {
+    if ($null -eq $script:BuildRunStatus) {
+        return
+    }
+
+    try {
+        New-Item -ItemType Directory -Path $buildStateDirectory -Force | Out-Null
+        $json = $script:BuildRunStatus | ConvertTo-Json -Depth 4
+        Set-Content -LiteralPath $buildRunStatusPath -Value $json -Encoding UTF8
+    }
+    catch {
+        Write-LogLine ("Build status update warning: {0}" -f $_.Exception.Message) 'Yellow'
+    }
+}
+
+function Start-BuildRunStatus {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Stage
+    )
+
+    $now = Get-Date
+    $script:BuildRunStatus = [ordered]@{
+        Repository = $repoRoot
+        ScriptPath = [System.IO.Path]::GetFullPath($scriptPath)
+        LogFilePath = $LogFilePath
+        ProcessId = $PID
+        Mode = $Mode
+        State = 'Running'
+        Stage = $Stage
+        StartedUtc = ConvertTo-BuildStatusTimeText -Value $now
+        StageStartedUtc = ConvertTo-BuildStatusTimeText -Value $now
+        LastUpdateUtc = ConvertTo-BuildStatusTimeText -Value $now
+        Caller = $invocationContext.Caller
+        CallerCommand = $invocationContext.CallerCommand
+        LauncherPath = $invocationContext.LauncherPath
+        LauncherArguments = $invocationContext.LauncherArguments
+    }
+    Write-BuildRunStatusFile
+}
+
+function Set-BuildRunStage {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Stage
+    )
+
+    if ($null -eq $script:BuildRunLockStream -or $null -eq $script:BuildRunStatus) {
+        return
+    }
+
+    $now = Get-Date
+    $script:BuildRunStatus['State'] = 'Running'
+    $script:BuildRunStatus['Stage'] = $Stage
+    $script:BuildRunStatus['StageStartedUtc'] = ConvertTo-BuildStatusTimeText -Value $now
+    $script:BuildRunStatus['LastUpdateUtc'] = ConvertTo-BuildStatusTimeText -Value $now
+    Write-BuildRunStatusFile
+}
+
+function Complete-BuildRunStatus {
+    param(
+        [Parameter(Mandatory = $true)]
+        [bool]$Succeeded
+    )
+
+    if ($null -eq $script:BuildRunLockStream) {
+        return
+    }
+
+    if ($null -ne $script:BuildRunStatus) {
+        $now = Get-Date
+        $script:BuildRunStatus['State'] = if ($Succeeded) { 'Completed' } else { 'Failed' }
+        $script:BuildRunStatus['Stage'] = if ($Succeeded) { $finalStepLabel } else { 'Failed' }
+        $script:BuildRunStatus['StageStartedUtc'] = ConvertTo-BuildStatusTimeText -Value $now
+        $script:BuildRunStatus['LastUpdateUtc'] = ConvertTo-BuildStatusTimeText -Value $now
+        Write-BuildRunStatusFile
+    }
+
+    $script:BuildRunLockStream.Dispose()
+    $script:BuildRunLockStream = $null
+}
+
+function Read-BuildRunStatusFile {
+    if (-not (Test-Path -LiteralPath $buildRunStatusPath -PathType Leaf)) {
+        return $null
+    }
+
+    try {
+        return Get-Content -LiteralPath $buildRunStatusPath -Raw | ConvertFrom-Json
+    }
+    catch {
+        return $null
+    }
+}
+
+function Get-LatestBuildLogStatus {
+    if (-not (Test-Path -LiteralPath $defaultLogDirectory -PathType Container)) {
+        return $null
+    }
+
+    $candidateLogs = @(Get-ChildItem -LiteralPath $defaultLogDirectory -File |
+        Where-Object {
+            (($_.Name -like 'build_latest_*.txt') -or
+                ($_.Name -like 'build_and_verify_latest_*.txt')) -and
+            (-not [System.StringComparer]::OrdinalIgnoreCase.Equals(
+                [System.IO.Path]::GetFullPath($_.FullName),
+                [System.IO.Path]::GetFullPath($LogFilePath)))
+        } |
+        Sort-Object LastWriteTimeUtc -Descending |
+        Select-Object -First 20)
+
+    if ($candidateLogs.Count -eq 0) {
+        return $null
+    }
+
+    foreach ($candidateLog in $candidateLogs) {
+        $lastStage = $null
+        try {
+            foreach ($line in Get-Content -LiteralPath $candidateLog.FullName) {
+                if ($line -match '^==>\s+(.+)$') {
+                    $lastStage = $Matches[1]
+                }
+            }
+        }
+        catch {
+            continue
+        }
+
+        if ($lastStage -eq 'Checking active build guard') {
+            continue
+        }
+
+        return [pscustomobject]@{
+            Path = $candidateLog.FullName
+            LastWriteTimeUtc = $candidateLog.LastWriteTimeUtc
+            LastStage = $lastStage
+        }
+    }
+
+    return $null
+}
+
+function Get-ObjectPropertyValue {
+    param(
+        [AllowNull()]
+        [psobject]$Object,
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+
+    if ($null -eq $Object) {
+        return $null
+    }
+
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property) {
+        return $null
+    }
+
+    return $property.Value
+}
+
+function Get-ExistingBuildProcessSnapshot {
+    $processes = $null
+    try {
+        $processes = @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop)
+    }
+    catch {
+        return $null
+    }
+
+    $canonicalBuildPattern = [regex]::Escape($canonicalBuildPath)
+    $solutionPattern = [regex]::Escape($solutionPath)
+    $sketchPattern = [regex]::Escape($sketchDir)
+
+    foreach ($process in $processes) {
+        $commandLine = Get-NormalizedSingleLineText -Value $process.CommandLine
+        if ([string]::IsNullOrWhiteSpace($commandLine)) {
+            continue
+        }
+
+        if ([int]$process.ProcessId -eq $PID) {
+            continue
+        }
+
+        $name = Get-NormalizedSingleLineText -Value $process.Name
+        $isBuildScript = ($name -match '^(powershell\.exe|pwsh\.exe)$') -and
+            ($commandLine -match 'build_and_verify_latest\.ps1') -and
+            ($commandLine -notmatch '-Mode\s+VerifyOnly')
+        $isArduinoCompile = ($name -match '^arduino-cli\.exe$') -and
+            ($commandLine -match '\bcompile\b') -and
+            (($commandLine -match $canonicalBuildPattern) -or ($commandLine -match $sketchPattern))
+        $isHostBuild = ($name -match '^(msbuild\.exe|cmd\.exe)$') -and
+            ($commandLine -match '\bmsbuild\b') -and
+            ($commandLine -match $solutionPattern)
+
+        if ($isBuildScript -or $isArduinoCompile -or $isHostBuild) {
+            return [pscustomobject]@{
+                ProcessId = [int]$process.ProcessId
+                ParentProcessId = [int]$process.ParentProcessId
+                Name = $name
+                ExecutablePath = Get-NormalizedSingleLineText -Value $process.ExecutablePath
+                CommandLine = $commandLine
+            }
+        }
+    }
+
+    return $null
+}
+
+function Get-BuildRunStatusReport {
+    param(
+        [AllowNull()]
+        [psobject]$ExistingProcess
+    )
+
+    $status = Read-BuildRunStatusFile
+    $latestLog = Get-LatestBuildLogStatus
+    $stage = $null
+    $stageAge = $null
+    $logPath = $null
+    $state = $null
+    $processId = $null
+    $modeText = $null
+    $source = 'lock'
+    $statusState = $null
+    $statusProcessId = $null
+    $statusProcess = $null
+
+    if ($null -ne $status) {
+        $statusState = Get-NormalizedSingleLineText -Value (Get-ObjectPropertyValue -Object $status -Name 'State')
+        $statusProcessId = ConvertTo-OptionalInt -Value (Get-ObjectPropertyValue -Object $status -Name 'ProcessId')
+        if ($null -ne $statusProcessId -and $statusProcessId -gt 0) {
+            $statusProcess = Get-ProcessSnapshot -ProcessId $statusProcessId
+        }
+    }
+
+    if ($null -ne $status -and
+        $statusState -eq 'Running' -and
+        $null -ne $statusProcess -and
+        (Test-IsBuildWrapperProcess -Process $statusProcess)) {
+        $source = 'status file'
+        $stage = Get-NormalizedSingleLineText -Value (Get-ObjectPropertyValue -Object $status -Name 'Stage')
+        $state = $statusState
+        $logPath = Get-NormalizedSingleLineText -Value (Get-ObjectPropertyValue -Object $status -Name 'LogFilePath')
+        $modeText = Get-NormalizedSingleLineText -Value (Get-ObjectPropertyValue -Object $status -Name 'Mode')
+        $processId = $statusProcessId
+
+        $stageStartedUtc = ConvertFrom-BuildStatusTimeText -Value (Get-ObjectPropertyValue -Object $status -Name 'StageStartedUtc')
+        if ($null -ne $stageStartedUtc) {
+            $stageAge = (Get-Date).ToUniversalTime() - $stageStartedUtc
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($stage) -and $null -ne $ExistingProcess -and $null -ne $latestLog) {
+        $source = 'latest log'
+        $stage = $latestLog.LastStage
+        $logPath = $latestLog.Path
+        $stageAge = (Get-Date).ToUniversalTime() - $latestLog.LastWriteTimeUtc
+    }
+
+    $isTestStage = $stage -eq 'Running the Release unit tests'
+    $likelyLocked = $isTestStage -and $null -ne $stageAge -and $stageAge -gt $buildRunTestStageTimeout
+    $assessment = if ($likelyLocked) {
+        'The active run has spent more than 5 minutes in the Release test stage; treat it as potentially locked.'
+    }
+    elseif ($isTestStage -and $null -ne $stageAge) {
+        'The active run is in the Release test stage and is still inside the 5 minute test-stage window.'
+    }
+    elseif ($isTestStage) {
+        'The active run is in the Release test stage, but the stage age is unavailable.'
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($stage)) {
+        'The active run has not reached the long-running test-stage threshold and is treated as valid.'
+    }
+    else {
+        'An active build lock or build process exists, but direct stage status is unavailable.'
+    }
+
+    return [pscustomobject]@{
+        Source = $source
+        State = $state
+        Stage = $stage
+        StageAge = $stageAge
+        LogPath = $logPath
+        ProcessId = $processId
+        Mode = $modeText
+        ExistingProcess = $ExistingProcess
+        LikelyLocked = $likelyLocked
+        Assessment = $assessment
+    }
+}
+
+function Write-BuildRunStatusReport {
+    param(
+        [Parameter(Mandatory = $true)]
+        [psobject]$Report
+    )
+
+    Write-LogLine 'Another build-capable script or build tool is already active. No new compile will be started.' 'Yellow'
+    if ($null -ne $Report.ExistingProcess) {
+        Write-LogLine ("Active process: {0}" -f (Format-ProcessSnapshot -Process $Report.ExistingProcess)) 'Yellow'
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($Report.Mode)) {
+        Write-LogLine ("Active mode: {0}" -f $Report.Mode) 'Yellow'
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($Report.State)) {
+        Write-LogLine ("Active state: {0}" -f $Report.State) 'Yellow'
+    }
+
+    if ($null -ne $Report.ProcessId) {
+        Write-LogLine ("Active script PID: {0}" -f $Report.ProcessId) 'Yellow'
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($Report.Stage)) {
+        Write-LogLine ("Active stage ({0}): {1}" -f $Report.Source, $Report.Stage) $(if ($Report.LikelyLocked) { 'Red' } else { 'Yellow' })
+        Write-LogLine ("Stage age: {0}" -f (Format-BuildStatusDuration -Duration $Report.StageAge)) $(if ($Report.LikelyLocked) { 'Red' } else { 'Yellow' })
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($Report.LogPath)) {
+        Write-LogLine ("Active log: {0}" -f $Report.LogPath) 'Yellow'
+    }
+
+    Write-LogLine $Report.Assessment $(if ($Report.LikelyLocked) { 'Red' } else { 'Yellow' })
+}
+
+function Enter-BuildRunGuard {
+    if (-not $requiresBuild) {
+        return
+    }
+
+    New-Item -ItemType Directory -Path $buildStateDirectory -Force | Out-Null
+    try {
+        $script:BuildRunLockStream = [System.IO.File]::Open(
+            $buildRunLockPath,
+            [System.IO.FileMode]::OpenOrCreate,
+            [System.IO.FileAccess]::ReadWrite,
+            [System.IO.FileShare]::None)
+    }
+    catch {
+        $report = Get-BuildRunStatusReport -ExistingProcess $null
+        Write-BuildRunStatusReport -Report $report
+        $script:scriptExitCode = 2
+        throw 'Another build-capable script is already running; not starting an overlapping compile.'
+    }
+
+    $existingProcess = Get-ExistingBuildProcessSnapshot
+    if ($null -ne $existingProcess) {
+        $report = Get-BuildRunStatusReport -ExistingProcess $existingProcess
+        Write-BuildRunStatusReport -Report $report
+        $script:BuildRunLockStream.Dispose()
+        $script:BuildRunLockStream = $null
+        $script:scriptExitCode = 2
+        throw 'Another build process is already running; not starting an overlapping compile.'
+    }
+
+    Start-BuildRunStatus -Stage 'Preparing build'
+    Write-LogLine 'No active build-capable script or build tool detected.' 'DarkCyan'
 }
 
 function Assert-PathExists {
@@ -435,7 +878,8 @@ function Ensure-JunctionTarget {
     $expectedTarget = [System.IO.Path]::GetFullPath($Target)
     $existingItem = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
     if ($null -ne $existingItem) {
-        $existingTargets = @($existingItem.Target | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        $existingTargetValue = Get-ObjectPropertyValue -Object $existingItem -Name 'Target'
+        $existingTargets = @($existingTargetValue | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
         $isReparsePoint = (($existingItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)
         if ($isReparsePoint -and $existingTargets.Count -gt 0) {
             foreach ($existingTarget in $existingTargets) {
@@ -959,6 +1403,8 @@ function Convert-ArduinoDependencyToRepoPath {
         [Parameter(Mandatory = $true)]
         [string]$CanonicalBuildPath,
         [Parameter(Mandatory = $true)]
+        [string]$ArduinoBuildPath,
+        [Parameter(Mandatory = $true)]
         [string]$FirmwareSketchDir,
         [Parameter(Mandatory = $true)]
         [string]$SketchDir,
@@ -972,6 +1418,23 @@ function Convert-ArduinoDependencyToRepoPath {
 
     $fullPath = [System.IO.Path]::GetFullPath($Path)
     if (-not (Test-IsPathUnderRoot -Path $fullPath -Root $RepoRoot)) {
+        return $null
+    }
+
+    $arduinoEigenSourceRoot = Join-Path $ArduinoEigenLibraryDir 'src'
+    if (Test-IsPathUnderRoot -Path $fullPath -Root $arduinoEigenSourceRoot) {
+        $relativePath = Get-RelativePathWithinRoot -Path $fullPath -Root $arduinoEigenSourceRoot
+        if ([string]::IsNullOrWhiteSpace($relativePath) -or
+            $relativePath.Equals('Eigen.h', [System.StringComparison]::OrdinalIgnoreCase) -or
+            $relativePath.Equals('library.properties', [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $null
+        }
+
+        $candidatePath = Join-Path $EigenSourceRoot $relativePath
+        if (Test-Path -LiteralPath $candidatePath -PathType Leaf) {
+            return [System.IO.Path]::GetFullPath($candidatePath)
+        }
+
         return $null
     }
 
@@ -997,24 +1460,7 @@ function Convert-ArduinoDependencyToRepoPath {
         return $null
     }
 
-    $arduinoEigenSourceRoot = Join-Path $ArduinoEigenLibraryDir 'src'
-    if (Test-IsPathUnderRoot -Path $fullPath -Root $arduinoEigenSourceRoot) {
-        $relativePath = Get-RelativePathWithinRoot -Path $fullPath -Root $arduinoEigenSourceRoot
-        if ([string]::IsNullOrWhiteSpace($relativePath) -or
-            $relativePath.Equals('Eigen.h', [System.StringComparison]::OrdinalIgnoreCase) -or
-            $relativePath.Equals('library.properties', [System.StringComparison]::OrdinalIgnoreCase)) {
-            return $null
-        }
-
-        $candidatePath = Join-Path $EigenSourceRoot $relativePath
-        if (Test-Path -LiteralPath $candidatePath -PathType Leaf) {
-            return [System.IO.Path]::GetFullPath($candidatePath)
-        }
-
-        return $null
-    }
-
-    $firmwarePchDir = Join-Path $CanonicalBuildPath 'firmware\pch'
+    $firmwarePchDir = Join-Path $ArduinoBuildPath 'pch'
     if ((Test-IsPathUnderRoot -Path $fullPath -Root $firmwarePchDir) -and
         $fullPath.EndsWith('Arduino.h', [System.StringComparison]::OrdinalIgnoreCase) -and
         (Test-Path -LiteralPath $ArduinoStubHeaderPath -PathType Leaf)) {
@@ -1027,7 +1473,7 @@ function Convert-ArduinoDependencyToRepoPath {
 function Get-LatestRepoInputWriteTimeFromArduinoDependencyFiles {
     param(
         [Parameter(Mandatory = $true)]
-        [string]$FirmwareOutputDir,
+        [string]$ArduinoBuildPath,
         [Parameter(Mandatory = $true)]
         [string]$RepoRoot,
         [Parameter(Mandatory = $true)]
@@ -1042,12 +1488,17 @@ function Get-LatestRepoInputWriteTimeFromArduinoDependencyFiles {
         [string]$ArduinoStubHeaderPath
     )
 
-    $firmwareSketchDir = Join-Path $FirmwareOutputDir 'sketch'
+    $firmwareSketchDir = Join-Path $ArduinoBuildPath 'sketch'
+    $firmwarePchDir = Join-Path $ArduinoBuildPath 'pch'
     Assert-PathExists -Path $firmwareSketchDir -Description 'Arduino sketch dependency directory'
+    Assert-PathExists -Path $firmwarePchDir -Description 'Arduino PCH dependency directory'
 
-    $dependencyFiles = @(Get-ChildItem -LiteralPath $firmwareSketchDir -File -Filter '*.d')
+    $dependencyFiles = @(
+        Get-ChildItem -LiteralPath $firmwareSketchDir -File -Filter '*.d'
+        Get-ChildItem -LiteralPath $firmwarePchDir -File -Filter '*.d'
+    )
     if ($dependencyFiles.Count -eq 0) {
-        throw ("No Arduino dependency files were found under {0}" -f $firmwareSketchDir)
+        throw ("No Arduino dependency files were found under {0} or {1}" -f $firmwareSketchDir, $firmwarePchDir)
     }
 
     $repoLocalPaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -1057,6 +1508,7 @@ function Get-LatestRepoInputWriteTimeFromArduinoDependencyFiles {
                 -Path $trackedPath `
                 -RepoRoot $RepoRoot `
                 -CanonicalBuildPath $CanonicalBuildPath `
+                -ArduinoBuildPath $ArduinoBuildPath `
                 -FirmwareSketchDir $firmwareSketchDir `
                 -SketchDir $SketchDir `
                 -ArduinoEigenLibraryDir $ArduinoEigenLibraryDir `
@@ -1076,7 +1528,7 @@ function Get-LatestRepoInputWriteTimeFromArduinoDependencyFiles {
     }
 
     if ($repoLocalPaths.Count -eq 0) {
-        throw ("No repo-local Arduino inputs were found in dependency files under {0}" -f $firmwareSketchDir)
+        throw ("No repo-local Arduino inputs were found in dependency files under {0} or {1}" -f $firmwareSketchDir, $firmwarePchDir)
     }
 
     $missingRepoLocalPaths = [System.Collections.Generic.List[string]]::new()
@@ -1104,7 +1556,7 @@ function Get-LatestRepoInputWriteTimeFromArduinoDependencyFiles {
     }
 
     if ($latestWriteTime -eq [datetime]::MinValue) {
-        throw ("No repo-local Arduino inputs were found under {0}" -f $firmwareSketchDir)
+        throw ("No repo-local Arduino inputs were found under {0} or {1}" -f $firmwareSketchDir, $firmwarePchDir)
     }
 
     return $latestWriteTime
@@ -1254,7 +1706,7 @@ function Get-AndLogReleaseArtifactStatus {
         [Parameter(Mandatory = $true)]
         [string]$ArtifactVerb,
         [Parameter(Mandatory = $true)]
-        [string]$FirmwareOutputDir,
+        [string]$ArduinoBuildPath,
         [Parameter(Mandatory = $true)]
         [string]$HexPath,
         [Parameter(Mandatory = $true)]
@@ -1289,7 +1741,7 @@ function Get-AndLogReleaseArtifactStatus {
 
     try {
         $firmwareSourceCutoff = Get-LatestRepoInputWriteTimeFromArduinoDependencyFiles `
-            -FirmwareOutputDir $FirmwareOutputDir `
+            -ArduinoBuildPath $ArduinoBuildPath `
             -RepoRoot $RepoRoot `
             -CanonicalBuildPath $CanonicalBuildPath `
             -SketchDir $SketchDir `
@@ -1469,19 +1921,16 @@ else {
 }
 $mazeMapHostProject = [pscustomobject]@{
     Name = 'MazeMap'
-    IntermediateDir = Join-Path $repoRoot 'MazeMap\MazeMap\x64\Release'
     TLogDir = Join-Path $repoRoot 'MazeMap\MazeMap\x64\Release\MazeMap.tlog'
     ProjectFile = Join-Path $repoRoot 'MazeMap\MazeMap\MazeMap.vcxproj'
 }
 $mazeMapTestHostProject = [pscustomobject]@{
     Name = 'MazeMapTest'
-    IntermediateDir = Join-Path $repoRoot 'MazeMap\MazeMapTest\x64\Release'
     TLogDir = Join-Path $repoRoot 'MazeMap\MazeMapTest\x64\Release\MazeMapTest.tlog'
     ProjectFile = Join-Path $repoRoot 'MazeMap\MazeMapTest\MazeMapTest.vcxproj'
 }
 $mazeSimulationHostProject = [pscustomobject]@{
     Name = 'MazeSimulation'
-    IntermediateDir = Join-Path $repoRoot 'MazeMap\MazeSimulation\x64\Release'
     TLogDir = Join-Path $repoRoot 'MazeMap\MazeSimulation\x64\Release\MazeSimulation.tlog'
     ProjectFile = Join-Path $repoRoot 'MazeMap\MazeSimulation\MazeSimulation.vcxproj'
 }
@@ -1494,18 +1943,26 @@ try {
     Write-LogLine $launcherSuccessLabel 'DarkCyan'
 
     if ($requiresBuild) {
+        Write-Step 'Checking active build guard'
+        Enter-BuildRunGuard
+    }
+
+    if ($requiresBuild) {
+        Set-BuildRunStage -Stage 'Checking build environment'
         Write-Step 'Checking build environment'
         Assert-UnsandboxedBuildEnvironment -WrapperPath $modeWrapperPath
         Write-LogLine 'Host build environment access check passed.' 'DarkCyan'
     }
 
     if ($requiresBuild) {
+        Set-BuildRunStage -Stage 'Preparing build directories'
         New-Item -ItemType Directory -Path $canonicalBuildPath -Force | Out-Null
         New-Item -ItemType Directory -Path $buildPath -Force | Out-Null
         New-Item -ItemType Directory -Path $firmwareOutputDir -Force | Out-Null
         Write-LogLine ("Resetting upload artifact path: {0}" -f $hexPath) 'DarkCyan'
         Remove-FileIfPresent -Path $hexPath
 
+        Set-BuildRunStage -Stage 'Compiling the Teensy sketch'
         Write-Step 'Compiling the Teensy sketch'
         Write-LogLine ("Teensy compile profile: {0} ({1})" -f $teensyOptimizationProfile, ($teensyBoardOptions -join ', ')) 'DarkCyan'
         Write-LogLine ("Teensy compile parallelism: --jobs {0}" -f $TeensyCompileJobs) 'DarkCyan'
@@ -1523,6 +1980,7 @@ try {
         $teensyBuildStopwatch.Stop()
         Write-LogLine ("Teensy compile completed in {0:n1}s" -f $teensyBuildStopwatch.Elapsed.TotalSeconds) 'DarkCyan'
 
+        Set-BuildRunStage -Stage 'Building the Release host targets'
         Write-Step 'Building the Release host targets'
         Write-LogLine ("Host build target: {0} (Release|x64)" -f $HostBuildTarget) 'DarkCyan'
         Write-LogLine ("Host LTCG mode: {0}" -f $HostLtcgMode) 'DarkCyan'
@@ -1547,10 +2005,11 @@ try {
         Write-LogLine ("Host build completed in {0:n1}s" -f $hostBuildStopwatch.Elapsed.TotalSeconds) 'DarkCyan'
     }
 
+    Set-BuildRunStage -Stage 'Checking latest release artifacts'
     Write-Step 'Checking latest release artifacts'
     $releaseArtifacts = Get-AndLogReleaseArtifactStatus `
         -ArtifactVerb $artifactVerb `
-        -FirmwareOutputDir $firmwareOutputDir `
+        -ArduinoBuildPath $buildPath `
         -HexPath $hexPath `
         -RepoRoot $repoRoot `
         -CanonicalBuildPath $canonicalBuildPath `
@@ -1569,6 +2028,7 @@ try {
 
     if ($requiresTests) {
         if ($releaseArtifacts.HostTestReady) {
+            Set-BuildRunStage -Stage 'Running the Release unit tests'
             Write-Step 'Running the Release unit tests'
             $testStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
             Invoke-External -FilePath $vstest -Arguments @($releaseArtifacts.TestDll.FullName) -FailureConsoleOutputMode 'VSTestFailuresOnly'
@@ -1603,7 +2063,10 @@ try {
     Write-LogLine ("{0}: {1}" -f $logPathLabel, $LogFilePath) 'Green'
 }
 catch {
-    $scriptExitCode = 1
+    if ($scriptExitCode -eq 0) {
+        $scriptExitCode = 1
+    }
+
     $errorMessage = ("ERROR: {0}" -f $_.Exception.Message)
     if ($script:SuppressTerminalErrorSummary) {
         Add-Content -LiteralPath $LogFilePath -Value $errorMessage -Encoding UTF8
@@ -1613,6 +2076,7 @@ catch {
     }
 }
 finally {
+    Complete-BuildRunStatus -Succeeded:($scriptExitCode -eq 0)
     Add-Content -LiteralPath $LogFilePath -Value '' -Encoding UTF8
     Add-Content -LiteralPath $LogFilePath -Value ('End time: ' + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff zzz')) -Encoding UTF8
     Pop-Location

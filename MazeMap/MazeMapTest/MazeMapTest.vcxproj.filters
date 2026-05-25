@@ -110,6 +110,9 @@
     <ClCompile Include="ManeuverTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="MotorEncoderDriveTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="WallMappingTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

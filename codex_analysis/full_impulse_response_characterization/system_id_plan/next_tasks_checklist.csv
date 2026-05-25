@@ -1,0 +1,10 @@
+task_id,owner,priority,task,acceptance_gate,notes
+SID-001,IR-A,high,Produce stationary fan/noise spectra and offline filter recommendation,Filter removes fan bands without changing launch timing metrics,Use raw gyro minus independent stationary bias
+SID-002,IR-A,high,Summarize yaw-launch steps by amplitude sign repeat delay and twitch/sustained label,All 0.50-0.70 CW/CCW repeats represented with held-out repeat IDs,Do not output deployable response kernels
+SID-003,IR-A,high,Fit initial motor-lag-only candidate on sustained 0.65/0.70 launch cases,Report fixed delay plus lag and held-out repeat RMSE,Reject amplitude-specific delay tables
+SID-004,IR-A,high,Fit bristle/static breakaway candidate on 0.50/0.55 twitch and 0.60 transition cases,Improves twitch/sustained classification and reduces reliable yaw-launch RMSE by more than 50%,Candidate must be compact PlantModel state/equation
+SID-005,IR-B,high,Build reliable open-floor validation split by run and motion class,Held-out splits include in-place yaw moving yaw mostly-forward and low-motion commanded,Use data_quality fit/downweight/validation decisions
+SID-006,IR-B,high,Score compact candidates on open-floor held-out runs,More than 50% RMSE reduction on reliable in-place and moving-yaw subsets,Exclude or separately score final bad tails
+SID-007,IR-B,medium,Test fan/load scaling of accepted candidate,Parameter trend is smooth versus normal load and improves held-out fan conditions,Do not create fan lookup tables
+SID-008,next-worker,high,Reject runtime kernels residual maps and maneuver branches in the production plan,Production shape remains PlantModel-owned equations and private state only,AGENTS.md ownership gate
+SID-009,next-worker,medium,Prepare future PlantModel test list if candidate clears gates,Tests cover finite zero-speed continuity symmetry straight no-bias and load scaling,No production edit in this scratch task

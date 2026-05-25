@@ -128,4 +128,10 @@ namespace MazeMap
 	bool CellCoordinates::IsRight(CellCoordinates other) { return const_cast<CellCoordinates const*>(this)->IsRight(other); }
 	Direction CellCoordinates::DirectionTo(CellCoordinates other) { return const_cast<CellCoordinates const*>(this)->DirectionTo(other); }
 	bool CellCoordinates::operator==(const CellCoordinates& other) { return other == (*this); }
+	CellCoordinates CellCoordinates::GetNearest(float x, float y, float cellDim)
+	{
+		x = std::clamp(x, 0.0f, cellDim * 16.0f);
+		y = std::clamp(y, 0.0f, cellDim * 16.0f);
+		return CellCoordinates(static_cast<uint8_t>((x / cellDim) + 0.5f), static_cast<uint8_t>((y / cellDim) + 0.5f));
+	}
 }

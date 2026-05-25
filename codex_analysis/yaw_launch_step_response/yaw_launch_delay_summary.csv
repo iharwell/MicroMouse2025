@@ -1,0 +1,11 @@
+amplitude,direction,steps,sustained_launch_steps,twitch_only_steps,median_motion_delay_samples,median_threshold_delay_samples,p10_threshold_delay_samples,p90_threshold_delay_samples,median_derivative_onset_samples,median_piecewise_ramp_onset_samples,median_derivative_peak_samples,median_template_best_offset_samples,mean_y_plus_0,mean_y_plus_1,mean_y_plus_2,mean_y_plus_3,mean_y_plus_4,mean_y_plus_5,mean_y_plus_6,quality_flags
+0.50,CCW,10,0,10,8.483,13.719,12.911,14.223,nan,2.000,7.500,0.000,-0.005376,-0.017471,-0.018448,-0.001710,0.043127,0.135001,0.257419,no_derivative_onset:10;twitch_only:10
+0.50,CW,10,0,10,6.724,7.338,6.758,8.714,5.000,2.000,7.000,0.000,0.013561,0.005131,-0.008552,-0.009041,0.025412,0.121562,0.264993,clean_onset:7;no_derivative_onset:3;twitch_only:10
+0.55,CCW,10,0,10,7.902,12.968,12.205,13.840,6.000,2.000,7.500,0.000,-0.002993,0.006292,0.012156,0.009957,0.021075,0.094990,0.242330,clean_onset:2;no_derivative_onset:8;twitch_only:10
+0.55,CW,10,0,10,7.121,7.731,7.364,7.882,6.000,3.000,8.000,0.500,-0.009957,-0.001405,0.006658,0.012889,0.028527,0.082039,0.218873,clean_onset:10;twitch_only:10
+0.60,CCW,10,0,3,7.683,9.262,8.776,11.027,5.500,2.500,8.000,0.000,-0.001466,-0.013806,-0.014172,-0.001955,0.038607,0.143065,0.314107,clean_onset:8;no_derivative_onset:2;twitch_only:3
+0.60,CW,10,0,0,7.280,8.006,7.450,8.453,5.500,3.000,8.000,1.000,0.001161,-0.001772,-0.003482,-0.003482,0.009957,0.090958,0.250149,clean_onset:10
+0.65,CCW,10,8,0,6.312,8.554,6.103,9.545,5.000,2.000,6.500,0.000,0.000672,0.003360,0.003360,0.009957,0.077763,0.260412,0.529559,clean_onset:10;sustained_launch:8
+0.65,CW,10,10,0,6.274,6.859,6.292,7.334,5.000,3.000,7.000,0.000,0.007330,-0.004154,-0.010507,-0.000855,0.047770,0.190712,0.425895,clean_onset:10;sustained_launch:10
+0.70,CCW,10,10,0,5.484,7.042,6.338,7.825,4.000,2.000,7.000,0.000,-0.005192,0.001894,0.007391,0.007391,0.060048,0.215574,0.509401,clean_onset:10;sustained_launch:10
+0.70,CW,10,10,0,6.085,6.733,6.055,7.524,4.000,2.000,7.000,0.000,0.003482,-0.001649,-0.006414,-0.003482,0.056994,0.217651,0.495351,clean_onset:10;sustained_launch:10

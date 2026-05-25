@@ -1,0 +1,19 @@
+scope,selection,forward_bin,abs_yaw_bin,count,median_opposing_nm,p20_opposing_nm,p80_opposing_nm,note
+worker_d_original,aligned,-0.1..0.1,0.2..1,21724,0.977698939,0.586716917,1.363562684,motor-only commanded yaw moment; D reported conflict bin
+same_d_windows_full_model,aligned,-0.1..0.1,0.2..1,21724,0.110192241,0.089238690,0.116278391,D row/window/bin filters with E PlantModel mirror
+worker_d_original,aligned,-0.1..0.1,1..3,24656,0.894728227,0.311305383,1.312764283,motor-only commanded yaw moment
+same_d_windows_full_model,aligned,-0.1..0.1,1..3,24656,0.100968445,0.030358510,0.112117758,D row/window/bin filters with E PlantModel mirror
+worker_d_original,aligned,-0.1..0.1,3..6,6610,0.838973718,0.515017452,1.050669309,motor-only commanded yaw moment
+same_d_windows_full_model,aligned,-0.1..0.1,3..6,6610,0.094613054,0.069346886,0.104596134,D row/window/bin filters with E PlantModel mirror
+worker_d_original,all,-0.1..0.1,0.2..1,29079,0.758599758,-0.382429133,1.194735343,motor-only commanded yaw moment
+same_d_windows_full_model,all,-0.1..0.1,0.2..1,29079,0.106476780,-0.050875876,0.114523819,D row/window/bin filters with E PlantModel mirror
+worker_d_original,all,-0.1..0.1,1..3,47698,0.047214284,-1.166338768,1.129742124,motor-only commanded yaw moment
+same_d_windows_full_model,all,-0.1..0.1,1..3,47698,-0.009620083,-0.093178319,0.106086368,D row/window/bin filters with E PlantModel mirror
+worker_d_original,all,-0.1..0.1,3..6,26112,-0.434150164,-1.008501683,0.530014764,motor-only commanded yaw moment
+same_d_windows_full_model,all,-0.1..0.1,3..6,26112,-0.061102229,-0.112521430,0.072212406,D row/window/bin filters with E PlantModel mirror
+worker_e_compact,all,0.00,0.50,28826,0.085758753,,,"E compact abs-yaw table; signed bins combined"
+worker_e_compact,all,0.00,1.00,13936,0.080160531,,,"E compact abs-yaw table; signed bins combined"
+worker_e_compact,all,0.00,1.50,9913,0.078300269,,,"E compact abs-yaw table; signed bins combined"
+worker_e_compact,all,0.00,2.00,10203,0.019093792,,,"E compact abs-yaw table; signed bins combined"
+worker_e_compact,all,0.00,2.50,12089,-0.039354409,,,"E compact abs-yaw table; signed bins combined"
+worker_e_compact,all,0.00,3.00,10278,-0.086537855,,,"E compact abs-yaw table; signed bins combined"

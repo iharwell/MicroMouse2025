@@ -1,0 +1,5 @@
+family,run_count,rows_scanned,moving_yaw_sensor_rows,nonzero_feature_sensor_rows,extracted_samples_existing_validation,top_run_by_extracted_samples,top_run_extracted_samples,top_run_family_share,saturation_available_runs,watchdog_available_runs,per_row_fan_runs,metadata_fan_runs,gyro_derivative_pairs,gyro_derivative_abs_ge_500_radps2_fraction,fit_authoritative_runs,downweighted_runs,validation_only_runs,excluded_runs
+competition_aux,13,381821,71179,46611,45435,aux003,6607,0.145417,0,0,0,13,381792,0.002017,0,13,13,0
+competition_diag,4,318928,75617,46565,46099,diag003,23242,0.504176,0,0,0,4,318922,0.000408,0,0,3,1
+competition_fwc,4,0,0,0,0,fwc000,0,0.000000,0,0,0,0,0,0.000000,0,0,0,4
+decoded_open_floor,49,3745735,658278,444129,337792,2026-04-21_00-16-10,44880,0.132863,49,46,47,0,3745112,0.000834,15,9,9,16

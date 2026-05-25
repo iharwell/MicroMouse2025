@@ -17,7 +17,10 @@ namespace MazeMap
         friend class Vehicle;
 
         static constexpr unsigned long kMinEncoderVelocitySampleMicros = 250UL;
-        static constexpr float kDefaultWheelBankEquivalentInertiaKgM2 = 240.0e-9f;
+        // First-pass wheel-frame inertia per bank: two 10 mm wide solid-rubber tires
+        // (25.0 mm OD, 17.2 mm hub OD, rho ~= 920 kg/m^3) plus the 1717T006SR rotor
+        // reflected through the 56:17 gearing. Hub and gear inertia are not included yet.
+        static constexpr float kDefaultWheelBankEquivalentInertiaKgM2 = 1.177e-6f;
         // Drive-owned tire parameters. Keep these here because they describe the motor/encoder wheel bank:
         // 25.0 mm wheel OD, 17.2 mm hub, solid 20A rubber, and two wheels per bank.
         // The measured contact span gives one tire contact width:

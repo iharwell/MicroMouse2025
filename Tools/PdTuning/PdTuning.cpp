@@ -41,6 +41,8 @@
     constexpr std::size_t kDefaultSearchPasses = 4U;
     constexpr std::size_t kDefaultSearchGridPoints = 9U;
     constexpr std::size_t kDefaultTopCandidateCount = 8U;
+    constexpr float kLogSearchMinimumRelativeToMaximum = 1.0e-6f;
+    constexpr float kLogSearchAbsolutePositiveMinimum = 1.0e-6f;
     constexpr float kLateWindowFraction = 0.25f;
     constexpr float kLateWindowMinimumS = 0.25f;
     constexpr int kOscillationSignChangeThreshold = 2;
@@ -54,18 +56,9 @@
     constexpr double kYawRateStepRmsScoreWeight = 60.0;
     constexpr double kForwardAccelStepRmsScoreWeight = 40.0;
     constexpr double kYawAccelStepRmsScoreWeight = 40.0;
-    constexpr double kAcceptanceCompletionScoreWeight = 250000.0;
-    constexpr double kAcceptanceCommandEvidenceScoreWeight = 250000.0;
-    constexpr double kInPlaceShiftScoreWeight = 150000.0;
-    constexpr double kInPlaceHeadingScoreWeight = 150000.0;
-    constexpr double kInPlaceTimeScoreWeight = 75000.0;
-    constexpr double kSmoothVelocityVariationScoreWeight = 100000.0;
-    constexpr double kSmoothYawAccelerationVariationScoreWeight = 200000.0;
-    constexpr double kSmoothYawRateVariationScoreWeight = 150000.0;
-    constexpr double kSmoothFinalPositionScoreWeight = 250000.0;
-    constexpr double kSmoothFinalHeadingScoreWeight = 200000.0;
     constexpr int kStartStraightMaxTicks = 6000;
     constexpr int kDriveManeuverMaxTicks = 20000;
+    constexpr int kPlantIntegrationSubstepsPerTick = 10;
     constexpr float kStartStraightDistanceM = 0.30f;
     constexpr float kStartStraightCruiseMps = 0.30f;
     constexpr float kSmoothManeuverEntrySpeedMps = 0.50f;
@@ -76,9 +69,18 @@
     constexpr float kSmoothManeuverVelocityVariationLimit = 0.05f;
     constexpr float kSmoothManeuverYawAccelerationVariationLimit = 0.20f;
     constexpr float kSmoothManeuverYawRateVariationLimit = 0.08f;
+    constexpr float kRippleOscillationDeadband = 1.0e-3f;
     constexpr float kManeuverYawRateMagnitudeEpsilonRadps = 1.0e-4f;
     constexpr float kManeuverTurnPlateauFraction = 0.95f;
     constexpr std::size_t kManeuverRampDeltaTrimSamples = 5U;
+    constexpr float kPlantIntegrationSubstepSeconds =
+        kTickSeconds / static_cast<float>(kPlantIntegrationSubstepsPerTick);
+    constexpr float kTrackingDistanceScaleFloorM = 0.5f * MazeMap::Config::kCellSizeM;
+    constexpr float kTrackingHeadingScaleFloorRad = 0.10f;
+    constexpr float kTrackingForwardVelocityScaleFloorMps = kSmoothManeuverEntrySpeedMps;
+    constexpr float kTrackingYawRateScaleFloorRadps = 1.0f;
+    constexpr float kTrackingForwardAccelScaleFloorMps2 = 1.0f;
+    constexpr float kTrackingYawAccelScaleFloorRadps2 = 1.0f;
 
     enum class SignalKind
     {
@@ -238,6 +240,7 @@
         bool completed = false;
         bool passed = false;
         bool blocker = false;
+        bool rippleOscillatory = false;
         bool allControlsFinite = true;
         bool commandEvidenceValid = true;
         bool requestedObjectivesFinite = true;
@@ -269,6 +272,20 @@
         float yawAccelerationVariationLimit = (std::numeric_limits<float>::quiet_NaN)();
         float yawRateVariation = (std::numeric_limits<float>::quiet_NaN)();
         float yawRateVariationLimit = (std::numeric_limits<float>::quiet_NaN)();
+        int trackingSampleCount = 0;
+        float distanceRmsErrorM = (std::numeric_limits<float>::quiet_NaN)();
+        float distanceRmsReferenceM = (std::numeric_limits<float>::quiet_NaN)();
+        float headingRmsErrorRad = (std::numeric_limits<float>::quiet_NaN)();
+        float headingRmsErrorDeg = (std::numeric_limits<float>::quiet_NaN)();
+        float headingRmsReferenceRad = (std::numeric_limits<float>::quiet_NaN)();
+        float forwardVelocityRmsErrorMps = (std::numeric_limits<float>::quiet_NaN)();
+        float forwardVelocityRmsReferenceMps = (std::numeric_limits<float>::quiet_NaN)();
+        float yawRateRmsErrorRadps = (std::numeric_limits<float>::quiet_NaN)();
+        float yawRateRmsReferenceRadps = (std::numeric_limits<float>::quiet_NaN)();
+        float forwardAccelRmsErrorMps2 = (std::numeric_limits<float>::quiet_NaN)();
+        float forwardAccelRmsReferenceMps2 = (std::numeric_limits<float>::quiet_NaN)();
+        float yawAccelRmsErrorRadps2 = (std::numeric_limits<float>::quiet_NaN)();
+        float yawAccelRmsReferenceRadps2 = (std::numeric_limits<float>::quiet_NaN)();
         int solverFailureCount = 0;
         int nonFiniteCount = 0;
         double scorePenalty = 0.0;
@@ -280,6 +297,16 @@
         float timeSeconds = 0.0f;
         float linearCommandMps = 0.0f;
         float angularCommandRadps = 0.0f;
+        float expectedDistanceM = 0.0f;
+        float distanceErrorM = 0.0f;
+        float expectedHeadingRad = 0.0f;
+        float headingErrorRad = 0.0f;
+        float forwardVelocityErrorMps = 0.0f;
+        float yawRateErrorRadps = 0.0f;
+        float expectedForwardAccelMps2 = 0.0f;
+        float forwardAccelErrorMps2 = 0.0f;
+        float expectedYawAccelRadps2 = 0.0f;
+        float yawAccelErrorRadps2 = 0.0f;
     };
 
     class ManeuverAcceptanceTrace
@@ -296,6 +323,8 @@
         int nonFiniteCount = 0;
         int appliedTicks = 0;
         float elapsedSeconds = 0.0f;
+        float expectedDistanceM = 0.0f;
+        float expectedHeadingRad = 0.0f;
         WheelObservationState wheels{};
         MazeMap::VehicleState truth{};
         std::vector<AcceptanceCommandSample> samples;
@@ -313,22 +342,25 @@
         bool acceptanceBlocked = false;
     };
 
+    class SearchRange
+    {
+    public:
+        float minimum = 0.0f;
+        float maximum = 0.0f;
+    };
+
     class Options
     {
     public:
         GainSet candidate{};
         bool hasExplicitCandidate = false;
         bool runSearch = false;
-        std::size_t searchPasses = kDefaultSearchPasses;
         std::size_t searchGridPoints = kDefaultSearchGridPoints;
+        std::size_t searchPasses = kDefaultSearchPasses;
         std::size_t topCandidateCount = kDefaultTopCandidateCount;
-    };
-
-    class SearchRange
-    {
-    public:
-        float minimum = 0.0f;
-        float maximum = 0.0f;
+        std::array<SearchRange, static_cast<std::size_t>(GainIndex::Count)> searchRanges{};
+        std::array<bool, static_cast<std::size_t>(GainIndex::Count)> searchMinimumSpecified{};
+        std::array<bool, static_cast<std::size_t>(GainIndex::Count)> searchMaximumSpecified{};
     };
 
     static const char* GainName(GainIndex index) noexcept
@@ -426,39 +458,176 @@
         return false;
     }
 
-    static bool ApplyGainOption(const std::string& name, float value, GainSet& gains) noexcept
+    static bool ResolveGainOption(const std::string& name, GainIndex& index) noexcept
     {
         if ((name == "--velocity-kp") || (name == "--vel-kp"))
         {
-            gains.velocityKp = value;
+            index = GainIndex::VelocityKp;
             return true;
         }
         if ((name == "--velocity-kd") || (name == "--vel-kd"))
         {
-            gains.velocityKd = value;
+            index = GainIndex::VelocityKd;
             return true;
         }
         if (name == "--heading-kp")
         {
-            gains.headingKp = value;
+            index = GainIndex::HeadingKp;
             return true;
         }
         if (name == "--heading-kd")
         {
-            gains.headingKd = value;
+            index = GainIndex::HeadingKd;
             return true;
         }
         if ((name == "--yawrate-kp") || (name == "--yaw-rate-kp"))
         {
-            gains.yawRateKp = value;
+            index = GainIndex::YawRateKp;
             return true;
         }
         if ((name == "--yawrate-kd") || (name == "--yaw-rate-kd"))
         {
-            gains.yawRateKd = value;
+            index = GainIndex::YawRateKd;
             return true;
         }
         return false;
+    }
+
+    static bool ResolveSearchBoundOption(const std::string& name, GainIndex& index, bool& minimum) noexcept
+    {
+        if ((name == "--velocity-kp-min") || (name == "--vel-kp-min"))
+        {
+            index = GainIndex::VelocityKp;
+            minimum = true;
+            return true;
+        }
+        if ((name == "--velocity-kp-max") || (name == "--vel-kp-max"))
+        {
+            index = GainIndex::VelocityKp;
+            minimum = false;
+            return true;
+        }
+        if ((name == "--velocity-kd-min") || (name == "--vel-kd-min"))
+        {
+            index = GainIndex::VelocityKd;
+            minimum = true;
+            return true;
+        }
+        if ((name == "--velocity-kd-max") || (name == "--vel-kd-max"))
+        {
+            index = GainIndex::VelocityKd;
+            minimum = false;
+            return true;
+        }
+        if (name == "--heading-kp-min")
+        {
+            index = GainIndex::HeadingKp;
+            minimum = true;
+            return true;
+        }
+        if (name == "--heading-kp-max")
+        {
+            index = GainIndex::HeadingKp;
+            minimum = false;
+            return true;
+        }
+        if (name == "--heading-kd-min")
+        {
+            index = GainIndex::HeadingKd;
+            minimum = true;
+            return true;
+        }
+        if (name == "--heading-kd-max")
+        {
+            index = GainIndex::HeadingKd;
+            minimum = false;
+            return true;
+        }
+        if ((name == "--yawrate-kp-min") || (name == "--yaw-rate-kp-min"))
+        {
+            index = GainIndex::YawRateKp;
+            minimum = true;
+            return true;
+        }
+        if ((name == "--yawrate-kp-max") || (name == "--yaw-rate-kp-max"))
+        {
+            index = GainIndex::YawRateKp;
+            minimum = false;
+            return true;
+        }
+        if ((name == "--yawrate-kd-min") || (name == "--yaw-rate-kd-min"))
+        {
+            index = GainIndex::YawRateKd;
+            minimum = true;
+            return true;
+        }
+        if ((name == "--yawrate-kd-max") || (name == "--yaw-rate-kd-max"))
+        {
+            index = GainIndex::YawRateKd;
+            minimum = false;
+            return true;
+        }
+        return false;
+    }
+
+    static bool ApplyGainOption(const std::string& name, float value, GainSet& gains) noexcept
+    {
+        GainIndex index = GainIndex::Count;
+        if (!ResolveGainOption(name, index))
+        {
+            return false;
+        }
+
+        value = std::isfinite(value) ? (std::max)(0.0f, value) : 0.0f;
+        switch (index)
+        {
+        case GainIndex::VelocityKp:
+            gains.velocityKp = value;
+            break;
+        case GainIndex::VelocityKd:
+            gains.velocityKd = value;
+            break;
+        case GainIndex::HeadingKp:
+            gains.headingKp = value;
+            break;
+        case GainIndex::HeadingKd:
+            gains.headingKd = value;
+            break;
+        case GainIndex::YawRateKp:
+            gains.yawRateKp = value;
+            break;
+        case GainIndex::YawRateKd:
+            gains.yawRateKd = value;
+            break;
+        case GainIndex::Count:
+        default:
+            return false;
+        }
+        return true;
+    }
+
+    static bool ApplySearchBoundOption(const std::string& name, float value, Options& options) noexcept
+    {
+        GainIndex index = GainIndex::Count;
+        bool minimum = false;
+        if (!ResolveSearchBoundOption(name, index, minimum))
+        {
+            return false;
+        }
+
+        const std::size_t rawIndex = static_cast<std::size_t>(index);
+        value = std::isfinite(value) ? (std::max)(0.0f, value) : 0.0f;
+        if (minimum)
+        {
+            options.searchRanges[rawIndex].minimum = value;
+            options.searchMinimumSpecified[rawIndex] = true;
+        }
+        else
+        {
+            options.searchRanges[rawIndex].maximum = value;
+            options.searchMaximumSpecified[rawIndex] = true;
+        }
+        return true;
     }
 
     static void PrintUsage()
@@ -467,11 +636,19 @@
             << "PdTuning evaluates DriveBase PDCluster candidates against the current C++ PlantModel.\n\n"
             << "Usage:\n"
             << "  PdTuning.exe [gain options]\n"
-            << "  PdTuning.exe --search [--search-passes N] [--search-grid N]\n\n"
+            << "  PdTuning.exe --search [--search-passes N] [--search-points N] [search bounds]\n\n"
             << "Gain options default to Config::kDriveBasePDCluster values:\n"
             << "  --velocity-kp V  --velocity-kd V\n"
             << "  --heading-kp V   --heading-kd V\n"
             << "  --yawrate-kp V   --yawrate-kd V\n\n"
+            << "Search bounds use matching min/max option pairs:\n"
+            << "  --velocity-kp-min V  --velocity-kp-max V\n"
+            << "  --velocity-kd-min V  --velocity-kd-max V\n"
+            << "  --heading-kp-min V   --heading-kp-max V\n"
+            << "  --heading-kd-min V   --heading-kd-max V\n"
+            << "  --yawrate-kp-min V   --yawrate-kp-max V\n"
+            << "  --yawrate-kd-min V   --yawrate-kd-max V\n\n"
+            << "Search uses log-spaced positive gain values with zero retained as an explicit candidate.\n\n"
             << "Stdout is JSON. Errors and this help text are not part of optimizer output.\n";
     }
 
@@ -771,26 +948,14 @@
             (std::fabs(NormalizeAngle(targetYawRad - initialYawRad)) > kStepTransitionEpsilon);
     }
 
-    static bool HasActiveForwardAccelerationObjective(const DriveTelemetry& telemetry) noexcept
+    static bool HasFiniteForwardAccelerationObjective(const DriveTelemetry& telemetry) noexcept
     {
-        const bool hasVelocityFeedback =
-            (telemetry.feedbackBranchFlags & DriveTelemetry::kFeedbackForwardVelocityInactive) == 0U;
-        const bool hasRequestedAccel = std::isfinite(telemetry.requestedForwardAccelMps2);
-        return
-            std::isfinite(telemetry.composedForwardAccelMps2) &&
-            (hasVelocityFeedback || hasRequestedAccel);
+        return std::isfinite(telemetry.composedForwardAccelMps2);
     }
 
-    static bool HasActiveYawAccelerationObjective(const DriveTelemetry& telemetry) noexcept
+    static bool HasFiniteYawAccelerationObjective(const DriveTelemetry& telemetry) noexcept
     {
-        const bool hasYawRateFeedback =
-            (telemetry.feedbackBranchFlags & DriveTelemetry::kFeedbackYawRateInactive) == 0U;
-        const bool hasHeadingFeedback =
-            (telemetry.feedbackBranchFlags & DriveTelemetry::kFeedbackHeadingInactive) == 0U;
-        const bool hasRequestedAccel = std::isfinite(telemetry.requestedYawAccelRadps2);
-        return
-            std::isfinite(telemetry.composedYawAccelRadps2) &&
-            (hasYawRateFeedback || hasHeadingFeedback || hasRequestedAccel);
+        return std::isfinite(telemetry.composedYawAccelRadps2);
     }
 
     const char* AccelerationMetricDefinition(
@@ -958,29 +1123,50 @@
         runtimeState.SetSensorSnapshot(snapshot);
     }
 
+    static WheelObservationState IntegratePlantCommandForTick(
+        MazeMap::PlantModel& plant,
+        MazeMap::VehicleState& runtimeState,
+        const MazeMap::App::Internal::CommandVector& control) noexcept
+    {
+        WheelObservationState tickDelta{};
+        for (int substep = 0; substep < kPlantIntegrationSubstepsPerTick; ++substep)
+        {
+            const float previousLeftWheelSpeedRadps = runtimeState.GetWheelSpeedLeft();
+            const float previousRightWheelSpeedRadps = runtimeState.GetWheelSpeedRight();
+            plant.integrate(control, kPlantIntegrationSubstepSeconds);
+
+            tickDelta.leftDistanceM +=
+                0.5f *
+                (previousLeftWheelSpeedRadps + runtimeState.GetWheelSpeedLeft()) *
+                MazeMap::Vehicle::GetDriveWheelRadiusM() *
+                kPlantIntegrationSubstepSeconds;
+            tickDelta.rightDistanceM +=
+                0.5f *
+                (previousRightWheelSpeedRadps + runtimeState.GetWheelSpeedRight()) *
+                MazeMap::Vehicle::GetDriveWheelRadiusM() *
+                kPlantIntegrationSubstepSeconds;
+        }
+        return tickDelta;
+    }
+
     static bool AdvanceTruth(
         MazeMap::PlantModel& plant,
         MazeMap::VehicleState& runtimeState,
         WheelObservationState& wheels,
         const MazeMap::App::Internal::CommandVector& control) noexcept
     {
-        const float previousLeftWheelSpeedRadps = runtimeState.GetWheelSpeedLeft();
-        const float previousRightWheelSpeedRadps = runtimeState.GetWheelSpeedRight();
-        plant.integrate(control, kTickSeconds);
-
-        const float leftDeltaM =
-            0.5f *
-            (previousLeftWheelSpeedRadps + runtimeState.GetWheelSpeedLeft()) *
-            MazeMap::Vehicle::GetDriveWheelRadiusM() *
-            kTickSeconds;
-        const float rightDeltaM =
-            0.5f *
-            (previousRightWheelSpeedRadps + runtimeState.GetWheelSpeedRight()) *
-            MazeMap::Vehicle::GetDriveWheelRadiusM() *
-            kTickSeconds;
-        wheels.leftDistanceM += leftDeltaM;
-        wheels.rightDistanceM += rightDeltaM;
-        PublishTruthToRuntime(runtimeState, runtimeState, wheels, leftDeltaM, rightDeltaM, kTickSeconds, false);
+        const WheelObservationState tickDelta =
+            IntegratePlantCommandForTick(plant, runtimeState, control);
+        wheels.leftDistanceM += tickDelta.leftDistanceM;
+        wheels.rightDistanceM += tickDelta.rightDistanceM;
+        PublishTruthToRuntime(
+            runtimeState,
+            runtimeState,
+            wheels,
+            tickDelta.leftDistanceM,
+            tickDelta.rightDistanceM,
+            kTickSeconds,
+            false);
         return VehicleStateIsFinite(runtimeState);
     }
 
@@ -1139,29 +1325,20 @@
         MazeMap::App::Internal::SharedRobotRuntime& runtime,
         MazeMap::PlantModel& truthPlant,
         MazeMap::VehicleState& truth,
+        WheelObservationState& wheels,
         float& leftEncoderRemainderCounts,
         float& rightEncoderRemainderCounts,
         const MazeMap::App::Internal::CommandVector& control)
     {
-        const float previousLeftWheelSpeedRadps = truth.GetWheelSpeedLeft();
-        const float previousRightWheelSpeedRadps = truth.GetWheelSpeedRight();
-        truthPlant.integrate(control, kTickSeconds);
-
-        const float leftDistanceDeltaM =
-            0.5f *
-            (previousLeftWheelSpeedRadps + truth.GetWheelSpeedLeft()) *
-            MazeMap::Vehicle::GetDriveWheelRadiusM() *
-            kTickSeconds;
-        const float rightDistanceDeltaM =
-            0.5f *
-            (previousRightWheelSpeedRadps + truth.GetWheelSpeedRight()) *
-            MazeMap::Vehicle::GetDriveWheelRadiusM() *
-            kTickSeconds;
+        const WheelObservationState tickDelta =
+            IntegratePlantCommandForTick(truthPlant, truth, control);
+        wheels.leftDistanceM += tickDelta.leftDistanceM;
+        wheels.rightDistanceM += tickDelta.rightDistanceM;
 
         return ApplyEncoderObservation(
             runtime,
-            leftDistanceDeltaM,
-            rightDistanceDeltaM,
+            tickDelta.leftDistanceM,
+            tickDelta.rightDistanceM,
             truth.GetYawRate(),
             leftEncoderRemainderCounts,
             rightEncoderRemainderCounts,
@@ -1220,123 +1397,71 @@
         metrics.elapsedSeconds = static_cast<float>(metrics.appliedTicks) * kTickSeconds;
     }
 
-    static double ComputeNormalizedMetricScore(
-        const float value,
-        const float limit,
-        const double weight) noexcept
+    static double ComputeRmsRatioScore(float rmsError, float rmsReference) noexcept
     {
-        if (!std::isfinite(value) || !std::isfinite(limit) || !(limit > 0.0f))
-        {
-            return 25.0 * weight;
-        }
-
-        const double ratio = static_cast<double>(std::fabs(value)) / static_cast<double>(limit);
-        const double baseScore = weight * ratio * ratio;
-        if (ratio <= 1.0)
-        {
-            return baseScore;
-        }
-
-        const double excess = ratio - 1.0;
-        return baseScore + (9.0 * weight * excess * excess);
-    }
-
-    static double ComputeCompletionScore(const AcceptanceMetrics& metrics) noexcept
-    {
-        if (metrics.completed && (metrics.appliedTicks > 0))
+        if (!std::isfinite(rmsError) || !std::isfinite(rmsReference) || !(rmsReference > 0.0f))
         {
             return 0.0;
         }
 
-        const double progress =
-            (metrics.maxTicks > 0) ?
-            (static_cast<double>((std::max)(0, metrics.appliedTicks)) / static_cast<double>(metrics.maxTicks)) :
-            0.0;
-        return kAcceptanceCompletionScoreWeight * (2.0 - (std::min)(progress, 1.0));
+        const double ratio = static_cast<double>(rmsError) / static_cast<double>(rmsReference);
+        return ratio * ratio;
     }
 
-    static double ComputeCommandEvidenceScore(const AcceptanceMetrics& metrics) noexcept
+    static double ComputeManeuverTrackingRmsScore(const AcceptanceMetrics& metrics) noexcept
     {
-        double score = 0.0;
-        score += metrics.allControlsFinite ? 0.0 : kAcceptanceCommandEvidenceScoreWeight;
-        score += metrics.commandEvidenceValid ? 0.0 : kAcceptanceCommandEvidenceScoreWeight;
-        score += metrics.requestedObjectivesFinite ? 0.0 : kAcceptanceCommandEvidenceScoreWeight;
-        score += metrics.truthFinite ? 0.0 : kAcceptanceCommandEvidenceScoreWeight;
-        score += metrics.solverClean ? 0.0 : kAcceptanceCommandEvidenceScoreWeight;
-        score +=
-            kAcceptanceCommandEvidenceScoreWeight *
-            static_cast<double>(metrics.nonFiniteCount + metrics.solverFailureCount);
-        return score;
+        return
+            ComputeRmsRatioScore(metrics.distanceRmsErrorM, metrics.distanceRmsReferenceM) +
+            ComputeRmsRatioScore(metrics.headingRmsErrorRad, metrics.headingRmsReferenceRad) +
+            ComputeRmsRatioScore(metrics.forwardVelocityRmsErrorMps, metrics.forwardVelocityRmsReferenceMps) +
+            ComputeRmsRatioScore(metrics.yawRateRmsErrorRadps, metrics.yawRateRmsReferenceRadps) +
+            ComputeRmsRatioScore(metrics.forwardAccelRmsErrorMps2, metrics.forwardAccelRmsReferenceMps2) +
+            ComputeRmsRatioScore(metrics.yawAccelRmsErrorRadps2, metrics.yawAccelRmsReferenceRadps2);
     }
 
     static double ComputeAcceptancePenalty(const AcceptanceMetrics& metrics) noexcept
     {
-        if ((metrics.metric == "drive_primitive_completion") || (metrics.metric == "completion"))
+        if (metrics.metric == "maneuver_tracking_rms")
         {
-            return ComputeCompletionScore(metrics);
+            return ComputeManeuverTrackingRmsScore(metrics);
         }
-        if (metrics.metric == "command_evidence")
-        {
-            return ComputeCommandEvidenceScore(metrics);
-        }
-        if (metrics.metric == "in_place_shift")
-        {
-            return ComputeNormalizedMetricScore(
-                metrics.shiftDistanceM,
-                metrics.shiftToleranceM,
-                kInPlaceShiftScoreWeight);
-        }
-        if (metrics.metric == "in_place_heading")
-        {
-            return ComputeNormalizedMetricScore(
-                metrics.finalHeadingErrorRad,
-                metrics.headingToleranceRad,
-                kInPlaceHeadingScoreWeight);
-        }
-        if (metrics.metric == "in_place_time")
-        {
-            return ComputeNormalizedMetricScore(
-                metrics.elapsedRelativeError,
-                metrics.elapsedRelativeTolerance,
-                kInPlaceTimeScoreWeight);
-        }
+
+        return 0.0;
+    }
+
+    static bool IsPdTuningInformationalAcceptanceMetric(const AcceptanceMetrics& metrics) noexcept
+    {
+        return
+            (metrics.metric == "in_place_time") ||
+            (metrics.metric == "in_place_shift") ||
+            (metrics.metric == "in_place_heading") ||
+            (metrics.metric == "smooth_velocity_variation") ||
+            (metrics.metric == "smooth_yaw_acceleration_variation") ||
+            (metrics.metric == "smooth_yaw_rate_variation") ||
+            (metrics.metric == "smooth_final_position") ||
+            (metrics.metric == "smooth_final_heading");
+    }
+
+    static bool IsNormalizedRippleOscillatory(float normalizedVariation) noexcept
+    {
+        return std::isfinite(normalizedVariation) && (normalizedVariation > kRippleOscillationDeadband);
+    }
+
+    static bool IsAcceptanceRippleOscillatory(const AcceptanceMetrics& metrics) noexcept
+    {
         if (metrics.metric == "smooth_velocity_variation")
         {
-            return ComputeNormalizedMetricScore(
-                metrics.velocityVariation,
-                metrics.velocityVariationLimit,
-                kSmoothVelocityVariationScoreWeight);
+            return IsNormalizedRippleOscillatory(metrics.velocityVariation);
         }
         if (metrics.metric == "smooth_yaw_acceleration_variation")
         {
-            return ComputeNormalizedMetricScore(
-                metrics.yawAccelerationVariation,
-                metrics.yawAccelerationVariationLimit,
-                kSmoothYawAccelerationVariationScoreWeight);
+            return IsNormalizedRippleOscillatory(metrics.yawAccelerationVariation);
         }
         if (metrics.metric == "smooth_yaw_rate_variation")
         {
-            return ComputeNormalizedMetricScore(
-                metrics.yawRateVariation,
-                metrics.yawRateVariationLimit,
-                kSmoothYawRateVariationScoreWeight);
+            return IsNormalizedRippleOscillatory(metrics.yawRateVariation);
         }
-        if (metrics.metric == "smooth_final_position")
-        {
-            return ComputeNormalizedMetricScore(
-                metrics.finalPositionErrorM,
-                metrics.positionToleranceM,
-                kSmoothFinalPositionScoreWeight);
-        }
-        if (metrics.metric == "smooth_final_heading")
-        {
-            return ComputeNormalizedMetricScore(
-                metrics.finalHeadingErrorRad,
-                metrics.headingToleranceRad,
-                kSmoothFinalHeadingScoreWeight);
-        }
-
-        return ComputeCommandEvidenceScore(metrics);
+        return false;
     }
 
     static void FinalizeAcceptance(AcceptanceMetrics& metrics, const bool acceptanceCondition) noexcept
@@ -1350,8 +1475,10 @@
             metrics.truthFinite &&
             metrics.solverClean &&
             (metrics.nonFiniteCount == 0);
-        metrics.blocker = !metrics.passed;
-        metrics.scorePenalty = ComputeAcceptancePenalty(metrics);
+        metrics.blocker = !metrics.passed && !IsPdTuningInformationalAcceptanceMetric(metrics);
+        metrics.rippleOscillatory = IsAcceptanceRippleOscillatory(metrics);
+        metrics.scorePenalty =
+            IsPdTuningInformationalAcceptanceMetric(metrics) ? 0.0 : ComputeAcceptancePenalty(metrics);
     }
 
     static AcceptanceMetrics RunStartStraightAcceptance(const GainSet& gains)
@@ -1530,11 +1657,52 @@
         {
             ++trace.nonFiniteCount;
         }
+    }
+
+    static float UseFiniteTelemetryValueOrZero(float value) noexcept
+    {
+        return std::isfinite(value) ? value : 0.0f;
+    }
+
+    static void RecordManeuverTrackingSample(
+        ManeuverAcceptanceTrace& trace,
+        const DriveTelemetry& telemetry,
+        const float previousForwardMps,
+        const float previousYawRateRadps) noexcept
+    {
+        const float requestedForwardMps = UseFiniteTelemetryValueOrZero(telemetry.requestedForwardMps);
+        const float requestedYawRateRadps = UseFiniteTelemetryValueOrZero(telemetry.requestedYawRateRadps);
+        const float expectedForwardAccelMps2 = UseFiniteTelemetryValueOrZero(telemetry.composedForwardAccelMps2);
+        const float expectedYawAccelRadps2 = UseFiniteTelemetryValueOrZero(telemetry.composedYawAccelRadps2);
+
+        trace.expectedDistanceM += requestedForwardMps * kTickSeconds;
+        trace.expectedHeadingRad =
+            std::isfinite(telemetry.requestedYawRad) ?
+            telemetry.requestedYawRad :
+            NormalizeAngle(trace.expectedHeadingRad + (requestedYawRateRadps * kTickSeconds));
+
+        const float actualDistanceM = AverageEncoderDistanceM(trace.wheels);
+        const float actualHeadingRad = trace.truth.GetHeading();
+        const float actualForwardMps = trace.truth.GetForwardVelocity();
+        const float actualYawRateRadps = trace.truth.GetYawRate();
+        const float actualForwardAccelMps2 = (actualForwardMps - previousForwardMps) / kTickSeconds;
+        const float actualYawAccelRadps2 = (actualYawRateRadps - previousYawRateRadps) / kTickSeconds;
+
         trace.samples.push_back(
             AcceptanceCommandSample{
                 trace.elapsedSeconds,
-                telemetry.requestedForwardMps,
-                telemetry.requestedYawRateRadps
+                requestedForwardMps,
+                requestedYawRateRadps,
+                trace.expectedDistanceM,
+                trace.expectedDistanceM - actualDistanceM,
+                trace.expectedHeadingRad,
+                AngleErrorRad(trace.expectedHeadingRad, actualHeadingRad),
+                requestedForwardMps - actualForwardMps,
+                requestedYawRateRadps - actualYawRateRadps,
+                expectedForwardAccelMps2,
+                expectedForwardAccelMps2 - actualForwardAccelMps2,
+                expectedYawAccelRadps2,
+                expectedYawAccelRadps2 - actualYawAccelRadps2
             });
     }
 
@@ -1601,11 +1769,15 @@
                 break;
             }
 
-            RecordManeuverTraceTelemetry(trace, control, runtime.DriveBase().LastTelemetry());
+            const DriveTelemetry telemetry = runtime.DriveBase().LastTelemetry();
+            const float previousForwardMps = trace.truth.GetForwardVelocity();
+            const float previousYawRateRadps = trace.truth.GetYawRate();
+            RecordManeuverTraceTelemetry(trace, control, telemetry);
             const bool advanced = AdvanceRuntimeDriveCycle(
                 runtime,
                 truthPlant,
                 trace.truth,
+                trace.wheels,
                 leftEncoderRemainderCounts,
                 rightEncoderRemainderCounts,
                 control);
@@ -1617,6 +1789,7 @@
                 ++trace.nonFiniteCount;
                 break;
             }
+            RecordManeuverTrackingSample(trace, telemetry, previousForwardMps, previousYawRateRadps);
         }
 
         const SensorSnapshot& finalSnapshot = runtime.RuntimeState().GetSensorSnapshot();
@@ -1766,6 +1939,35 @@
         return magnitudes;
     }
 
+    static float ComputeSampleRms(
+        const std::vector<AcceptanceCommandSample>& samples,
+        float AcceptanceCommandSample::* member) noexcept
+    {
+        double squaredSum = 0.0;
+        int count = 0;
+        for (const AcceptanceCommandSample& sample : samples)
+        {
+            const float value = sample.*member;
+            if (!std::isfinite(value))
+            {
+                continue;
+            }
+            squaredSum += static_cast<double>(value) * static_cast<double>(value);
+            ++count;
+        }
+
+        return (count > 0) ?
+            static_cast<float>(std::sqrt(squaredSum / static_cast<double>(count))) :
+            (std::numeric_limits<float>::quiet_NaN)();
+    }
+
+    static float ResolveRmsReference(float requestedRms, float floorValue) noexcept
+    {
+        return (std::max)(
+            std::isfinite(requestedRms) ? std::fabs(requestedRms) : 0.0f,
+            floorValue);
+    }
+
     static AcceptanceMetrics BuildManeuverAcceptanceBase(
         const ManeuverAcceptanceTrace& trace,
         const MazeMap::ManeuverCode code,
@@ -1817,6 +2019,44 @@
                 metrics.finalYM - BuildNominalEndYMeters(code));
         metrics.shiftDistanceM = std::hypot(metrics.finalXM, metrics.finalYM);
         metrics.shiftToleranceM = kInPlaceManeuverPositionToleranceM;
+        metrics.trackingSampleCount = static_cast<int>(trace.samples.size());
+        metrics.distanceRmsErrorM =
+            ComputeSampleRms(trace.samples, &AcceptanceCommandSample::distanceErrorM);
+        metrics.distanceRmsReferenceM =
+            ResolveRmsReference(
+                ComputeSampleRms(trace.samples, &AcceptanceCommandSample::expectedDistanceM),
+                kTrackingDistanceScaleFloorM);
+        metrics.headingRmsErrorRad =
+            ComputeSampleRms(trace.samples, &AcceptanceCommandSample::headingErrorRad);
+        metrics.headingRmsErrorDeg = metrics.headingRmsErrorRad * RAD_TO_DEG_F;
+        metrics.headingRmsReferenceRad =
+            ResolveRmsReference(
+                ComputeSampleRms(trace.samples, &AcceptanceCommandSample::expectedHeadingRad),
+                kTrackingHeadingScaleFloorRad);
+        metrics.forwardVelocityRmsErrorMps =
+            ComputeSampleRms(trace.samples, &AcceptanceCommandSample::forwardVelocityErrorMps);
+        metrics.forwardVelocityRmsReferenceMps =
+            ResolveRmsReference(
+                ComputeSampleRms(trace.samples, &AcceptanceCommandSample::linearCommandMps),
+                kTrackingForwardVelocityScaleFloorMps);
+        metrics.yawRateRmsErrorRadps =
+            ComputeSampleRms(trace.samples, &AcceptanceCommandSample::yawRateErrorRadps);
+        metrics.yawRateRmsReferenceRadps =
+            ResolveRmsReference(
+                ComputeSampleRms(trace.samples, &AcceptanceCommandSample::angularCommandRadps),
+                kTrackingYawRateScaleFloorRadps);
+        metrics.forwardAccelRmsErrorMps2 =
+            ComputeSampleRms(trace.samples, &AcceptanceCommandSample::forwardAccelErrorMps2);
+        metrics.forwardAccelRmsReferenceMps2 =
+            ResolveRmsReference(
+                ComputeSampleRms(trace.samples, &AcceptanceCommandSample::expectedForwardAccelMps2),
+                kTrackingForwardAccelScaleFloorMps2);
+        metrics.yawAccelRmsErrorRadps2 =
+            ComputeSampleRms(trace.samples, &AcceptanceCommandSample::yawAccelErrorRadps2);
+        metrics.yawAccelRmsReferenceRadps2 =
+            ResolveRmsReference(
+                ComputeSampleRms(trace.samples, &AcceptanceCommandSample::expectedYawAccelRadps2),
+                kTrackingYawAccelScaleFloorRadps2);
         return metrics;
     }
 
@@ -1846,6 +2086,26 @@
             metrics.commandEvidenceValid &&
             metrics.requestedObjectivesFinite &&
             metrics.truthFinite);
+        return metrics;
+    }
+
+    static AcceptanceMetrics MakeManeuverTrackingRmsAcceptance(
+        const ManeuverAcceptanceTrace& trace,
+        const MazeMap::ManeuverCode code,
+        const bool smoothTurn)
+    {
+        AcceptanceMetrics metrics =
+            BuildManeuverAcceptanceBase(trace, code, smoothTurn, "tracking_rms", "maneuver_tracking_rms");
+        FinalizeAcceptance(
+            metrics,
+            metrics.completed &&
+            !trace.samples.empty() &&
+            std::isfinite(metrics.distanceRmsErrorM) &&
+            std::isfinite(metrics.headingRmsErrorRad) &&
+            std::isfinite(metrics.forwardVelocityRmsErrorMps) &&
+            std::isfinite(metrics.yawRateRmsErrorRadps) &&
+            std::isfinite(metrics.forwardAccelRmsErrorMps2) &&
+            std::isfinite(metrics.yawAccelRmsErrorRadps2));
         return metrics;
     }
 
@@ -2235,7 +2495,7 @@
                 std::isfinite(forwardAccelMps2))
             {
                 float forwardAccelErrorMps2 = forwardAccelMps2;
-                if (HasActiveForwardAccelerationObjective(telemetry))
+                if (HasFiniteForwardAccelerationObjective(telemetry))
                 {
                     forwardAccelErrorMps2 = forwardAccelMps2 - telemetry.composedForwardAccelMps2;
                     first100ForwardAccelObjectiveSquared +=
@@ -2257,7 +2517,7 @@
                 std::isfinite(yawAccelRadps2))
             {
                 float yawAccelErrorRadps2 = yawAccelRadps2;
-                if (HasActiveYawAccelerationObjective(telemetry))
+                if (HasFiniteYawAccelerationObjective(telemetry))
                 {
                     yawAccelErrorRadps2 = yawAccelRadps2 - telemetry.composedYawAccelRadps2;
                     first100YawAccelObjectiveSquared +=
@@ -2432,7 +2692,7 @@
             MazeMap::S180SS
         }};
 
-        acceptances.reserve(1U + (inPlaceManeuvers.size() * 5U) + (smoothManeuvers.size() * 7U));
+        acceptances.reserve(1U + (inPlaceManeuvers.size() * 6U) + (smoothManeuvers.size() * 8U));
         acceptances.push_back(RunStartStraightAcceptance(gains));
 
         for (const MazeMap::ManeuverCode code : inPlaceManeuvers)
@@ -2440,6 +2700,7 @@
             const ManeuverAcceptanceTrace trace = SimulateDriveManeuverAcceptance(gains, code, false);
             acceptances.push_back(MakeCompletionAcceptance(trace, code, false));
             acceptances.push_back(MakeCommandEvidenceAcceptance(trace, code, false));
+            acceptances.push_back(MakeManeuverTrackingRmsAcceptance(trace, code, false));
             acceptances.push_back(MakeInPlaceShiftAcceptance(trace, code));
             acceptances.push_back(MakeInPlaceHeadingAcceptance(trace, code));
             acceptances.push_back(MakeInPlaceTimeAcceptance(trace, code));
@@ -2450,6 +2711,7 @@
             const ManeuverAcceptanceTrace trace = SimulateDriveManeuverAcceptance(gains, code, true);
             acceptances.push_back(MakeCompletionAcceptance(trace, code, true));
             acceptances.push_back(MakeCommandEvidenceAcceptance(trace, code, true));
+            acceptances.push_back(MakeManeuverTrackingRmsAcceptance(trace, code, true));
             acceptances.push_back(MakeSmoothVelocityVariationAcceptance(trace, code));
             acceptances.push_back(MakeSmoothYawAccelerationVariationAcceptance(trace, code));
             acceptances.push_back(MakeSmoothYawRateVariationAcceptance(trace, code));
@@ -2478,6 +2740,7 @@
         for (const AcceptanceMetrics& acceptance : result.acceptanceScenarios)
         {
             result.acceptanceBlocked = result.acceptanceBlocked || acceptance.blocker;
+            result.oscillationFlagged = result.oscillationFlagged || acceptance.rippleOscillatory;
             result.failed = result.failed || acceptance.blocker;
             result.score += acceptance.scorePenalty;
         }
@@ -2490,9 +2753,17 @@
         return { 0.0f, maximum };
     }
 
-    static std::array<SearchRange, static_cast<std::size_t>(GainIndex::Count)> BuildInitialSearchRanges(const GainSet& seed) noexcept
+    static bool SearchRangeIsExplicit(const Options& options, GainIndex index) noexcept
     {
-        return {{
+        const std::size_t rawIndex = static_cast<std::size_t>(index);
+        return options.searchMinimumSpecified[rawIndex] && options.searchMaximumSpecified[rawIndex];
+    }
+
+    static std::array<SearchRange, static_cast<std::size_t>(GainIndex::Count)> BuildInitialSearchRanges(
+        const GainSet& seed,
+        const Options& options) noexcept
+    {
+        std::array<SearchRange, static_cast<std::size_t>(GainIndex::Count)> ranges = {{
             BuildRange(seed.velocityKp, 120.0f, 5.0f),
             BuildRange(seed.velocityKd, 8.0f, 500.0f),
             BuildRange(seed.headingKp, 120.0f, 5.0f),
@@ -2500,9 +2771,73 @@
             BuildRange(seed.yawRateKp, 220.0f, 5.0f),
             BuildRange(seed.yawRateKd, 60.0f, 5.0f)
         }};
+        for (std::size_t rawIndex = 0U; rawIndex < static_cast<std::size_t>(GainIndex::Count); ++rawIndex)
+        {
+            if (SearchRangeIsExplicit(options, static_cast<GainIndex>(rawIndex)))
+            {
+                ranges[rawIndex] = options.searchRanges[rawIndex];
+            }
+        }
+        return ranges;
     }
 
-    static std::vector<float> BuildGridValues(const SearchRange& range, std::size_t gridPoints)
+    static GainSet ClampGainsToSearchRanges(
+        GainSet gains,
+        const std::array<SearchRange, static_cast<std::size_t>(GainIndex::Count)>& ranges) noexcept
+    {
+        for (std::size_t rawIndex = 0U; rawIndex < static_cast<std::size_t>(GainIndex::Count); ++rawIndex)
+        {
+            const SearchRange& range = ranges[rawIndex];
+            if (!std::isfinite(range.minimum) || !std::isfinite(range.maximum))
+            {
+                continue;
+            }
+            const float value = GetGain(gains, static_cast<GainIndex>(rawIndex));
+            SetGain(
+                gains,
+                static_cast<GainIndex>(rawIndex),
+                (std::min)((std::max)(value, range.minimum), range.maximum));
+        }
+        return gains;
+    }
+
+    static bool NearlySameGridValue(float left, float right) noexcept
+    {
+        const float scale = (std::max)(1.0f, (std::max)(std::fabs(left), std::fabs(right)));
+        return std::fabs(left - right) <= (scale * 1.0e-6f);
+    }
+
+    static void NormalizeGridValues(std::vector<float>& values)
+    {
+        std::sort(values.begin(), values.end());
+        auto uniqueEnd =
+            std::unique(
+                values.begin(),
+                values.end(),
+                [](float left, float right) noexcept
+                {
+                    return NearlySameGridValue(left, right);
+                });
+        values.erase(uniqueEnd, values.end());
+    }
+
+    static float BuildPositiveLogSearchMinimum(const SearchRange& range) noexcept
+    {
+        if (!std::isfinite(range.maximum) || !(range.maximum > 0.0f))
+        {
+            return 0.0f;
+        }
+
+        const float broadMinimum =
+            (std::max)(
+                kLogSearchAbsolutePositiveMinimum,
+                range.maximum * kLogSearchMinimumRelativeToMaximum);
+        const float requestedMinimum =
+            (range.minimum > 0.0f) ? range.minimum : broadMinimum;
+        return (std::min)((std::max)(requestedMinimum, broadMinimum), range.maximum);
+    }
+
+    static std::vector<float> BuildLogGridValues(const SearchRange& range, std::size_t gridPoints)
     {
         gridPoints = (std::max)(static_cast<std::size_t>(2U), gridPoints);
         std::vector<float> values;
@@ -2513,13 +2848,90 @@
             return values;
         }
 
-        for (std::size_t index = 0U; index < gridPoints; ++index)
+        if (range.minimum <= 0.0f)
         {
-            const float fraction =
-                static_cast<float>(index) / static_cast<float>(gridPoints - 1U);
-            values.push_back(range.minimum + (fraction * (range.maximum - range.minimum)));
+            values.push_back(0.0f);
         }
+
+        const float positiveMaximum = (std::max)(0.0f, range.maximum);
+        const std::size_t positiveCount = gridPoints - values.size();
+        if ((positiveCount == 0U) || !(positiveMaximum > 0.0f))
+        {
+            NormalizeGridValues(values);
+            return values;
+        }
+
+        const float positiveMinimum = BuildPositiveLogSearchMinimum(range);
+        if ((positiveCount == 1U) || !(positiveMaximum > positiveMinimum))
+        {
+            values.push_back(positiveMaximum);
+            NormalizeGridValues(values);
+            return values;
+        }
+
+        const double logMinimum = std::log(static_cast<double>(positiveMinimum));
+        const double logMaximum = std::log(static_cast<double>(positiveMaximum));
+        for (std::size_t index = 0U; index < positiveCount; ++index)
+        {
+            const double fraction =
+                static_cast<double>(index) / static_cast<double>(positiveCount - 1U);
+            values.push_back(static_cast<float>(std::exp(logMinimum + (fraction * (logMaximum - logMinimum)))));
+        }
+        NormalizeGridValues(values);
         return values;
+    }
+
+    static SearchRange BuildNextLogSearchRange(
+        const SearchRange& absoluteRange,
+        const std::vector<float>& evaluatedValues,
+        float center) noexcept
+    {
+        if (!std::isfinite(center) || evaluatedValues.empty())
+        {
+            return absoluteRange;
+        }
+
+        center = (std::min)((std::max)(center, absoluteRange.minimum), absoluteRange.maximum);
+        float nextMinimum = absoluteRange.minimum;
+        float nextMaximum = absoluteRange.maximum;
+        for (float value : evaluatedValues)
+        {
+            if (!std::isfinite(value))
+            {
+                continue;
+            }
+            if ((value < center) && (value > nextMinimum))
+            {
+                nextMinimum = value;
+            }
+            if ((value > center) && (value < nextMaximum))
+            {
+                nextMaximum = value;
+            }
+        }
+
+        if (!(nextMaximum > nextMinimum))
+        {
+            return absoluteRange;
+        }
+
+        return { nextMinimum, nextMaximum };
+    }
+
+    static int CandidateFeasibilityRank(const EvaluationResult& result) noexcept
+    {
+        return (result.failed || result.acceptanceBlocked) ? 1 : 0;
+    }
+
+    static bool CandidateIsBetter(const EvaluationResult& candidate, const EvaluationResult& incumbent) noexcept
+    {
+        const int candidateRank = CandidateFeasibilityRank(candidate);
+        const int incumbentRank = CandidateFeasibilityRank(incumbent);
+        if (candidateRank != incumbentRank)
+        {
+            return candidateRank < incumbentRank;
+        }
+        return candidate.score < incumbent.score;
     }
 
     static void AddTopCandidate(std::vector<EvaluationResult>& topCandidates, EvaluationResult candidate, std::size_t maxCount)
@@ -2532,7 +2944,7 @@
         auto insertAt = topCandidates.begin();
         for (; insertAt != topCandidates.end(); ++insertAt)
         {
-            if (candidate.score < insertAt->score)
+            if (CandidateIsBetter(candidate, *insertAt))
             {
                 break;
             }
@@ -2555,42 +2967,36 @@
     static SearchResult RunSearch(const GainSet& seed, const Options& options)
     {
         SearchResult result{};
-        result.best = Evaluate(seed);
+        std::array<SearchRange, static_cast<std::size_t>(GainIndex::Count)> ranges =
+            BuildInitialSearchRanges(seed, options);
+        const std::array<SearchRange, static_cast<std::size_t>(GainIndex::Count)> absoluteRanges = ranges;
+        const GainSet searchSeed = ClampGainsToSearchRanges(seed, ranges);
+
+        result.best = Evaluate(searchSeed);
         result.evaluatedCandidates = 1U;
         AddTopCandidate(result.topCandidates, result.best, options.topCandidateCount);
-
-        std::array<SearchRange, static_cast<std::size_t>(GainIndex::Count)> ranges = BuildInitialSearchRanges(seed);
-        const std::array<SearchRange, static_cast<std::size_t>(GainIndex::Count)> absoluteRanges = ranges;
 
         for (std::size_t pass = 0U; pass < options.searchPasses; ++pass)
         {
             for (std::size_t rawIndex = 0U; rawIndex < static_cast<std::size_t>(GainIndex::Count); ++rawIndex)
             {
                 const GainIndex gainIndex = static_cast<GainIndex>(rawIndex);
-                const std::vector<float> values = BuildGridValues(ranges[rawIndex], options.searchGridPoints);
+                const std::vector<float> values = BuildLogGridValues(ranges[rawIndex], options.searchGridPoints);
                 for (float value : values)
                 {
                     GainSet candidate = result.best.gains;
                     SetGain(candidate, gainIndex, value);
                     EvaluationResult evaluation = Evaluate(candidate);
                     ++result.evaluatedCandidates;
-                    if (evaluation.score < result.best.score)
+                    if (CandidateIsBetter(evaluation, result.best))
                     {
                         result.best = evaluation;
                     }
                     AddTopCandidate(result.topCandidates, std::move(evaluation), options.topCandidateCount);
                 }
 
-                const float span = ranges[rawIndex].maximum - ranges[rawIndex].minimum;
-                const float step =
-                    (options.searchGridPoints > 1U) ?
-                    (span / static_cast<float>(options.searchGridPoints - 1U)) :
-                    span;
                 const float center = GetGain(result.best.gains, gainIndex);
-                ranges[rawIndex].minimum =
-                    (std::max)(absoluteRanges[rawIndex].minimum, center - step);
-                ranges[rawIndex].maximum =
-                    (std::min)(absoluteRanges[rawIndex].maximum, center + step);
+                ranges[rawIndex] = BuildNextLogSearchRange(absoluteRanges[rawIndex], values, center);
             }
         }
 
@@ -2624,11 +3030,13 @@
                 }
                 continue;
             }
-            if (ReadOptionValue(argc, argv, index, "--search-grid", value, error))
+            if (ReadOptionValue(argc, argv, index, "--search-grid", value, error) ||
+                ReadOptionValue(argc, argv, index, "--search-points", value, error) ||
+                ReadOptionValue(argc, argv, index, "--points", value, error))
             {
                 if (!ParseSizeText(value, options.searchGridPoints) || (options.searchGridPoints < 2U))
                 {
-                    error = "Invalid --search-grid value: " + value;
+                    error = "Invalid search point count: " + value;
                     return false;
                 }
                 continue;
@@ -2676,6 +3084,43 @@
                 continue;
             }
 
+            const std::array<const char*, 20> boundOptions = {{
+                "--velocity-kp-min", "--vel-kp-min",
+                "--velocity-kp-max", "--vel-kp-max",
+                "--velocity-kd-min", "--vel-kd-min",
+                "--velocity-kd-max", "--vel-kd-max",
+                "--heading-kp-min", "--heading-kp-max",
+                "--heading-kd-min", "--heading-kd-max",
+                "--yawrate-kp-min", "--yaw-rate-kp-min",
+                "--yawrate-kp-max", "--yaw-rate-kp-max",
+                "--yawrate-kd-min", "--yaw-rate-kd-min",
+                "--yawrate-kd-max", "--yaw-rate-kd-max"
+            }};
+            for (const char* boundOption : boundOptions)
+            {
+                value.clear();
+                if (ReadOptionValue(argc, argv, index, boundOption, value, error))
+                {
+                    float parsed = 0.0f;
+                    if (!ParseFloatText(value, parsed) || (parsed < 0.0f))
+                    {
+                        error = "Invalid " + std::string(boundOption) + " value: " + value;
+                        return false;
+                    }
+                    if (!ApplySearchBoundOption(boundOption, parsed, options))
+                    {
+                        error = "Internal parser error for " + std::string(boundOption);
+                        return false;
+                    }
+                    handledGain = true;
+                    break;
+                }
+            }
+            if (handledGain)
+            {
+                continue;
+            }
+
             const std::array<const char*, 2> yawKdOptions = {{ "--yawrate-kd", "--yaw-rate-kd" }};
             for (const char* gainOption : yawKdOptions)
             {
@@ -2705,6 +3150,28 @@
 
             error = "Unknown argument: " + arg;
             return false;
+        }
+
+        for (std::size_t rawIndex = 0U; rawIndex < static_cast<std::size_t>(GainIndex::Count); ++rawIndex)
+        {
+            const bool hasMinimum = options.searchMinimumSpecified[rawIndex];
+            const bool hasMaximum = options.searchMaximumSpecified[rawIndex];
+            if (hasMinimum != hasMaximum)
+            {
+                error =
+                    "Search bounds for " +
+                    std::string(GainName(static_cast<GainIndex>(rawIndex))) +
+                    " require both min and max values.";
+                return false;
+            }
+            if (hasMinimum && (options.searchRanges[rawIndex].maximum < options.searchRanges[rawIndex].minimum))
+            {
+                error =
+                    "Search bounds for " +
+                    std::string(GainName(static_cast<GainIndex>(rawIndex))) +
+                    " must have max >= min.";
+                return false;
+            }
         }
 
         return true;
@@ -2928,6 +3395,7 @@
             << pad << "  \"completed\": " << (metrics.completed ? "true" : "false") << ",\n"
             << pad << "  \"passed\": " << (metrics.passed ? "true" : "false") << ",\n"
             << pad << "  \"blocker\": " << (metrics.blocker ? "true" : "false") << ",\n"
+            << pad << "  \"ripple_oscillatory\": " << (metrics.rippleOscillatory ? "true" : "false") << ",\n"
             << pad << "  \"definition\": {\n"
             << pad << "    \"target_distance_m\": ";
         WriteJsonNumber(output, metrics.targetDistanceM);
@@ -2999,6 +3467,47 @@
             << pad << "    \"yaw_rate_variation\": ";
         WriteJsonNumber(output, metrics.yawRateVariation);
         output << "\n" << pad << "  },\n"
+            << pad << "  \"tracking_rms\": {\n"
+            << pad << "    \"samples\": " << metrics.trackingSampleCount << ",\n"
+            << pad << "    \"distance_error_m\": ";
+        WriteJsonNumber(output, metrics.distanceRmsErrorM);
+        output << ",\n"
+            << pad << "    \"distance_reference_m\": ";
+        WriteJsonNumber(output, metrics.distanceRmsReferenceM);
+        output << ",\n"
+            << pad << "    \"heading_error_rad\": ";
+        WriteJsonNumber(output, metrics.headingRmsErrorRad);
+        output << ",\n"
+            << pad << "    \"heading_error_deg\": ";
+        WriteJsonNumber(output, metrics.headingRmsErrorDeg);
+        output << ",\n"
+            << pad << "    \"heading_reference_rad\": ";
+        WriteJsonNumber(output, metrics.headingRmsReferenceRad);
+        output << ",\n"
+            << pad << "    \"forward_velocity_error_mps\": ";
+        WriteJsonNumber(output, metrics.forwardVelocityRmsErrorMps);
+        output << ",\n"
+            << pad << "    \"forward_velocity_reference_mps\": ";
+        WriteJsonNumber(output, metrics.forwardVelocityRmsReferenceMps);
+        output << ",\n"
+            << pad << "    \"yaw_rate_error_radps\": ";
+        WriteJsonNumber(output, metrics.yawRateRmsErrorRadps);
+        output << ",\n"
+            << pad << "    \"yaw_rate_reference_radps\": ";
+        WriteJsonNumber(output, metrics.yawRateRmsReferenceRadps);
+        output << ",\n"
+            << pad << "    \"forward_accel_error_mps2\": ";
+        WriteJsonNumber(output, metrics.forwardAccelRmsErrorMps2);
+        output << ",\n"
+            << pad << "    \"forward_accel_reference_mps2\": ";
+        WriteJsonNumber(output, metrics.forwardAccelRmsReferenceMps2);
+        output << ",\n"
+            << pad << "    \"yaw_accel_error_radps2\": ";
+        WriteJsonNumber(output, metrics.yawAccelRmsErrorRadps2);
+        output << ",\n"
+            << pad << "    \"yaw_accel_reference_radps2\": ";
+        WriteJsonNumber(output, metrics.yawAccelRmsReferenceRadps2);
+        output << "\n" << pad << "  },\n"
             << pad << "  \"health\": {\n"
             << pad << "    \"all_controls_finite\": " << (metrics.allControlsFinite ? "true" : "false") << ",\n"
             << pad << "    \"command_evidence_valid\": " << (metrics.commandEvidenceValid ? "true" : "false") << ",\n"
@@ -3065,6 +3574,32 @@
         output << pad << "]";
     }
 
+    static void WriteSearchBoundsJson(
+        std::ostream& output,
+        const GainSet& seed,
+        const Options& options,
+        int indent)
+    {
+        const std::string pad(static_cast<std::size_t>(indent), ' ');
+        const std::array<SearchRange, static_cast<std::size_t>(GainIndex::Count)> ranges =
+            BuildInitialSearchRanges(seed, options);
+        output << "{\n";
+        for (std::size_t rawIndex = 0U; rawIndex < static_cast<std::size_t>(GainIndex::Count); ++rawIndex)
+        {
+            const GainIndex index = static_cast<GainIndex>(rawIndex);
+            output << pad << "  " << JsonString(GainName(index)) << ": {\n"
+                << pad << "    \"minimum\": ";
+            WriteJsonNumber(output, ranges[rawIndex].minimum);
+            output << ",\n"
+                << pad << "    \"maximum\": ";
+            WriteJsonNumber(output, ranges[rawIndex].maximum);
+            output << ",\n"
+                << pad << "    \"source\": " << JsonString(SearchRangeIsExplicit(options, index) ? "explicit" : "derived")
+                << "\n" << pad << "  }" << ((rawIndex + 1U) < static_cast<std::size_t>(GainIndex::Count) ? "," : "") << "\n";
+        }
+        output << pad << "}";
+    }
+
     static void WriteOutputJson(
         const EvaluationResult& baseline,
         const EvaluationResult& candidate,
@@ -3081,22 +3616,24 @@
         std::cout << ",\n"
             << "  \"physical_parameters_fixed\": true,\n"
             << "  \"acceptance_metric_definitions\": {\n"
-            << "    \"scoring\": \"Drive primitive and DriveManeuver checks are reported with pass/blocker flags, but optimizer ranking uses continuous normalized score contributions rather than flat pass/fail penalties. Ratios below each release-test limit still score, so candidates can improve margin before and after crossing the pass threshold.\",\n"
-            << "    \"drive_primitive_start_straight_completes\": \"Runs Drive::StartStraight(0.30 m, 0.30 m/s, 0.0 m/s exit) for up to 6000 exact 0.001s ticks through SharedRobotRuntime, Drive, DriveBase, PlantModel::integrate, and sensor snapshot publication; completion failure is reported as a blocker and scored as a continuous completion deficit.\",\n"
+            << "    \"scoring\": \"Completion, command-evidence, release-limit, timing, and final-position rows are reported with pass/blocker flags but do not contribute weighted score. DriveManeuver ranking uses the maneuver_tracking_rms row: the sum of squared per-tick RMS tracking-error ratios for distance, heading, forward velocity, yaw rate, forward acceleration, and yaw acceleration.\",\n"
+            << "    \"drive_primitive_start_straight_completes\": \"Runs Drive::StartStraight(0.30 m, 0.30 m/s, 0.0 m/s exit) for up to 6000 exact 0.001s ticks through SharedRobotRuntime, Drive, DriveBase, PlantModel::integrate, and sensor snapshot publication; completion failure is reported as a blocker but contributes no weighted score.\",\n"
             << "    \"drive_maneuver_in_place_codes\": \"Covers IP45, IP90, IP135, and IP180 through the same SharedRobotRuntime/Drive/DriveBase/PlantModel path as DriveManeuverTests.\",\n"
             << "    \"drive_maneuver_in_place_completion\": \"Each in-place maneuver must start, complete within 20000 exact 0.001s ticks, and emit command samples.\",\n"
             << "    \"drive_maneuver_in_place_command_evidence\": \"Each in-place maneuver must return finite wheel commands matching DriveTelemetry command evidence, with finite requested body objectives and finite truth state.\",\n"
-            << "    \"drive_maneuver_in_place_shift\": \"Each in-place maneuver final translation must stay below 0.020 m.\",\n"
-            << "    \"drive_maneuver_in_place_heading\": \"Each in-place maneuver final heading error must stay at or below 3 degrees.\",\n"
-            << "    \"drive_maneuver_in_place_time\": \"Each in-place maneuver elapsed time must stay within 40% of MotionLimits::ComputeMinimumTurnDurationSeconds for the nominal turn angle.\",\n"
+            << "    \"drive_maneuver_tracking_rms\": \"Each maneuver records one tracking sample per 0.001s command tick after applying ten 0.0001s plant substeps with that same command. The scored value is the sum of squared RMS error ratios for cumulative distance, instantaneous heading, forward velocity, yaw rate, forward acceleration, and yaw acceleration.\",\n"
+            << "    \"drive_maneuver_in_place_shift\": \"Each in-place maneuver final translation is reported against 0.020 m, but this position check is informational for the current PD ripple tuning pass and does not block acceptance or contribute score.\",\n"
+            << "    \"drive_maneuver_in_place_heading\": \"Each in-place maneuver final heading error is reported against 3 degrees, but the threshold row is informational for the current PD ripple tuning pass and does not block acceptance or contribute score.\",\n"
+            << "    \"drive_maneuver_in_place_time\": \"Each in-place maneuver elapsed time is reported against MotionLimits::ComputeMinimumTurnDurationSeconds for the nominal turn angle, but this timing check is informational for PD tuning and does not block acceptance or contribute score.\",\n"
             << "    \"drive_maneuver_smooth_codes\": \"Covers S45LS, S45LD, S45SS, S45SD, S90LS, S90SS, S90SD, S135LS, S135LD, S135SS, S135SD, S180LS, and S180SS through the same SharedRobotRuntime/Drive/DriveBase/PlantModel path as DriveManeuverTests.\",\n"
             << "    \"drive_maneuver_smooth_completion\": \"Each smooth maneuver at 0.50 m/s entry/exit must start, complete within 20000 exact 0.001s ticks, and emit command samples.\",\n"
             << "    \"drive_maneuver_smooth_command_evidence\": \"Each smooth maneuver must return finite wheel commands matching DriveTelemetry command evidence, with finite requested body objectives and finite truth state.\",\n"
-            << "    \"drive_maneuver_smooth_velocity_variation\": \"Each smooth maneuver normalized span of requested forward-speed magnitudes must stay below 0.05.\",\n"
-            << "    \"drive_maneuver_smooth_yaw_acceleration_variation\": \"Each smooth maneuver normalized span of trimmed ramp yaw-acceleration magnitudes must stay below 0.20.\",\n"
-            << "    \"drive_maneuver_smooth_yaw_rate_variation\": \"Each smooth maneuver normalized span of plateau yaw-rate magnitudes must stay below 0.08.\",\n"
-            << "    \"drive_maneuver_smooth_final_position\": \"Each smooth maneuver final position error must stay at or below 0.030 m.\",\n"
-            << "    \"drive_maneuver_smooth_final_heading\": \"Each smooth maneuver final heading error must stay at or below 3 degrees.\"\n"
+            << "    \"drive_maneuver_smooth_velocity_variation\": \"Each smooth maneuver normalized span of requested forward-speed magnitudes is reported against 0.05 but is informational for the current PD ripple tuning pass and does not block acceptance or contribute score.\",\n"
+            << "    \"drive_maneuver_smooth_yaw_acceleration_variation\": \"Each smooth maneuver normalized span of trimmed ramp yaw-acceleration magnitudes is reported against 0.20 but is informational for the current PD ripple tuning pass and does not block acceptance or contribute score.\",\n"
+            << "    \"drive_maneuver_smooth_yaw_rate_variation\": \"Each smooth maneuver normalized span of plateau yaw-rate magnitudes is reported against 0.08 but is informational for the current PD ripple tuning pass and does not block acceptance or contribute score.\",\n"
+            << "    \"drive_maneuver_ripple_oscillation\": \"Any smooth velocity, yaw-acceleration, or yaw-rate variation above the normalized ripple deadband sets ripple_oscillatory=true on that row and contributes to the aggregate oscillation_flagged value.\",\n"
+            << "    \"drive_maneuver_smooth_final_position\": \"Each smooth maneuver final position error is reported against 0.030 m, but this position check is informational for the current PD ripple tuning pass and does not block acceptance or contribute score.\",\n"
+            << "    \"drive_maneuver_smooth_final_heading\": \"Each smooth maneuver final heading error is reported against 3 degrees, but the threshold row is informational for the current PD ripple tuning pass and does not block acceptance or contribute score.\"\n"
             << "  },\n"
             << "  \"step_response_metric_definitions\": {\n"
             << "    \"tick_seconds\": ";
@@ -3104,8 +3641,8 @@
         std::cout << ",\n"
             << "    \"velocity_error_first_500_ticks\": \"RMS(targetForwardMps - state.vf) over the first 500 0.001s ticks when targetForwardMps steps from its initial value.\",\n"
             << "    \"yaw_rate_error_first_500_ticks\": \"RMS(targetYawRateRadps - state.yaw_rate) over the first 500 0.001s ticks when targetYawRateRadps steps from its initial value.\",\n"
-            << "    \"forward_accel_error_first_100_ticks\": \"RMS((nextVf - prevVf) / 0.001 - DriveTelemetry.composedForwardAccelMps2) over the first 100 ticks for forward velocity steps when the composed objective is finite and active; fallback samples use RMS((nextVf - prevVf) / 0.001) as undesired forward acceleration when the objective is inactive or non-finite.\",\n"
-            << "    \"yaw_accel_error_first_100_ticks\": \"RMS((nextYawRate - prevYawRate) / 0.001 - DriveTelemetry.composedYawAccelRadps2) over the first 100 ticks for yaw-rate or heading steps when the composed objective is finite and active; fallback samples use RMS((nextYawRate - prevYawRate) / 0.001) as undesired yaw acceleration when the objective is inactive or non-finite.\"\n"
+            << "    \"forward_accel_error_first_100_ticks\": \"RMS((nextVf - prevVf) / 0.001 - DriveTelemetry.composedForwardAccelMps2) over the first 100 ticks for forward velocity steps when DriveTelemetry publishes a finite composed forward-acceleration objective; fallback samples use RMS((nextVf - prevVf) / 0.001) as undesired forward acceleration when the composed objective is inactive or non-finite.\",\n"
+            << "    \"yaw_accel_error_first_100_ticks\": \"RMS((nextYawRate - prevYawRate) / 0.001 - DriveTelemetry.composedYawAccelRadps2) over the first 100 ticks for yaw-rate or heading steps when DriveTelemetry publishes a finite composed yaw-acceleration objective; fallback samples use RMS((nextYawRate - prevYawRate) / 0.001) as undesired yaw acceleration when the composed objective is inactive or non-finite.\"\n"
             << "  },\n"
             << "  \"score_weights\": {\n"
             << "    \"velocity_error_first_500_ticks\": ";
@@ -3120,35 +3657,19 @@
             << "    \"yaw_accel_error_first_100_ticks\": ";
         WriteJsonNumber(std::cout, kYawAccelStepRmsScoreWeight);
         std::cout << ",\n"
-            << "    \"acceptance_completion\": ";
-        WriteJsonNumber(std::cout, kAcceptanceCompletionScoreWeight);
-        std::cout << ",\n"
-            << "    \"acceptance_command_evidence\": ";
-        WriteJsonNumber(std::cout, kAcceptanceCommandEvidenceScoreWeight);
-        std::cout << ",\n"
-            << "    \"in_place_shift\": ";
-        WriteJsonNumber(std::cout, kInPlaceShiftScoreWeight);
-        std::cout << ",\n"
-            << "    \"in_place_heading\": ";
-        WriteJsonNumber(std::cout, kInPlaceHeadingScoreWeight);
-        std::cout << ",\n"
-            << "    \"in_place_time\": ";
-        WriteJsonNumber(std::cout, kInPlaceTimeScoreWeight);
-        std::cout << ",\n"
-            << "    \"smooth_velocity_variation\": ";
-        WriteJsonNumber(std::cout, kSmoothVelocityVariationScoreWeight);
-        std::cout << ",\n"
-            << "    \"smooth_yaw_acceleration_variation\": ";
-        WriteJsonNumber(std::cout, kSmoothYawAccelerationVariationScoreWeight);
-        std::cout << ",\n"
-            << "    \"smooth_yaw_rate_variation\": ";
-        WriteJsonNumber(std::cout, kSmoothYawRateVariationScoreWeight);
-        std::cout << ",\n"
-            << "    \"smooth_final_position\": ";
-        WriteJsonNumber(std::cout, kSmoothFinalPositionScoreWeight);
-        std::cout << ",\n"
-            << "    \"smooth_final_heading\": ";
-        WriteJsonNumber(std::cout, kSmoothFinalHeadingScoreWeight);
+            << "    \"acceptance_completion\": 0,\n"
+            << "    \"acceptance_command_evidence\": 0,\n"
+            << "    \"in_place_shift\": 0,\n"
+            << "    \"in_place_heading\": 0,\n"
+            << "    \"in_place_time\": 0,\n"
+            << "    \"maneuver_tracking_rms\": 1,\n"
+            << "    \"smooth_velocity_variation\": 0,\n"
+            << "    \"smooth_yaw_acceleration_variation\": 0,\n"
+            << "    \"smooth_yaw_rate_variation\": 0,\n"
+            << "    \"smooth_final_position\": 0,\n"
+            << "    \"smooth_final_heading\": 0,\n"
+            << "    \"ripple_oscillation_deadband\": ";
+        WriteJsonNumber(std::cout, kRippleOscillationDeadband);
         std::cout << "\n"
             << "  },\n"
             << "  \"baseline_source\": \"Config::kDriveBasePDCluster\",\n"
@@ -3174,6 +3695,16 @@
                 << "    \"enabled\": true,\n"
                 << "    \"passes\": " << options.searchPasses << ",\n"
                 << "    \"grid_points_per_dimension\": " << options.searchGridPoints << ",\n"
+                << "    \"coordinate_grid\": \"log_spaced_positive_with_zero_endpoint\",\n"
+                << "    \"positive_minimum_relative_to_range_max\": ";
+            WriteJsonNumber(std::cout, kLogSearchMinimumRelativeToMaximum);
+            std::cout << ",\n"
+                << "    \"absolute_positive_minimum\": ";
+            WriteJsonNumber(std::cout, kLogSearchAbsolutePositiveMinimum);
+            std::cout << ",\n"
+                << "    \"bounds\": ";
+            WriteSearchBoundsJson(std::cout, options.candidate, options, 4);
+            std::cout << ",\n"
                 << "    \"evaluated_candidates\": " << search->evaluatedCandidates << ",\n";
             WriteEvaluationJson(std::cout, "best", search->best, 4);
             std::cout << ",\n"

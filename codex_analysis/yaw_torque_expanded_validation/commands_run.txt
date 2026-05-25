@@ -1,0 +1,3 @@
+Get-Content -LiteralPath AGENTS.md
+python codex_analysis\yaw_torque_expanded_validation\expanded_yaw_torque_validation.py --out-dir codex_analysis\yaw_torque_expanded_validation
+python codex_analysis\yaw_torque_expanded_validation\summarize_competition_and_g.py

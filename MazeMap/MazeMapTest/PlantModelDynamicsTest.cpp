@@ -34,8 +34,8 @@ namespace MazeMap
             VehicleState state;
             PlantModel plant(vehicle, state);
 
-            Assert::AreEqual(2.4e-7f, plant.leftDriveEquivalentWheelInertiaKgM2(), 1.0e-10f);
-            Assert::AreEqual(2.4e-7f, plant.rightDriveEquivalentWheelInertiaKgM2(), 1.0e-10f);
+            Assert::AreEqual(1.177e-6f, plant.leftDriveEquivalentWheelInertiaKgM2(), 1.0e-10f);
+            Assert::AreEqual(1.177e-6f, plant.rightDriveEquivalentWheelInertiaKgM2(), 1.0e-10f);
             Assert::AreEqual(4.12f, plant.leftDriveLongitudinalTireStiffnessN(), 0.01f);
             Assert::AreEqual(4.12f, plant.rightDriveLongitudinalTireStiffnessN(), 0.01f);
         }
@@ -577,6 +577,163 @@ namespace MazeMap
                 centerYawAccelRadps2 < 0.0f &&
                 aboveYawAccelRadps2 < 0.0f &&
                 maxNeighborDeltaRadps2 <= maxAllowedNeighborDeltaRadps2,
+                message.str().c_str());
+        }
+
+        TEST_METHOD(PlantModelContactContinuumYawCorrectionProducesPatchForceCouple)
+        {
+            Vehicle vehicle;
+            vehicle.SetFanDuty(0.80f);
+            const float halfTrackM = 0.5f * vehicle.GetTrackWidth();
+            constexpr float yawRateRadps = 1.0f;
+
+            VehicleState state;
+            state.SetPosition(Eigen::Vector2f(0.0f, 0.0f));
+            state.SetHeading(0.0f);
+            state.SetForwardVelocity(0.0f);
+            state.SetRightwardVelocity(0.0f);
+            state.SetYawRate(yawRateRadps);
+            state.SetWheelSpeedLeft(Vehicle::WheelSpeedFromLinearVelocity(halfTrackM * yawRateRadps));
+            state.SetWheelSpeedRight(Vehicle::WheelSpeedFromLinearVelocity(-halfTrackM * yawRateRadps));
+            PlantModel plant(vehicle, state);
+
+            const App::Internal::CommandVector control{};
+            const float frontLeftForwardForceN = plant.contactForwardForceN(control, 0U);
+            const float frontRightForwardForceN = plant.contactForwardForceN(control, 1U);
+            const float rearLeftForwardForceN = plant.contactForwardForceN(control, 2U);
+            const float rearRightForwardForceN = plant.contactForwardForceN(control, 3U);
+            const float totalForwardForceN =
+                frontLeftForwardForceN +
+                frontRightForwardForceN +
+                rearLeftForwardForceN +
+                rearRightForwardForceN;
+
+            std::wstringstream message;
+            message <<
+                L"PlantModelContactContinuumYawCorrectionProducesPatchForceCouple\n"
+                L"field=contact_forward_force_n\n"
+                L"criterion=finite tuned left/right-opposed patch force couple with near-zero net forward force\n"
+                L"fl=" << frontLeftForwardForceN << L"\n"
+                L"fr=" << frontRightForwardForceN << L"\n"
+                L"rl=" << rearLeftForwardForceN << L"\n"
+                L"rr=" << rearRightForwardForceN << L"\n"
+                L"sum=" << totalForwardForceN;
+            Assert::IsTrue(
+                std::isfinite(frontLeftForwardForceN) &&
+                std::isfinite(frontRightForwardForceN) &&
+                std::isfinite(rearLeftForwardForceN) &&
+                std::isfinite(rearRightForwardForceN) &&
+                frontLeftForwardForceN < -1.0e-6f &&
+                rearLeftForwardForceN < -1.0e-6f &&
+                frontRightForwardForceN > 1.0e-6f &&
+                rearRightForwardForceN > 1.0e-6f &&
+                std::fabs(totalForwardForceN) < 1.0e-5f,
+                message.str().c_str());
+        }
+
+        TEST_METHOD(PlantModelContactContinuumYawCorrectionIsFiniteAcrossZeroForwardSpeed)
+        {
+            Vehicle vehicle;
+            vehicle.SetFanDuty(0.80f);
+            const float halfTrackM = 0.5f * vehicle.GetTrackWidth();
+            const float forwardSpeedsMps[] = { -0.002f, 0.0f, 0.002f };
+            const float rightSpeedsMps[] = { -0.020f, 0.0f, 0.020f };
+            const float yawRatesRadps[] = { -3.0f, 0.0f, 3.0f };
+
+            for (const float forwardSpeedMps : forwardSpeedsMps)
+            {
+                for (const float rightSpeedMps : rightSpeedsMps)
+                {
+                    for (const float yawRateRadps : yawRatesRadps)
+                    {
+                        VehicleState state;
+                        state.SetPosition(Eigen::Vector2f(0.0f, 0.0f));
+                        state.SetHeading(0.0f);
+                        state.SetForwardVelocity(forwardSpeedMps);
+                        state.SetRightwardVelocity(rightSpeedMps);
+                        state.SetYawRate(yawRateRadps);
+                        state.SetWheelSpeedLeft(
+                            Vehicle::WheelSpeedFromLinearVelocity(
+                                forwardSpeedMps + (halfTrackM * yawRateRadps)));
+                        state.SetWheelSpeedRight(
+                            Vehicle::WheelSpeedFromLinearVelocity(
+                                forwardSpeedMps - (halfTrackM * yawRateRadps)));
+                        PlantModel plant(vehicle, state);
+
+                        App::Internal::CommandVector control{};
+                        control.SetLeftCommand(0.12f);
+                        control.SetRightCommand(-0.10f);
+
+                        for (uint8_t contactIndex = 0U; contactIndex < 4U; ++contactIndex)
+                        {
+                            Assert::IsTrue(std::isfinite(plant.contactForwardRelativeVelocityMps(contactIndex)));
+                            Assert::IsTrue(std::isfinite(plant.contactRightRelativeVelocityMps(contactIndex)));
+                            Assert::IsTrue(std::isfinite(plant.contactForwardForceN(control, contactIndex)));
+                            Assert::IsTrue(std::isfinite(plant.contactRightForceN(control, contactIndex)));
+                            Assert::IsTrue(std::isfinite(plant.contactPreProjectionUtilization(control, contactIndex)));
+                            Assert::IsTrue(std::isfinite(plant.contactSaturation(control, contactIndex)));
+                        }
+
+                        plant.integrate(control, 0.001f);
+                        Assert::IsTrue(std::isfinite(state.GetForwardVelocity()));
+                        Assert::IsTrue(std::isfinite(state.GetRightwardVelocity()));
+                        Assert::IsTrue(std::isfinite(state.GetYawRate()));
+                        Assert::IsTrue(std::isfinite(state.GetYawAccel()));
+                    }
+                }
+            }
+        }
+
+        TEST_METHOD(PlantModelContactContinuumYawCorrectionIsContinuousAcrossZeroForwardSpeed)
+        {
+            Vehicle vehicle;
+            vehicle.SetFanDuty(0.80f);
+            const float halfTrackM = 0.5f * vehicle.GetTrackWidth();
+            constexpr float yawRateRadps = 1.0f;
+            constexpr float forwardDeltaMps = 0.0001f;
+            constexpr float dtSeconds = 0.001f;
+            const App::Internal::CommandVector control{};
+            float yawAccelerationsRadps2[3] = {};
+            const float forwardSpeedsMps[3] = { -forwardDeltaMps, 0.0f, forwardDeltaMps };
+
+            for (int sample = 0; sample < 3; ++sample)
+            {
+                const float forwardSpeedMps = forwardSpeedsMps[sample];
+                VehicleState state;
+                state.SetPosition(Eigen::Vector2f(0.0f, 0.0f));
+                state.SetHeading(0.0f);
+                state.SetForwardVelocity(forwardSpeedMps);
+                state.SetRightwardVelocity(0.0f);
+                state.SetYawRate(yawRateRadps);
+                state.SetWheelSpeedLeft(
+                    Vehicle::WheelSpeedFromLinearVelocity(
+                        forwardSpeedMps + (halfTrackM * yawRateRadps)));
+                state.SetWheelSpeedRight(
+                    Vehicle::WheelSpeedFromLinearVelocity(
+                        forwardSpeedMps - (halfTrackM * yawRateRadps)));
+                PlantModel plant(vehicle, state);
+                plant.integrate(control, dtSeconds);
+                yawAccelerationsRadps2[sample] = state.GetYawAccel();
+            }
+
+            const float maxNeighborDeltaRadps2 =
+                (std::max)(
+                    std::fabs(yawAccelerationsRadps2[1] - yawAccelerationsRadps2[0]),
+                    std::fabs(yawAccelerationsRadps2[2] - yawAccelerationsRadps2[1]));
+            std::wstringstream message;
+            message <<
+                L"PlantModelContactContinuumYawCorrectionIsContinuousAcrossZeroForwardSpeed\n"
+                L"field=yaw_acceleration_radps2\n"
+                L"criterion=finite and bounded neighboring deltas across Vf=0\n"
+                L"below=" << yawAccelerationsRadps2[0] << L"\n"
+                L"center=" << yawAccelerationsRadps2[1] << L"\n"
+                L"above=" << yawAccelerationsRadps2[2] << L"\n"
+                L"max_neighbor_delta=" << maxNeighborDeltaRadps2;
+            Assert::IsTrue(
+                std::isfinite(yawAccelerationsRadps2[0]) &&
+                std::isfinite(yawAccelerationsRadps2[1]) &&
+                std::isfinite(yawAccelerationsRadps2[2]) &&
+                maxNeighborDeltaRadps2 < 1.0e-3f,
                 message.str().c_str());
         }
 

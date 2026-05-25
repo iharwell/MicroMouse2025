@@ -1,0 +1,4 @@
+dataset,samples,moving_yaw_samples_abs_vf_gt_0p02_abs_yaw_gt_0p2,nonzero_forward_samples_abs_vf_ge_0p15,max_abs_forward_mps,max_abs_yaw_radps,train_surface_bins,holdout_samples,holdout_samples_with_surface_bin,holdout_current_rmse_radps,holdout_surface_corrected_rmse_radps,covered_current_rmse_radps,covered_surface_corrected_rmse_radps
+all_included,2382049,677445,775644,1.177363,23.718675,393,811816,800676,0.272693052,0.248282427,0.270613964,0.245637214
+open_floor_only,1870997,531861,591710,1.177363,23.718675,374,593314,582090,0.258347167,0.237744117,0.255885951,0.234647700
+competition_only,511052,145584,183934,1.007389,20.349142,127,218502,212673,0.308298322,0.258216285,0.307276026,0.255477430

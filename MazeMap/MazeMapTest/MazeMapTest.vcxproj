@@ -219,6 +219,7 @@
     <ClCompile Include="SharedRuntimeTest.cpp" />
     <ClCompile Include="MmLogSchemaCompositionTest.cpp" />
     <ClCompile Include="ManeuverTest.cpp" />
+    <ClCompile Include="MotorEncoderDriveTest.cpp" />
     <ClCompile Include="WallMappingTest.cpp" />
     <ClCompile Include="MazeMaskTest.cpp" />
     <ClCompile Include="MazeTest.cpp" />

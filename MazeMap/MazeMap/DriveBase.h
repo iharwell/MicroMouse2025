@@ -36,7 +36,10 @@ namespace MazeMap
         const DriveTelemetry& LastTelemetry() const noexcept;
 
     private:
-        static float ComposeAccelerationObjective(float requestedAccel, float feedbackAccel) noexcept;
+        static float ComposeAccelerationObjective(
+            float requestedAccel,
+            float feedbackAccel,
+            bool hasFeedback) noexcept;
         static float ComputeForwardVelocityFeedbackAccelMps2(
             const MazeMap::PDCluster& feedbackTuning,
             float forwardVelocityErrorMps) noexcept;

@@ -1,0 +1,13 @@
+amplitude,direction,quality_class,split,samples,response_lag_samples,no_response_derivative_rmse_radps,current_plantmodel_derivative_rmse_radps,empirical_condition_response_derivative_rmse_radps,rmse_reduction_vs_current_plantmodel_percent,variance_explained_vs_current_plantmodel_percent
+0.50,CCW,twitch_static_bristle,validation,1035,4,0.021175516,0.087620505,0.011682390,86.667059,98.222327
+0.50,CW,twitch_static_bristle,validation,1035,4,0.023474383,0.081623028,0.010523869,87.106740,98.337639
+0.55,CCW,twitch_static_bristle,validation,1035,4,0.023046728,0.125041178,0.012346467,90.126079,99.025057
+0.55,CW,twitch_static_bristle,validation,1035,4,0.026053291,0.127541467,0.009910576,92.229527,99.396197
+0.60,CCW,transitional,validation,1035,4,0.029839763,0.189119698,0.017546710,90.721902,99.139169
+0.60,CW,transitional,validation,1035,4,0.028746971,0.206572001,0.012423335,93.985954,99.638313
+0.65,CCW,sustained_launch,validation,690,4,0.034231115,0.151976474,0.025618000,83.143444,97.158565
+0.65,CCW,transitional,validation,345,4,0.038971505,0.159278432,0.031146697,80.445126,96.176069
+0.65,CW,sustained_launch,validation,1035,4,0.034398875,0.167084728,0.022047931,86.804341,98.258746
+0.70,CCW,sustained_launch,validation,1035,4,0.045626020,0.091349735,0.029035966,68.214504,89.896822
+0.70,CW,sustained_launch,validation,1035,4,0.046556474,0.077086552,0.029275822,62.022140,85.576822
+ALL,ALL,ALL,validation,10350,4,0.032628416,0.138108255,0.019766833,85.687435,97.951505

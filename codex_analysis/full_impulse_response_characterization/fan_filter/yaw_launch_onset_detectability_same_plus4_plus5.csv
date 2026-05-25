@@ -1,0 +1,7 @@
+signal,alignment_offset_samples,steps,median_value_over_threshold,mean_value_over_threshold,p10_value_over_threshold,p90_value_over_threshold
+raw,0,100,-0.051980,0.000237,-0.346328,0.378627
+raw,4,100,0.461978,0.467981,-0.088272,1.123520
+raw,5,100,1.568386,1.779756,0.602503,3.359573
+filtered,0,100,-0.051358,-0.031057,-0.446148,0.424213
+filtered,4,100,0.510572,0.757791,-0.100076,1.813670
+filtered,5,100,1.757437,2.714598,0.628594,5.392151

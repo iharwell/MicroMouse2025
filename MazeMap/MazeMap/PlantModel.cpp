@@ -159,8 +159,9 @@ namespace MazeMap
                 context,
                 sink,
                 "plant_dump_params_misc",
-                "force_epsilon_n=%.9g;fan_downforce_at_full_duty_n=%.9g;no_hit_range_m=%.9g",
+                "force_epsilon_n=%.9g;contact_yaw_patch_force_gain_ns_per_m=%.9g;fan_downforce_at_full_duty_n=%.9g;no_hit_range_m=%.9g",
                 static_cast<double>(kForceEpsilonN),
+                static_cast<double>(kContactYawPatchForceGainNsPerM),
                 static_cast<double>(_vehicle.GetFanDownforceAtFullDuty()),
                 static_cast<double>(_vehicle.FrontLeftWallSensor().GetNoHitRangeM())))
         {
@@ -452,7 +453,11 @@ namespace MazeMap
             (std::isfinite(_vehicle.GetYawInertia()) && (_vehicle.GetYawInertia() > 0.0f)) ?
             _vehicle.GetYawInertia() :
             1.0f;
-        const float invYawInertiaKgM2 = 1.0f / yawInertiaKgM2;
+        const float wheelSpinupMassKg =
+            (wheelRadiusM > kForceEpsilonN) ?
+            (((std::max)(0.0f, _leftDrive.getEquivalentWheelInertiaKgM2()) +
+              (std::max)(0.0f, _rightDrive.getEquivalentWheelInertiaKgM2())) / (wheelRadiusM * wheelRadiusM)) :
+            0.0f;
 
         const float forwardVelocityMps =
             std::isfinite(state(VehicleState::kVf)) ? state(VehicleState::kVf) : 0.0f;
@@ -562,34 +567,110 @@ namespace MazeMap
         const float peakFrontMu = (sustainedContactMu > 0.0f) ? sustainedContactMu : kMuFront;
         const float peakRearMu = (sustainedContactMu > 0.0f) ? sustainedContactMu : kMuRear;
 
-        const float frontLeftRawForwardForceN =
+        float frontLeftRawForwardForceN =
             frontLeftDriveRequestN +
             (frontLeftLongitudinalStiffnessNPerMps *
                 derivatives._wheelKinematics._contacts[kFrontLeft]._forwardRelativeVelocityMps);
-        const float frontRightRawForwardForceN =
+        float frontRightRawForwardForceN =
             frontRightDriveRequestN +
             (frontRightLongitudinalStiffnessNPerMps *
                 derivatives._wheelKinematics._contacts[kFrontRight]._forwardRelativeVelocityMps);
-        const float rearLeftRawForwardForceN =
+        float rearLeftRawForwardForceN =
             rearLeftDriveRequestN +
             (rearLeftLongitudinalStiffnessNPerMps *
                 derivatives._wheelKinematics._contacts[kRearLeft]._forwardRelativeVelocityMps);
-        const float rearRightRawForwardForceN =
+        float rearRightRawForwardForceN =
             rearRightDriveRequestN +
             (rearRightLongitudinalStiffnessNPerMps *
                 derivatives._wheelKinematics._contacts[kRearRight]._forwardRelativeVelocityMps);
-        const float frontLeftRawRightForceN =
+        float frontLeftRawRightForceN =
             frontLeftRightContactForceGainNPerMpsResolved *
             derivatives._wheelKinematics._contacts[kFrontLeft]._rightRelativeVelocityMps;
-        const float frontRightRawRightForceN =
+        float frontRightRawRightForceN =
             frontRightRightContactForceGainNPerMpsResolved *
             derivatives._wheelKinematics._contacts[kFrontRight]._rightRelativeVelocityMps;
-        const float rearLeftRawRightForceN =
+        float rearLeftRawRightForceN =
             rearLeftRightContactForceGainNPerMpsResolved *
             derivatives._wheelKinematics._contacts[kRearLeft]._rightRelativeVelocityMps;
-        const float rearRightRawRightForceN =
+        float rearRightRawRightForceN =
             rearRightRightContactForceGainNPerMpsResolved *
             derivatives._wheelKinematics._contacts[kRearRight]._rightRelativeVelocityMps;
+
+        const float contactCorrectionHalfTrackWidthM = 0.5f * std::fabs(_vehicle.GetTrackWidth());
+        const float contactCorrectionLongitudinalOffsetM =
+            std::fabs(Vehicle::GetDriveWheelLongitudinalOffsetM());
+        const std::array<float, 4> contactRightPositionsM = {
+            -contactCorrectionHalfTrackWidthM,
+            contactCorrectionHalfTrackWidthM,
+            -contactCorrectionHalfTrackWidthM,
+            contactCorrectionHalfTrackWidthM
+        };
+        const std::array<float, 4> contactForwardPositionsM = {
+            contactCorrectionLongitudinalOffsetM,
+            contactCorrectionLongitudinalOffsetM,
+            -contactCorrectionLongitudinalOffsetM,
+            -contactCorrectionLongitudinalOffsetM
+        };
+        const float resolvedTotalNormalLoadN =
+            (totalNormalLoadN > kForceEpsilonN) ? totalNormalLoadN : kForceEpsilonN;
+        float loadWeightedPatchYawVelocityM2ps = 0.0f;
+        float loadWeightedPatchRadiusSquaredM2 = 0.0f;
+        for (uint8_t contactIndex = 0U; contactIndex < 4U; ++contactIndex)
+        {
+            const ContactForce& contact = contactForces._contacts[contactIndex];
+            const ContactKinematics& kinematics = derivatives._wheelKinematics._contacts[contactIndex];
+            const float rightPositionM = contactRightPositionsM[contactIndex];
+            const float forwardPositionM = contactForwardPositionsM[contactIndex];
+            loadWeightedPatchYawVelocityM2ps +=
+                contact._normalForceN *
+                ((forwardPositionM * kinematics._rightRelativeVelocityMps) -
+                 (rightPositionM * kinematics._forwardRelativeVelocityMps));
+            loadWeightedPatchRadiusSquaredM2 +=
+                contact._normalForceN *
+                ((rightPositionM * rightPositionM) + (forwardPositionM * forwardPositionM));
+        }
+        const float patchYawVelocityM2ps =
+            loadWeightedPatchYawVelocityM2ps / resolvedTotalNormalLoadN;
+        const float patchRadiusSquaredM2 =
+            (std::max)(
+                loadWeightedPatchRadiusSquaredM2 / resolvedTotalNormalLoadN,
+                kForceEpsilonN * kForceEpsilonN);
+        const float contactYawCorrectionScale =
+            kContactYawPatchForceGainNsPerM *
+            patchYawVelocityM2ps /
+            patchRadiusSquaredM2;
+        frontLeftRawForwardForceN -=
+            (frontLeftContact._normalForceN / resolvedTotalNormalLoadN) *
+            contactRightPositionsM[kFrontLeft] *
+            contactYawCorrectionScale;
+        frontRightRawForwardForceN -=
+            (frontRightContact._normalForceN / resolvedTotalNormalLoadN) *
+            contactRightPositionsM[kFrontRight] *
+            contactYawCorrectionScale;
+        rearLeftRawForwardForceN -=
+            (rearLeftContact._normalForceN / resolvedTotalNormalLoadN) *
+            contactRightPositionsM[kRearLeft] *
+            contactYawCorrectionScale;
+        rearRightRawForwardForceN -=
+            (rearRightContact._normalForceN / resolvedTotalNormalLoadN) *
+            contactRightPositionsM[kRearRight] *
+            contactYawCorrectionScale;
+        frontLeftRawRightForceN +=
+            (frontLeftContact._normalForceN / resolvedTotalNormalLoadN) *
+            contactForwardPositionsM[kFrontLeft] *
+            contactYawCorrectionScale;
+        frontRightRawRightForceN +=
+            (frontRightContact._normalForceN / resolvedTotalNormalLoadN) *
+            contactForwardPositionsM[kFrontRight] *
+            contactYawCorrectionScale;
+        rearLeftRawRightForceN +=
+            (rearLeftContact._normalForceN / resolvedTotalNormalLoadN) *
+            contactForwardPositionsM[kRearLeft] *
+            contactYawCorrectionScale;
+        rearRightRawRightForceN +=
+            (rearRightContact._normalForceN / resolvedTotalNormalLoadN) *
+            contactForwardPositionsM[kRearRight] *
+            contactYawCorrectionScale;
 
         const float frontLeftRawMagnitudeN =
             MazeMap::Math::Sqrtf(
@@ -668,17 +749,18 @@ namespace MazeMap
         const float yawMomentNm =
             (contactYawHalfTrackWidthM * (leftBankForwardForceN - rightBankForwardForceN)) +
             (contactYawLongitudinalOffsetM * (frontRightForceN - rearRightForceN));
-        const float yawMomentAfterLossNm = yawMomentNm - (kYawRateDampingNmsPerRad * yawRateRadps);
 
         float sineHeading = 0.0f;
         float cosineHeading = 0.0f;
         sin_cosf(heading, sineHeading, cosineHeading);
 
-        const float rawForwardAccelMps2 = sumForwardForceN * invMassKg;
+        const float rawForwardAccelMps2 = sumForwardForceN / (massKg + wheelSpinupMassKg);
         const float rawRightAccelMps2 =
             (sumRightForceN * invMassKg) -
             (kRightVelocityDampingNsPerM * rightVelocityMps * invMassKg);
-        const float rawYawAccelRadps2 = yawMomentAfterLossNm * invYawInertiaKgM2;
+        const float rawYawAccelRadps2 =
+            yawMomentNm /
+            (yawInertiaKgM2 + (wheelSpinupMassKg * contactYawHalfTrackWidthM * contactYawHalfTrackWidthM));
         const float maxForwardAccelMps2 =
             (std::isfinite(_vehicle.GetMaxForwardAcceleration()) &&
              (_vehicle.GetMaxForwardAcceleration() > 0.0f)) ?
@@ -1090,8 +1172,7 @@ namespace MazeMap
 
         const float forwardForceRequestN = massKg * desiredAccelMps2;
         const float requestedYawMomentNm =
-            (yawInertiaKgM2 * desiredYawAccelRadps2) +
-            (kYawRateDampingNmsPerRad * yawRateRadps);
+            yawInertiaKgM2 * desiredYawAccelRadps2;
         const float commonForceRequestN = 0.5f * forwardForceRequestN;
         const float differentialForceRequestN = requestedYawMomentNm * invTrackWidthM;
         const float leftForceCommandN = commonForceRequestN + differentialForceRequestN;

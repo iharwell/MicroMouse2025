@@ -1,0 +1,12 @@
+name,value
+mass_kg,0.14
+track_width_m,0.084635
+yaw_inertia_kg_m2,0.00022
+yaw_denominator_including_wheel_spinup_kg_m2,0.000246510400642
+wheel_radius_m,0.01261
+drive_wheel_longitudinal_offset_m,0.01475
+wheel_bank_inertia_kg_m2,1.177e-06
+longitudinal_tire_stiffness_n,4.12
+front_right_contact_force_gain_n_per_mps,18
+rear_right_contact_force_gain_n_per_mps,16
+contact_yaw_patch_force_gain_ns_per_m,-2

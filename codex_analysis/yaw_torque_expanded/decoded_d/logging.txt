@@ -1,0 +1,16 @@
+startup_trace [9832585] begin: mode:open_floor_measurement
+Open-floor measurement mode
+Open-floor battery: timing capture plus the registered main-regime battery
+IMU_FR disabled; using IMU_BL only
+wall_adc_session_pre_write expected_cfg=1065 read_cfg=1065 read_gc=0
+wall_adc_apply expected_cfg=1065 read_cfg=1065 read_gc=0
+wall_adc_session_post_write expected_cfg=1065 read_cfg=1065 read_gc=0
+wall_adc_post_conversion expected_cfg=1065 read_cfg=1065 read_gc=0
+wall_adc_session_post_sample expected_cfg=1065 read_cfg=1065 read_gc=0
+wall_adc_post_conversion expected_cfg=1065 read_cfg=1065 read_gc=0
+wall_adc_session_pre_write expected_cfg=1065 read_cfg=1065 read_gc=0
+wall_adc_session_post_write expected_cfg=1065 read_cfg=1065 read_gc=0
+wall_adc_post_conversion expected_cfg=1065 read_cfg=1065 read_gc=0
+wall_adc_session_post_sample expected_cfg=1065 read_cfg=1065 read_gc=0
+wall_adc_post_conversion expected_cfg=1065 read_cfg=1065 read_gc=0
+open_floor_measurement [159244026] fault: Open-floor measurement selector jumper removed

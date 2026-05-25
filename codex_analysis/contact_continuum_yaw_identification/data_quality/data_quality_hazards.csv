@@ -1,0 +1,106 @@
+scope,hazard,evidence,recommendation
+competition_aux,saturation unavailable,0/13 runs expose saturation flags,do not use unavailable-saturation runs as fit authority
+competition_aux,watchdog unavailable,0/13 runs expose watchdog flags,"treat watchdog absence as schema trust loss, not proof of no watchdog activity"
+competition_aux,fan/load assumed,per-row fan in 0 runs; metadata fan in 13 runs,separate load/fan inference from contact-continuum yaw fit
+competition_diag,saturation unavailable,0/4 runs expose saturation flags,do not use unavailable-saturation runs as fit authority
+competition_diag,watchdog unavailable,0/4 runs expose watchdog flags,"treat watchdog absence as schema trust loss, not proof of no watchdog activity"
+competition_diag,fan/load assumed,per-row fan in 0 runs; metadata fan in 4 runs,separate load/fan inference from contact-continuum yaw fit
+competition_fwc,saturation unavailable,0/4 runs expose saturation flags,do not use unavailable-saturation runs as fit authority
+competition_fwc,watchdog unavailable,0/4 runs expose watchdog flags,"treat watchdog absence as schema trust loss, not proof of no watchdog activity"
+competition_fwc,fan/load assumed,per-row fan in 0 runs; metadata fan in 0 runs,separate load/fan inference from contact-continuum yaw fit
+decoded_open_floor,watchdog unavailable,46/49 runs expose watchdog flags,"treat watchdog absence as schema trust loss, not proof of no watchdog activity"
+decoded_open_floor:2026-04-11_06-58-25,missing/stale angular command evidence,cmd_angular zero fraction during moving-yaw rows=0.800239,fit only from wheel commands/sensor timing or downweight
+decoded_open_floor:2026-04-11_21-03-20,missing/stale angular command evidence,cmd_angular zero fraction during moving-yaw rows=0.648461,fit only from wheel commands/sensor timing or downweight
+decoded_open_floor:2026-04-12_05-13-55,saturation can mimic yaw physics,moving-yaw saturation fraction=0.530488,exclude saturated rows and downweight the run
+decoded_open_floor:2026-04-14_02-00-02,saturation can mimic yaw physics,moving-yaw saturation fraction=0.258663,exclude saturated rows and downweight the run
+decoded_open_floor:2026-04-14_05-40-35,missing/stale angular command evidence,cmd_angular zero fraction during moving-yaw rows=1.000000,fit only from wheel commands/sensor timing or downweight
+decoded_open_floor:2026-04-14_06-21-48,final bad tail,tail_seconds=0.467997; existing_cutoff=dropped final sensor-quiescent/invalid tail >= 0.25 s,trim tails before derivative/ablation work
+decoded_open_floor:2026-04-14_06-37-59,final bad tail,tail_seconds=0.451706; existing_cutoff=kept through final sensor-active row,trim tails before derivative/ablation work
+decoded_open_floor:2026-04-14_07-02-50,final bad tail,tail_seconds=0.432597; existing_cutoff=kept through final sensor-active row,trim tails before derivative/ablation work
+decoded_open_floor:2026-04-14_07-17-42,final bad tail,tail_seconds=0.451199; existing_cutoff=kept through final sensor-active row,trim tails before derivative/ablation work
+decoded_open_floor:2026-04-14_07-25-50,missing/stale angular command evidence,cmd_angular zero fraction during moving-yaw rows=1.000000,fit only from wheel commands/sensor timing or downweight
+decoded_open_floor:2026-04-14_07-25-50,final bad tail,tail_seconds=0.460200; existing_cutoff=dropped final sensor-quiescent/invalid tail >= 0.25 s,trim tails before derivative/ablation work
+decoded_open_floor:2026-04-14_07-40-05,final bad tail,tail_seconds=0.346514; existing_cutoff=dropped final sensor-quiescent/invalid tail >= 0.25 s,trim tails before derivative/ablation work
+decoded_open_floor:2026-04-14_07-51-39,missing/stale angular command evidence,cmd_angular zero fraction during moving-yaw rows=1.000000,fit only from wheel commands/sensor timing or downweight
+decoded_open_floor:2026-04-14_07-51-39,final bad tail,tail_seconds=0.460200; existing_cutoff=dropped final sensor-quiescent/invalid tail >= 0.25 s,trim tails before derivative/ablation work
+decoded_open_floor:2026-04-14_07-53-57,missing/stale angular command evidence,cmd_angular zero fraction during moving-yaw rows=1.000000,fit only from wheel commands/sensor timing or downweight
+decoded_open_floor:2026-04-14_07-53-57,final bad tail,tail_seconds=0.357940; existing_cutoff=kept through final sensor-active row,trim tails before derivative/ablation work
+decoded_open_floor:2026-04-14_08-14-01,missing/stale angular command evidence,cmd_angular zero fraction during moving-yaw rows=1.000000,fit only from wheel commands/sensor timing or downweight
+decoded_open_floor:2026-04-14_08-14-01,final bad tail,tail_seconds=0.460000; existing_cutoff=dropped final sensor-quiescent/invalid tail >= 0.25 s,trim tails before derivative/ablation work
+decoded_open_floor:2026-04-14_08-34-57,missing/stale angular command evidence,cmd_angular zero fraction during moving-yaw rows=1.000000,fit only from wheel commands/sensor timing or downweight
+decoded_open_floor:2026-04-14_08-34-57,final bad tail,tail_seconds=0.468000; existing_cutoff=dropped final sensor-quiescent/invalid tail >= 0.25 s,trim tails before derivative/ablation work
+decoded_open_floor:2026-04-14_08-44-07,missing/stale angular command evidence,cmd_angular zero fraction during moving-yaw rows=1.000000,fit only from wheel commands/sensor timing or downweight
+decoded_open_floor:2026-04-14_08-44-07,final bad tail,tail_seconds=0.286000; existing_cutoff=kept through final sensor-active row,trim tails before derivative/ablation work
+decoded_open_floor:2026-04-14_08-58-04,missing/stale angular command evidence,cmd_angular zero fraction during moving-yaw rows=1.000000,fit only from wheel commands/sensor timing or downweight
+decoded_open_floor:2026-04-14_08-58-04,final bad tail,tail_seconds=0.328000; existing_cutoff=kept through final sensor-active row,trim tails before derivative/ablation work
+decoded_open_floor:2026-04-14_09-15-42,missing/stale angular command evidence,cmd_angular zero fraction during moving-yaw rows=1.000000,fit only from wheel commands/sensor timing or downweight
+decoded_open_floor:2026-04-14_09-15-42,final bad tail,tail_seconds=0.455000; existing_cutoff=dropped final sensor-quiescent/invalid tail >= 0.25 s,trim tails before derivative/ablation work
+decoded_open_floor:2026-04-14_16-34-17,saturation can mimic yaw physics,moving-yaw saturation fraction=0.306872,exclude saturated rows and downweight the run
+decoded_open_floor:2026-04-14_16-34-17,gyro derivative noise/spikes,abs(dgyro/dt)>=500 rad/s^2 fraction=0.004431; rms=74.871860 rad/s^2,"smooth, bin, or use robust losses before fitting acceleration-like yaw residuals"
+decoded_open_floor:2026-04-15_01-22-20,final bad tail,tail_seconds=0.266000; existing_cutoff=kept through final sensor-active row,trim tails before derivative/ablation work
+decoded_open_floor:2026-04-15_02-09-58,saturation can mimic yaw physics,moving-yaw saturation fraction=0.269673,exclude saturated rows and downweight the run
+decoded_open_floor:2026-04-15_02-09-58,gyro derivative noise/spikes,abs(dgyro/dt)>=500 rad/s^2 fraction=0.005194; rms=97.608038 rad/s^2,"smooth, bin, or use robust losses before fitting acceleration-like yaw residuals"
+decoded_open_floor:2026-04-16_02-43-36,missing/stale angular command evidence,cmd_angular zero fraction during moving-yaw rows=1.000000,fit only from wheel commands/sensor timing or downweight
+decoded_open_floor:2026-04-16_02-43-36,final bad tail,tail_seconds=1.660000; existing_cutoff=dropped final sensor-quiescent/invalid tail >= 0.25 s,trim tails before derivative/ablation work
+decoded_open_floor:2026-04-20_02-33-07,missing/stale angular command evidence,cmd_angular zero fraction during moving-yaw rows=1.000000,fit only from wheel commands/sensor timing or downweight
+decoded_open_floor:2026-04-20_02-33-07,weak gyro bias estimate,sensor stationary rows=255,exclude or validation-only unless paired with external calibration
+decoded_open_floor:2026-04-20_04-54-09,missing/stale angular command evidence,cmd_angular zero fraction during moving-yaw rows=1.000000,fit only from wheel commands/sensor timing or downweight
+decoded_open_floor:2026-04-20_04-54-09,saturation can mimic yaw physics,moving-yaw saturation fraction=0.315654,exclude saturated rows and downweight the run
+decoded_open_floor:2026-04-20_04-54-09,gyro derivative noise/spikes,abs(dgyro/dt)>=500 rad/s^2 fraction=0.007399; rms=150.358990 rad/s^2,"smooth, bin, or use robust losses before fitting acceleration-like yaw residuals"
+decoded_open_floor:2026-04-20_08-38-39,saturation can mimic yaw physics,moving-yaw saturation fraction=0.343160,exclude saturated rows and downweight the run
+decoded_open_floor:2026-04-20_10-22-09,saturation can mimic yaw physics,moving-yaw saturation fraction=0.375386,exclude saturated rows and downweight the run
+decoded_open_floor:2026-04-20_10-22-09,gyro derivative noise/spikes,abs(dgyro/dt)>=500 rad/s^2 fraction=0.004164; rms=151.091224 rad/s^2,"smooth, bin, or use robust losses before fitting acceleration-like yaw residuals"
+decoded_open_floor:2026-04-20_11-47-47,missing/stale angular command evidence,cmd_angular zero fraction during moving-yaw rows=1.000000,fit only from wheel commands/sensor timing or downweight
+decoded_open_floor:2026-04-20_23-05-07,missing/stale angular command evidence,cmd_angular zero fraction during moving-yaw rows=1.000000,fit only from wheel commands/sensor timing or downweight
+decoded_open_floor:2026-04-22_12-10-34,old schema,decoded_open_floor_legacy_or_partial,separate family and avoid fit authority
+decoded_open_floor:2026-05-04_16-57-53,missing/stale angular command evidence,cmd_angular zero fraction during moving-yaw rows=1.000000,fit only from wheel commands/sensor timing or downweight
+decoded_open_floor:2026-05-04_16-57-53,final bad tail,tail_seconds=0.268000; existing_cutoff=kept through final sensor-active row,trim tails before derivative/ablation work
+decoded_open_floor:2026-05-04_16-57-53,old schema,decoded_open_floor_legacy_or_partial,separate family and avoid fit authority
+decoded_open_floor:2026-05-04_20-35-47,missing/stale angular command evidence,cmd_angular zero fraction during moving-yaw rows=1.000000,fit only from wheel commands/sensor timing or downweight
+decoded_open_floor:2026-05-04_20-35-47,old schema,decoded_open_floor_legacy_or_partial,separate family and avoid fit authority
+competition_diag:diag000,final bad tail,tail_seconds=1.215920; existing_cutoff=dropped final sensor-quiescent/invalid tail >= 0.25 s,trim tails before derivative/ablation work
+competition_diag:diag000,old schema,legacy_competition_sample,separate family and avoid fit authority
+competition_diag:diag001,final bad tail,tail_seconds=1.214188; existing_cutoff=dropped final sensor-quiescent/invalid tail >= 0.25 s,trim tails before derivative/ablation work
+competition_diag:diag001,old schema,legacy_competition_sample,separate family and avoid fit authority
+competition_diag:diag002,old schema,legacy_competition_sample,separate family and avoid fit authority
+competition_diag:diag003,final bad tail,tail_seconds=1.217591; existing_cutoff=dropped final sensor-quiescent/invalid tail >= 0.25 s,trim tails before derivative/ablation work
+competition_diag:diag003,old schema,legacy_competition_sample,separate family and avoid fit authority
+competition_aux:aux000,old schema,legacy_competition_sample,separate family and avoid fit authority
+competition_aux:aux000,phase/procedure contamination,high_path_dependence,validation only until phase labels and repeats are separated
+competition_aux:aux000,gyro derivative noise/spikes,abs(dgyro/dt)>=500 rad/s^2 fraction=0.002746; rms=61.948466 rad/s^2,"smooth, bin, or use robust losses before fitting acceleration-like yaw residuals"
+competition_aux:aux001,old schema,legacy_competition_sample,separate family and avoid fit authority
+competition_aux:aux001,phase/procedure contamination,high_path_dependence,validation only until phase labels and repeats are separated
+competition_aux:aux001,gyro derivative noise/spikes,abs(dgyro/dt)>=500 rad/s^2 fraction=0.001469; rms=48.814510 rad/s^2,"smooth, bin, or use robust losses before fitting acceleration-like yaw residuals"
+competition_aux:aux002,old schema,legacy_competition_sample,separate family and avoid fit authority
+competition_aux:aux002,phase/procedure contamination,high_path_dependence,validation only until phase labels and repeats are separated
+competition_aux:aux002,gyro derivative noise/spikes,abs(dgyro/dt)>=500 rad/s^2 fraction=0.002061; rms=58.925395 rad/s^2,"smooth, bin, or use robust losses before fitting acceleration-like yaw residuals"
+competition_aux:aux003,old schema,legacy_competition_sample,separate family and avoid fit authority
+competition_aux:aux003,phase/procedure contamination,high_path_dependence,validation only until phase labels and repeats are separated
+competition_aux:aux003,gyro derivative noise/spikes,abs(dgyro/dt)>=500 rad/s^2 fraction=0.002681; rms=70.392557 rad/s^2,"smooth, bin, or use robust losses before fitting acceleration-like yaw residuals"
+competition_aux:aux004,old schema,legacy_competition_sample,separate family and avoid fit authority
+competition_aux:aux004,phase/procedure contamination,high_path_dependence,validation only until phase labels and repeats are separated
+competition_aux:aux004,gyro derivative noise/spikes,abs(dgyro/dt)>=500 rad/s^2 fraction=0.001238; rms=59.210707 rad/s^2,"smooth, bin, or use robust losses before fitting acceleration-like yaw residuals"
+competition_aux:aux005,old schema,legacy_competition_sample,separate family and avoid fit authority
+competition_aux:aux005,phase/procedure contamination,high_path_dependence,validation only until phase labels and repeats are separated
+competition_aux:aux006,old schema,legacy_competition_sample,separate family and avoid fit authority
+competition_aux:aux006,phase/procedure contamination,high_path_dependence,validation only until phase labels and repeats are separated
+competition_aux:aux006,gyro derivative noise/spikes,abs(dgyro/dt)>=500 rad/s^2 fraction=0.001178; rms=46.414089 rad/s^2,"smooth, bin, or use robust losses before fitting acceleration-like yaw residuals"
+competition_aux:aux007,old schema,legacy_competition_sample,separate family and avoid fit authority
+competition_aux:aux007,phase/procedure contamination,high_path_dependence,validation only until phase labels and repeats are separated
+competition_aux:aux008,old schema,legacy_competition_sample,separate family and avoid fit authority
+competition_aux:aux008,phase/procedure contamination,high_path_dependence,validation only until phase labels and repeats are separated
+competition_aux:aux009,old schema,legacy_competition_sample,separate family and avoid fit authority
+competition_aux:aux009,phase/procedure contamination,high_path_dependence,validation only until phase labels and repeats are separated
+competition_aux:aux009,gyro derivative noise/spikes,abs(dgyro/dt)>=500 rad/s^2 fraction=0.004192; rms=66.114459 rad/s^2,"smooth, bin, or use robust losses before fitting acceleration-like yaw residuals"
+competition_aux:aux010,old schema,legacy_competition_sample,separate family and avoid fit authority
+competition_aux:aux010,phase/procedure contamination,high_path_dependence,validation only until phase labels and repeats are separated
+competition_aux:aux010,gyro derivative noise/spikes,abs(dgyro/dt)>=500 rad/s^2 fraction=0.004657; rms=71.584409 rad/s^2,"smooth, bin, or use robust losses before fitting acceleration-like yaw residuals"
+competition_aux:aux011,weak gyro bias estimate,sensor stationary rows=0,exclude or validation-only unless paired with external calibration
+competition_aux:aux011,old schema,legacy_competition_sample,separate family and avoid fit authority
+competition_aux:aux011,phase/procedure contamination,high_path_dependence,validation only until phase labels and repeats are separated
+competition_aux:aux012,old schema,legacy_competition_sample,separate family and avoid fit authority
+competition_aux:aux012,phase/procedure contamination,high_path_dependence,validation only until phase labels and repeats are separated
+competition_fwc:fwc000,weak gyro bias estimate,sensor stationary rows=0,exclude or validation-only unless paired with external calibration
+competition_fwc:fwc001,weak gyro bias estimate,sensor stationary rows=0,exclude or validation-only unless paired with external calibration
+competition_fwc:fwc002,weak gyro bias estimate,sensor stationary rows=0,exclude or validation-only unless paired with external calibration
+competition_fwc:fwc003,weak gyro bias estimate,sensor stationary rows=0,exclude or validation-only unless paired with external calibration

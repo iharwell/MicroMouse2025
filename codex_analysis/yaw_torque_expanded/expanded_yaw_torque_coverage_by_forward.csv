@@ -1,0 +1,14 @@
+abs_forward_velocity_bin_mps,count,yaw_bin_count,max_abs_yaw_rate_bin_radps,families
+0.00,703322,47,23.50,competition_aux;competition_diag;open_floor
+0.10,903083,47,23.50,competition_aux;competition_diag;open_floor
+0.20,233547,45,22.50,competition_aux;competition_diag;open_floor
+0.30,275516,46,23.00,competition_aux;competition_diag;open_floor
+0.40,167724,42,21.00,competition_aux;competition_diag;open_floor
+0.50,44348,36,18.50,competition_aux;competition_diag;open_floor
+0.60,48487,25,18.00,competition_aux;competition_diag;open_floor
+0.70,4777,22,13.00,competition_aux;competition_diag;open_floor
+0.80,938,10,9.50,competition_aux;open_floor
+0.90,201,4,2.00,competition_aux;open_floor
+1.00,49,5,3.50,competition_aux;open_floor
+1.10,44,7,4.00,open_floor
+1.20,13,5,3.50,open_floor

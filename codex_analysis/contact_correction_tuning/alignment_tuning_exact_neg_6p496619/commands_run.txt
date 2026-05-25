@@ -1,0 +1,1 @@
+python codex_analysis\contact_correction_tuning\tune_contact_correction_alignment.py --out-dir codex_analysis\contact_correction_tuning\alignment_tuning_exact_neg_6p496619 --response-lags 0 1 2 --forced-gain -6.496619190

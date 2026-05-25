@@ -1,0 +1,13 @@
+response_lag_samples,dataset,samples,fit_authoritative_old_rmse_radps,dataset_old_rmse_radps,offset_vs_fit_pct,policy
+0,fit_downweighted_open_floor,779760,0.150058239,0.174304915,16.158177,keep_validation
+0,validation_only_open_floor,361987,0.150058239,0.068655577,-54.247380,stress_only_off_distribution
+0,competition_stress,631958,0.150058239,0.361683931,141.029039,stress_only_off_distribution
+2,fit_downweighted_open_floor,776989,0.144705675,0.157111646,8.573244,keep_validation
+2,validation_only_open_floor,360484,0.144705675,0.068998992,-52.317702,stress_only_off_distribution
+2,competition_stress,622538,0.144705675,0.360934074,149.426343,stress_only_off_distribution
+4,fit_downweighted_open_floor,774212,0.141863703,0.144079209,1.561715,keep_validation
+4,validation_only_open_floor,359085,0.141863703,0.066315731,-53.253912,stress_only_off_distribution
+4,competition_stress,614159,0.141863703,0.357835420,152.238884,stress_only_off_distribution
+5,fit_downweighted_open_floor,772826,0.145087836,0.144659400,-0.295294,keep_validation
+5,validation_only_open_floor,358410,0.145087836,0.069237960,-52.278591,stress_only_off_distribution
+5,competition_stress,610015,0.145087836,0.357099122,146.126162,stress_only_off_distribution

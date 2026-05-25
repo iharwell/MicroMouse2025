@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "CppUnitTest.h"
 
+#include "..\MazeMap\CoreConfig.h"
 #include "..\MazeMap\DriveBase.h"
 #include "..\MazeMap\PlantModel.h"
 #include "..\MazeMap\Vehicle.h"
@@ -29,7 +30,7 @@ namespace MazeMap
             PDCluster feedbackTuning;
             DriveBase drive;
 
-            explicit DriveBaseHarness(const PDCluster& cluster = PDCluster{}) noexcept
+            explicit DriveBaseHarness(const PDCluster& cluster = Config::kDriveBasePDCluster) noexcept
                 : vehicle()
                 , runtimeState()
                 , plant(vehicle, runtimeState)
@@ -141,13 +142,9 @@ namespace MazeMap
             AssertMatchesPlantFeedforward(harness, telemetry);
         }
 
-        TEST_METHOD(NaNObjectivesDisableFeedbackAndRemainInactiveInTelemetry)
+        TEST_METHOD(NaNObjectivesRemainInactiveInTelemetry)
         {
-            PDCluster cluster;
-            cluster.VelocityStatePD.SetGains(100.0f, 0.0f);
-            cluster.YawRateStatePD.SetGains(100.0f, 0.0f);
-            cluster.HeadingStatePD.SetGains(100.0f, 0.0f);
-            DriveBaseHarness harness(cluster);
+            DriveBaseHarness harness;
             harness.runtimeState.SetForwardVelocity(0.5f);
             harness.runtimeState.SetYawRate(1.0f);
             harness.runtimeState.SetHeading(0.25f);
@@ -160,9 +157,6 @@ namespace MazeMap
             Assert::IsTrue(std::isnan(telemetry.requestedForwardAccelMps2));
             Assert::IsTrue(std::isnan(telemetry.requestedYawAccelRadps2));
             Assert::IsTrue(std::isnan(telemetry.requestedYawRad));
-            AssertFlagSet(telemetry.feedbackBranchFlags, DriveTelemetry::kFeedbackForwardVelocityInactive);
-            AssertFlagSet(telemetry.feedbackBranchFlags, DriveTelemetry::kFeedbackYawRateInactive);
-            AssertFlagSet(telemetry.feedbackBranchFlags, DriveTelemetry::kFeedbackHeadingInactive);
             Assert::IsTrue(std::isnan(telemetry.composedForwardAccelMps2));
             Assert::IsTrue(std::isnan(telemetry.composedYawAccelRadps2));
             AssertMatchesPlantFeedforward(harness, telemetry);
@@ -170,9 +164,7 @@ namespace MazeMap
 
         TEST_METHOD(ForwardVelocityFeedbackChangesOnlyComposedForwardAcceleration)
         {
-            PDCluster cluster;
-            cluster.VelocityStatePD.SetGains(3.0f, 0.0f);
-            DriveBaseHarness harness(cluster);
+            DriveBaseHarness harness;
             harness.runtimeState.SetForwardVelocity(0.20f);
 
             (void)harness.drive.ProposeBodyTick(1.0f, kNaN, 0.50f, kNaN, kNaN);
@@ -180,7 +172,10 @@ namespace MazeMap
 
             Assert::AreEqual(1.0f, telemetry.requestedForwardMps, 1.0e-6f);
             Assert::AreEqual(0.50f, telemetry.requestedForwardAccelMps2, 1.0e-6f);
-            Assert::AreEqual(0.50f + ((1.0f - 0.20f) * 3.0f), telemetry.composedForwardAccelMps2, 1.0e-6f);
+            Assert::AreEqual(
+                0.50f + harness.feedbackTuning.VelocityStatePD.Compute(1.0f - 0.20f, 0.0f),
+                telemetry.composedForwardAccelMps2,
+                1.0e-6f);
             Assert::IsTrue(std::isnan(telemetry.requestedYawRateRadps));
             Assert::IsTrue(std::isnan(telemetry.composedYawAccelRadps2));
             AssertMatchesPlantFeedforward(harness, telemetry);
@@ -188,10 +183,7 @@ namespace MazeMap
 
         TEST_METHOD(YawRateAndHeadingFeedbackComposeYawAcceleration)
         {
-            PDCluster cluster;
-            cluster.YawRateStatePD.SetGains(2.0f, 0.0f);
-            cluster.HeadingStatePD.SetGains(5.0f, 0.0f);
-            DriveBaseHarness harness(cluster);
+            DriveBaseHarness harness;
             harness.runtimeState.SetYawRate(0.40f);
             harness.runtimeState.SetHeading(0.25f);
 
@@ -201,7 +193,9 @@ namespace MazeMap
             Assert::AreEqual(1.0f, telemetry.requestedYawRateRadps, 1.0e-6f);
             Assert::AreEqual(0.75f, telemetry.requestedYawRad, 1.0e-6f);
             Assert::AreEqual(
-                0.30f + ((1.0f - 0.40f) * 2.0f) + ((0.75f - 0.25f) * 5.0f),
+                0.30f +
+                    harness.feedbackTuning.YawRateStatePD.Compute(1.0f - 0.40f, 0.0f) +
+                    harness.feedbackTuning.HeadingStatePD.Compute(0.75f - 0.25f, 1.0f - 0.40f),
                 telemetry.composedYawAccelRadps2,
                 1.0e-6f);
             Assert::IsTrue(std::isnan(telemetry.composedForwardAccelMps2));
@@ -210,23 +204,18 @@ namespace MazeMap
 
         TEST_METHOD(InfiniteAccelerationIntentReachesPlantModelAsMaximizeObjective)
         {
-            PDCluster cluster;
-            cluster.VelocityStatePD.SetGains(100.0f, 0.0f);
-            cluster.YawRateStatePD.SetGains(100.0f, 0.0f);
-            DriveBaseHarness harness(cluster);
+            DriveBaseHarness harness;
 
             const CommandVector command =
                 harness.drive.ProposeBodyTick(2.0f, -3.0f, kInf, -kInf, kNaN);
             const DriveTelemetry& telemetry = harness.drive.LastTelemetry();
 
             AssertFiniteCommand(command);
-			Assert::AreEqual(2.0f, telemetry.requestedForwardMps, 1.0e-6f);
+            Assert::AreEqual(2.0f, telemetry.requestedForwardMps, 1.0e-6f);
             Assert::AreEqual(-3.0f, telemetry.requestedYawRateRadps, 1.0e-6f);
             Assert::IsTrue(telemetry.requestedForwardAccelMps2 == kInf);
             Assert::IsTrue(telemetry.requestedYawAccelRadps2 == -kInf);
             Assert::IsTrue(std::isnan(telemetry.requestedYawRad));
-            AssertFlagSet(telemetry.feedbackBranchFlags, DriveTelemetry::kFeedbackForwardSuppressedForMaximize);
-            AssertFlagSet(telemetry.feedbackBranchFlags, DriveTelemetry::kFeedbackYawSuppressedForMaximize);
             Assert::IsTrue(std::isinf(telemetry.composedForwardAccelMps2));
             Assert::IsFalse(std::signbit(telemetry.composedForwardAccelMps2));
             Assert::IsTrue(std::isinf(telemetry.composedYawAccelRadps2));

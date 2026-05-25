@@ -85,5 +85,7 @@ namespace MazeMap
 		bool IsValidMove(Direction direction);
 		// Returns true if moving one cell in the provided direction results in a coordinate that is in the 16x16 bounds of the maze.
 		bool IsValidMove(Direction direction) const;
+
+		static CellCoordinates GetNearest(float x, float y, float cellDim);
 	};
 }

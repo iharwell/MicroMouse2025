@@ -8,15 +8,6 @@
 namespace
 {
     using CommandVector = MazeMap::App::Internal::CommandVector;
-
-    float AddFeedbackAccel(float accumulatedAccel, float feedbackAccel) noexcept
-    {
-        if (!std::isfinite(feedbackAccel))
-        {
-            return accumulatedAccel;
-        }
-        return std::isfinite(accumulatedAccel) ? (accumulatedAccel + feedbackAccel) : feedbackAccel;
-    }
 }
 
 namespace MazeMap
@@ -58,34 +49,26 @@ namespace MazeMap
         const float observedYawRateRadps = _runtimeState.GetYawRate();
         const float observedYawRad = _runtimeState.GetHeading();
 
-        float forwardFeedbackAccelMps2 = (std::numeric_limits<float>::quiet_NaN)();
+        bool hasForwardFeedbackAccel = false;
+        float forwardFeedbackAccelMps2 = 0.0f;
         if (std::isfinite(targetForwardMps) && std::isfinite(observedForwardMps))
         {
-            forwardFeedbackAccelMps2 =
-                AddFeedbackAccel(
-                    forwardFeedbackAccelMps2,
-                    ComputeForwardVelocityFeedbackAccelMps2(
-                        _feedbackTuning,
-                        targetForwardMps - observedForwardMps));
-        }
-        else
-        {
-            telemetry.feedbackBranchFlags |= DriveTelemetry::kFeedbackForwardVelocityInactive;
+            forwardFeedbackAccelMps2 +=
+                ComputeForwardVelocityFeedbackAccelMps2(
+                    _feedbackTuning,
+                    targetForwardMps - observedForwardMps);
+            hasForwardFeedbackAccel = true;
         }
 
-        float yawFeedbackAccelRadps2 = (std::numeric_limits<float>::quiet_NaN)();
+        bool hasYawFeedbackAccel = false;
+        float yawFeedbackAccelRadps2 = 0.0f;
         if (std::isfinite(targetYawRateRadps) && std::isfinite(observedYawRateRadps))
         {
-            yawFeedbackAccelRadps2 =
-                AddFeedbackAccel(
-                    yawFeedbackAccelRadps2,
-                    ComputeYawRateFeedbackAccelRadps2(
-                        _feedbackTuning,
-                        targetYawRateRadps - observedYawRateRadps));
-        }
-        else
-        {
-            telemetry.feedbackBranchFlags |= DriveTelemetry::kFeedbackYawRateInactive;
+            yawFeedbackAccelRadps2 +=
+                ComputeYawRateFeedbackAccelRadps2(
+                    _feedbackTuning,
+                    targetYawRateRadps - observedYawRateRadps);
+            hasYawFeedbackAccel = true;
         }
 
         if (std::isfinite(targetYawRad) && std::isfinite(observedYawRad))
@@ -96,40 +79,24 @@ namespace MazeMap
                 std::isfinite(observedYawRateRadps) ?
                 (headingTargetYawRateRadps - observedYawRateRadps) :
                 0.0f;
-            yawFeedbackAccelRadps2 =
-                AddFeedbackAccel(
-                    yawFeedbackAccelRadps2,
-                    ComputeHeadingFeedbackAccelRadps2(
-                        _feedbackTuning,
-                        AngleDifference(observedYawRad, targetYawRad),
-                        headingErrorRateRadps));
-        }
-        else
-        {
-            telemetry.feedbackBranchFlags |= DriveTelemetry::kFeedbackHeadingInactive;
+            yawFeedbackAccelRadps2 +=
+                ComputeHeadingFeedbackAccelRadps2(
+                    _feedbackTuning,
+                    AngleDifference(observedYawRad, targetYawRad),
+                    headingErrorRateRadps);
+            hasYawFeedbackAccel = true;
         }
 
-        if ((targetForwardAccelMps2) == std::numeric_limits<float>::infinity())
-        {
-            telemetry.composedForwardAccelMps2 = targetForwardAccelMps2;
-            telemetry.feedbackBranchFlags |= DriveTelemetry::kFeedbackForwardSuppressedForMaximize;
-        }
-        else
-        {
-            telemetry.composedForwardAccelMps2 =
-                ComposeAccelerationObjective(targetForwardAccelMps2, forwardFeedbackAccelMps2);
-        }
-
-        if ((targetYawAccelRadps2) == std::numeric_limits<float>::infinity())
-        {
-            telemetry.composedYawAccelRadps2 = targetYawAccelRadps2;
-            telemetry.feedbackBranchFlags |= DriveTelemetry::kFeedbackYawSuppressedForMaximize;
-        }
-        else
-        {
-            telemetry.composedYawAccelRadps2 =
-                ComposeAccelerationObjective(targetYawAccelRadps2, yawFeedbackAccelRadps2);
-        }
+        telemetry.composedForwardAccelMps2 =
+            ComposeAccelerationObjective(
+                targetForwardAccelMps2,
+                forwardFeedbackAccelMps2,
+                hasForwardFeedbackAccel);
+        telemetry.composedYawAccelRadps2 =
+            ComposeAccelerationObjective(
+                targetYawAccelRadps2,
+                yawFeedbackAccelRadps2,
+                hasYawFeedbackAccel);
 
         float maxLongitudinalAccelMps2 = 0.0f;
         float maxYawAccelRadps2 = 0.0f;
@@ -145,7 +112,7 @@ namespace MazeMap
         telemetry.leftPlantCommand = plantCommand.LeftCommand();
         telemetry.rightPlantCommand = plantCommand.RightCommand();
 
-		CommandVector finalCommand = plantCommand;
+        CommandVector finalCommand = plantCommand;
         finalCommand.ClampCommand();
         if (!plantCommand.IsFinite())
         {
@@ -172,15 +139,22 @@ namespace MazeMap
         return _lastTelemetry;
     }
 
-    float DriveBase::ComposeAccelerationObjective(float requestedAccel, float feedbackAccel) noexcept
+    float DriveBase::ComposeAccelerationObjective(
+        float requestedAccel,
+        float feedbackAccel,
+        bool hasFeedback) noexcept
     {
+        if (std::isinf(requestedAccel))
+        {
+            return requestedAccel;
+        }
+
         const bool hasRequestedAccel = std::isfinite(requestedAccel);
-        const bool hasFeedbackAccel = std::isfinite(feedbackAccel);
         if (hasRequestedAccel)
         {
-            return requestedAccel + (hasFeedbackAccel ? feedbackAccel : 0.0f);
+            return requestedAccel + (hasFeedback ? feedbackAccel : 0.0f);
         }
-        return hasFeedbackAccel ? feedbackAccel : (std::numeric_limits<float>::quiet_NaN)();
+        return hasFeedback ? feedbackAccel : (std::numeric_limits<float>::quiet_NaN)();
     }
 
     float DriveBase::ComputeForwardVelocityFeedbackAccelMps2(

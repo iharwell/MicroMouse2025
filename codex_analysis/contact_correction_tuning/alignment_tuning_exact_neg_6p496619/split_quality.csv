@@ -1,0 +1,10 @@
+response_lag_samples,dataset,samples,fit_authoritative_old_rmse_radps,dataset_old_rmse_radps,offset_vs_fit_pct,policy
+0,fit_downweighted_open_floor,779760,0.150058239,0.174304915,16.158177,keep_validation
+0,validation_only_open_floor,361987,0.150058239,0.068655577,-54.247380,stress_only_off_distribution
+0,competition_stress,631958,0.150058239,0.361683931,141.029039,stress_only_off_distribution
+1,fit_downweighted_open_floor,778375,0.147584238,0.165086008,11.858834,keep_validation
+1,validation_only_open_floor,361208,0.147584238,0.069406753,-52.971432,stress_only_off_distribution
+1,competition_stress,626862,0.147584238,0.361421120,144.891409,stress_only_off_distribution
+2,fit_downweighted_open_floor,776989,0.144705675,0.157111646,8.573244,keep_validation
+2,validation_only_open_floor,360484,0.144705675,0.068998992,-52.317702,stress_only_off_distribution
+2,competition_stress,622538,0.144705675,0.360934074,149.426343,stress_only_off_distribution

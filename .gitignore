@@ -12,6 +12,7 @@
 
 /codex_verify/arduino_build/
 /codex_verify/arduino_build_work_*/
+/codex_verify/build_state/
 /codex_verify/arduino_data/
 /codex_verify/arduino_downloads/
 /codex_verify/edge_pdf_profile/
@@ -20,6 +21,8 @@
 /codex_verify/vstest_blame/
 /codex_verify/*.exe
 /codex_verify/*.log
+
+/codex_analysis/contact_continuum_yaw_identification/features/contact_continuum_feature_sample.csv
 
 /scripts
 /Maze Files Archive

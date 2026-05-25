@@ -146,7 +146,10 @@ namespace MazeMap
         static constexpr float kStaticFrictionMaxSpeedMps = 0.005f;
         static constexpr float kViscousFrictionNmPerRadps = 0.0f;
         static constexpr float kRightVelocityDampingNsPerM = 0.0f;
-        static constexpr float kYawRateDampingNmsPerRad = 0.0f;
+        // PlantModel-local contact-yaw correction gain, N*s/m.
+        // Delay-calibrated replay on 2026-05-24 found no problem-solving gain under +4 command-to-gyro alignment
+        // once +5 derivative-onset and yaw-launch sustained-step checks were applied.
+        static constexpr float kContactYawPatchForceGainNsPerM = 0.0f;
         static constexpr float kFrontLoadFraction = 0.5f;
         static constexpr float kMuFront = 1.65f;
         static constexpr float kMuRear = 1.65f;
