@@ -9,97 +9,75 @@
 
 namespace MazeMap::App::Internal::Runtime
 {
-    namespace
+    bool TryResolveMapQualifiedSideWallReference(
+        const MazeMap::Maze& maze,
+        const MazeMap::VehicleState& state,
+        const MazeMap::WallSensor& sensor,
+        const bool distanceValidForControl,
+        MazeMap::CellCoordinates& cell,
+        MazeMap::Direction& wallDirection)
     {
-        struct MapQualifiedSideWallReference final
+        cell = MazeMap::CellCoordinates(0U, 0U);
+        wallDirection = MazeMap::None;
+        if (!distanceValidForControl)
         {
-            bool useWall = false;
-            MazeMap::CellCoordinates cell = MazeMap::CellCoordinates(0U, 0U);
-            MazeMap::Direction wallDirection = MazeMap::None;
-        };
-
-        bool TryResolveMapQualifiedSideWallReference(
-            const MazeMap::Maze& maze,
-            const MazeMap::VehicleState& state,
-            const MazeMap::WallSensor& sensor,
-            const bool distanceValidForControl,
-            MapQualifiedSideWallReference& reference)
-        {
-            reference = MapQualifiedSideWallReference{};
-            if (!distanceValidForControl)
-            {
-                return false;
-            }
-
-            float alongWallCoordinateM = 0.0f;
-            if (!TryComputeSideWallAimCoordinateM(state, sensor, alongWallCoordinateM))
-            {
-                return false;
-            }
-
-            const Eigen::Vector2f worldOffset = RotateBodyVectorToWorld(state, sensor.GetPosition());
-            const float sensorXM = state.GetPositionX() + worldOffset.x();
-            const float sensorYM = state.GetPositionY() + worldOffset.y();
-            const Eigen::Vector2f sensorFacing = SensorWorldFacing(state, sensor);
-
-            int cellX = -1;
-            int cellY = -1;
-            MazeMap::Direction wallDirection = MazeMap::None;
-            if (std::fabs(sensorFacing.x()) >= std::fabs(sensorFacing.y()))
-            {
-                if (!std::isfinite(sensorXM) || !std::isfinite(alongWallCoordinateM))
-                {
-                    return false;
-                }
-
-                cellX = static_cast<int>(std::floor(sensorXM / Config::kCellSizeM));
-                cellY = static_cast<int>(std::floor(alongWallCoordinateM / Config::kCellSizeM));
-                wallDirection = (sensorFacing.x() >= 0.0f) ? MazeMap::Right : MazeMap::Left;
-            }
-            else
-            {
-                if (!std::isfinite(sensorYM) || !std::isfinite(alongWallCoordinateM))
-                {
-                    return false;
-                }
-
-                cellX = static_cast<int>(std::floor(alongWallCoordinateM / Config::kCellSizeM));
-                cellY = static_cast<int>(std::floor(sensorYM / Config::kCellSizeM));
-                wallDirection = (sensorFacing.y() >= 0.0f) ? MazeMap::Up : MazeMap::Down;
-            }
-
-            if ((cellX < 0) ||
-                (cellY < 0) ||
-                (cellX >= static_cast<int>(maze.GetXSize())) ||
-                (cellY >= static_cast<int>(maze.GetYSize())))
-            {
-                return false;
-            }
-
-            const MazeMap::Cell& observedCell = maze.Index(cellX, cellY);
-            if (observedCell.GetWall(wallDirection) != MazeMap::Wall)
-            {
-                return false;
-            }
-
-            reference.useWall = true;
-            reference.cell = MazeMap::CellCoordinates(static_cast<std::uint8_t>(cellX), static_cast<std::uint8_t>(cellY));
-            reference.wallDirection = wallDirection;
-            return true;
-        }
-    }
-
-    float ComputeSignalRiseAboveBaseline(float measuredDifferentialLight, float signalBaseline) noexcept
-    {
-        if (!std::isfinite(measuredDifferentialLight) ||
-            !std::isfinite(signalBaseline))
-        {
-            return 0.0f;
+            return false;
         }
 
-        return (measuredDifferentialLight > signalBaseline) ?
-            (measuredDifferentialLight - signalBaseline) :
-            0.0f;
+        float alongWallCoordinateM = 0.0f;
+        if (!sensor.TryComputeWallAimCoordinateM(state, alongWallCoordinateM))
+        {
+            return false;
+        }
+
+        const Eigen::Vector2f sensorPosition = sensor.WorldPosition(state);
+        const Eigen::Vector2f sensorFacing = sensor.WorldFacing(state);
+        const float sensorXM = sensorPosition.x();
+        const float sensorYM = sensorPosition.y();
+
+        int cellX = -1;
+        int cellY = -1;
+        if (std::fabs(sensorFacing.x()) >= std::fabs(sensorFacing.y()))
+        {
+            if (!std::isfinite(sensorXM) || !std::isfinite(alongWallCoordinateM))
+            {
+                return false;
+            }
+
+            cellX = static_cast<int>(std::floor(sensorXM / Config::kCellSizeM));
+            cellY = static_cast<int>(std::floor(alongWallCoordinateM / Config::kCellSizeM));
+            wallDirection = (sensorFacing.x() >= 0.0f) ? MazeMap::Right : MazeMap::Left;
+        }
+        else
+        {
+            if (!std::isfinite(sensorYM) || !std::isfinite(alongWallCoordinateM))
+            {
+                return false;
+            }
+
+            cellX = static_cast<int>(std::floor(alongWallCoordinateM / Config::kCellSizeM));
+            cellY = static_cast<int>(std::floor(sensorYM / Config::kCellSizeM));
+            wallDirection = (sensorFacing.y() >= 0.0f) ? MazeMap::Up : MazeMap::Down;
+        }
+
+        if ((cellX < 0) ||
+            (cellY < 0) ||
+            (cellX >= static_cast<int>(maze.GetXSize())) ||
+            (cellY >= static_cast<int>(maze.GetYSize())))
+        {
+            wallDirection = MazeMap::None;
+            return false;
+        }
+
+        const MazeMap::Cell& observedCell = maze.Index(cellX, cellY);
+        if (observedCell.GetWall(wallDirection) != MazeMap::Wall)
+        {
+            wallDirection = MazeMap::None;
+            return false;
+        }
+
+        cell = MazeMap::CellCoordinates(static_cast<std::uint8_t>(cellX), static_cast<std::uint8_t>(cellY));
+        return true;
     }
 
     bool UpdateFilteredSignalState(
@@ -118,28 +96,6 @@ namespace MazeMap::App::Internal::Runtime
             onMeasuredThreshold,
             offMeasuredThreshold);
         return currentState;
-    }
-
-    float ComputeCorridorError(
-        float leftDistanceM,
-        float rightDistanceM,
-        bool leftDistanceValidForControl,
-        bool rightDistanceValidForControl,
-        float expectedSideWallDistanceM) noexcept
-    {
-        if (leftDistanceValidForControl && rightDistanceValidForControl)
-        {
-            return 0.5f * (leftDistanceM - rightDistanceM);
-        }
-        if (leftDistanceValidForControl)
-        {
-            return leftDistanceM - expectedSideWallDistanceM;
-        }
-        if (rightDistanceValidForControl)
-        {
-            return expectedSideWallDistanceM - rightDistanceM;
-        }
-        return 0.0f;
     }
 
     bool TryComputeWallGroundedCorridorCoordinateM(
@@ -172,22 +128,25 @@ namespace MazeMap::App::Internal::Runtime
         float rightCoordinateM = 0.0f;
         bool haveLeftCoordinate = false;
         bool haveRightCoordinate = false;
-        MapQualifiedSideWallReference leftReference{};
-        MapQualifiedSideWallReference rightReference{};
+        MazeMap::CellCoordinates leftReferenceCell(0U, 0U);
+        MazeMap::CellCoordinates rightReferenceCell(0U, 0U);
+        MazeMap::Direction leftReferenceWallDirection = MazeMap::None;
+        MazeMap::Direction rightReferenceWallDirection = MazeMap::None;
 
         if (TryResolveMapQualifiedSideWallReference(
                 maze,
                 state,
                 vehicle.SideLeftWallSensor(),
                 snapshot.LeftDistanceValidForControl(),
-                leftReference))
+                leftReferenceCell,
+                leftReferenceWallDirection))
         {
             haveLeftCoordinate = TryComputePoseAxisFromObservedWall(
                 state,
                 vehicle.SideLeftWallSensor(),
                 snapshot.SideLeftDistanceM(),
-                leftReference.cell,
-                leftReference.wallDirection,
+                leftReferenceCell,
+                leftReferenceWallDirection,
                 leftCoordinateM);
         }
 
@@ -196,14 +155,15 @@ namespace MazeMap::App::Internal::Runtime
                 state,
                 vehicle.SideRightWallSensor(),
                 snapshot.RightDistanceValidForControl(),
-                rightReference))
+                rightReferenceCell,
+                rightReferenceWallDirection))
         {
             haveRightCoordinate = TryComputePoseAxisFromObservedWall(
                 state,
                 vehicle.SideRightWallSensor(),
                 snapshot.SideRightDistanceM(),
-                rightReference.cell,
-                rightReference.wallDirection,
+                rightReferenceCell,
+                rightReferenceWallDirection,
                 rightCoordinateM);
         }
 

@@ -5,17 +5,13 @@
 #include "BootUtilityModeFramework.h"
 #include "BootModeDescriptor.h"
 #include "BootModeRegistry.h"
+#include "HardwareConfig.h"
 #include "MazeMapRuntimeCore.h"
 #include "SharedRobotRuntime.h"
 #include "PinPairStrap.h"
 
 using MazeMap::App::Internal::GetSharedRobotRuntime;
 using MazeMap::App::Internal::SharedRobotRuntime;
-
-namespace
-{
-    constexpr const char* kWallSensorLedCalibrationStableId = "wall_sensor_led_calibration";
-}
 
 namespace MazeMap::App::Internal
 {
@@ -31,7 +27,7 @@ namespace MazeMap::App::Internal
         if (!_runtime.RegisterModeFaultHandler(
                 &WallSensorLedCalibrationController::TeardownOnRuntimeFault,
                 this,
-                kWallSensorLedCalibrationStableId))
+                kStableId))
         {
             _runtime.FailActiveMode("Wall sensor LED calibration fault handler registration failed");
         }
@@ -67,7 +63,7 @@ namespace MazeMap::App::Internal
         (void)_runtime.AppendTextLogLine("Wall sensor LED calibration mode");
         (void)MazeMap::App::Internal::BootUtilityModeFramework::ResetStartupTrace("mode:wall_sensor_led_calibration");
         (void)_runtime.AppendTextLogLine("Front calibration active; side LEDs held off");
-        PrintFrequency("Front LED square wave (Hz): ", WallSensorLedCalibrationHalfPeriodUs(WallSensorId::FrontLeft));
+        PrintFrequency("Front LED square wave (Hz): ", HardwareConfig::kFrontWallSensorSwitchSettleTime_us);
         (void)_runtime.AppendTextLogLine("Remove selector jumper to switch to side calibration");
         const auto& runtimeState = _runtime.RuntimeState();
         _loopController.StageNextSessionState(
@@ -193,9 +189,9 @@ namespace MazeMap::App::Internal
         switch (_phase)
         {
         case LedCalibrationPhase::Front:
-            return WallSensorLedCalibrationHalfPeriodUs(WallSensorId::FrontLeft);
+            return HardwareConfig::kFrontWallSensorSwitchSettleTime_us;
         case LedCalibrationPhase::Side:
-            return WallSensorLedCalibrationHalfPeriodUs(WallSensorId::SideLeft);
+            return HardwareConfig::kSideWallSensorSwitchSettleTime_us;
         case LedCalibrationPhase::Complete:
         default:
             return 0U;
@@ -256,7 +252,7 @@ namespace MazeMap::App::Internal
                 _ledEnabled = false;
                 _lastToggleUs = static_cast<std::uint32_t>(micros());
                 (void)_runtime.AppendTextLogLine("Side calibration active; front LEDs held off");
-                PrintFrequency("Side LED square wave (Hz): ", WallSensorLedCalibrationHalfPeriodUs(WallSensorId::SideLeft));
+                PrintFrequency("Side LED square wave (Hz): ", HardwareConfig::kSideWallSensorSwitchSettleTime_us);
             }
             else if (_phase == LedCalibrationPhase::Side)
             {

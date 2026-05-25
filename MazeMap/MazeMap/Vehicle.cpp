@@ -82,30 +82,42 @@ namespace MazeMap
             GetFrontLeftSensorMount().positionBodyM(),
             GetFrontLeftSensorMount().SensorForwardBody(),
             kDefaultWallSensorAdcToLightTable,
-            kDefaultWallSensorDistanceModel)
+            kDefaultWallSensorDistanceModel,
+            0.30f,
+            HardwareConfig::kFrontWallSensorSwitchSettleTime_us,
+            HardwareConfig::kFrontWallSensorSwitchSettleTime_us)
         , _frontRightWallSensor(
             kFrontRightWallSensorPin,
             kFrontRightWallSensorLedPin,
             GetFrontRightSensorMount().positionBodyM(),
             GetFrontRightSensorMount().SensorForwardBody(),
             kDefaultWallSensorAdcToLightTable,
-            kDefaultWallSensorDistanceModel)
+            kDefaultWallSensorDistanceModel,
+            0.30f,
+            HardwareConfig::kFrontWallSensorSwitchSettleTime_us,
+            HardwareConfig::kFrontWallSensorSwitchSettleTime_us)
         , _sideLeftWallSensor(
             kSideLeftWallSensorPin,
             kSideLeftWallSensorLedPin,
             GetSideLeftSensorMount().positionBodyM(),
             GetSideLeftSensorMount().SensorForwardBody(),
             kDefaultWallSensorAdcToLightTable,
-            kDefaultWallSensorDistanceModel)
+            kDefaultWallSensorDistanceModel,
+            0.30f,
+            HardwareConfig::kSideWallSensorSwitchSettleTime_us,
+            HardwareConfig::kSideWallSensorSwitchSettleTime_us)
         , _sideRightWallSensor(
             kSideRightWallSensorPin,
             kSideRightWallSensorLedPin,
             GetSideRightSensorMount().positionBodyM(),
             GetSideRightSensorMount().SensorForwardBody(),
             kDefaultWallSensorAdcToLightTable,
-            kDefaultWallSensorDistanceModel)
+            kDefaultWallSensorDistanceModel,
+            0.30f,
+            HardwareConfig::kSideWallSensorSwitchSettleTime_us,
+            HardwareConfig::kSideWallSensorSwitchSettleTime_us)
         , _frontRightImu()
-        , _backLeftImu()
+        , _backLeftImu(GetBackLeftImuMount())
         , _fanDuty(0.0f)
         , _peakForwardAcceleration(kVehiclePeakForwardAccelerationMps2)
         , _peakLateralAcceleration(GetSustainedLateralAccelerationReferenceMps2())

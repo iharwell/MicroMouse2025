@@ -632,6 +632,9 @@
     <ClCompile Include="WallGeometryModel.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="WallSensor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="WallSensorPreprocessor.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

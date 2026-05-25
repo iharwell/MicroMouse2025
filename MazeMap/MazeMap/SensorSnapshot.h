@@ -6,6 +6,7 @@
 #include "WallObservationPipeline.h"
 
 #include <cstdint>
+#include <limits>
 #include <stdint.h>
 
 class SensorSnapshot final
@@ -134,6 +135,66 @@ public:
     constexpr void SetFrontRightTelemetry(const WallSensorTelemetry& telemetry) noexcept { _frontRightTelemetry = telemetry; }
     constexpr void SetSideLeftTelemetry(const WallSensorTelemetry& telemetry) noexcept { _sideLeftTelemetry = telemetry; }
     constexpr void SetSideRightTelemetry(const WallSensorTelemetry& telemetry) noexcept { _sideRightTelemetry = telemetry; }
+    constexpr void SetFrontLeftTelemetryValues(
+        float ambientLight,
+        float litLight,
+        float differentialLight,
+        float rawDistanceM,
+        float distanceM,
+        bool wall) noexcept
+    {
+        _frontLeftTelemetry.ambientLight = ambientLight;
+        _frontLeftTelemetry.litLight = litLight;
+        _frontLeftTelemetry.differentialLight = differentialLight;
+        _frontLeftTelemetry.rawDistanceM = rawDistanceM;
+        _frontLeftTelemetry.distanceM = distanceM;
+        _frontLeftTelemetry.wall = wall;
+    }
+    constexpr void SetFrontRightTelemetryValues(
+        float ambientLight,
+        float litLight,
+        float differentialLight,
+        float rawDistanceM,
+        float distanceM,
+        bool wall) noexcept
+    {
+        _frontRightTelemetry.ambientLight = ambientLight;
+        _frontRightTelemetry.litLight = litLight;
+        _frontRightTelemetry.differentialLight = differentialLight;
+        _frontRightTelemetry.rawDistanceM = rawDistanceM;
+        _frontRightTelemetry.distanceM = distanceM;
+        _frontRightTelemetry.wall = wall;
+    }
+    constexpr void SetSideLeftTelemetryValues(
+        float ambientLight,
+        float litLight,
+        float differentialLight,
+        float rawDistanceM,
+        float distanceM,
+        bool wall) noexcept
+    {
+        _sideLeftTelemetry.ambientLight = ambientLight;
+        _sideLeftTelemetry.litLight = litLight;
+        _sideLeftTelemetry.differentialLight = differentialLight;
+        _sideLeftTelemetry.rawDistanceM = rawDistanceM;
+        _sideLeftTelemetry.distanceM = distanceM;
+        _sideLeftTelemetry.wall = wall;
+    }
+    constexpr void SetSideRightTelemetryValues(
+        float ambientLight,
+        float litLight,
+        float differentialLight,
+        float rawDistanceM,
+        float distanceM,
+        bool wall) noexcept
+    {
+        _sideRightTelemetry.ambientLight = ambientLight;
+        _sideRightTelemetry.litLight = litLight;
+        _sideRightTelemetry.differentialLight = differentialLight;
+        _sideRightTelemetry.rawDistanceM = rawDistanceM;
+        _sideRightTelemetry.distanceM = distanceM;
+        _sideRightTelemetry.wall = wall;
+    }
     void SetFrontLeftWallSensorObservation(const MazeMap::WallObs& observation) noexcept { _frontLeftWallSensorObservation = observation; }
     void SetFrontRightWallSensorObservation(const MazeMap::WallObs& observation) noexcept { _frontRightWallSensorObservation = observation; }
     void SetSideLeftWallSensorObservation(const MazeMap::WallObs& observation) noexcept { _sideLeftWallSensorObservation = observation; }
@@ -144,6 +205,97 @@ public:
     constexpr void SetFrontRightImuTelemetry(const ImuTelemetry& telemetry) noexcept { _frontRightImuTelemetry = telemetry; }
     constexpr void SetBackLeftImuTelemetry(const ImuTelemetry& telemetry) noexcept { _backLeftImuTelemetry = telemetry; }
     constexpr void SetImuTiming(const ImuObservationTiming& timing) noexcept { _imuTiming = timing; }
+
+    void ClearUnavailableObservations(
+        bool inertialObserved,
+        bool frontWallObserved,
+        bool leftWallObserved,
+        bool rightWallObserved) noexcept
+    {
+        if (!inertialObserved)
+        {
+            const float noInertialObservation = std::numeric_limits<float>::quiet_NaN();
+            _bodyRightAccelerationMps2 = 0.0f;
+            _bodyForwardAccelerationMps2 = 0.0f;
+            _planarAccelerationMps2 = 0.0f;
+            _rawYawRateRadps = noInertialObservation;
+            _yawRateBiasRadps = noInertialObservation;
+            _yawRateRadps = noInertialObservation;
+            _accelerationBiasValid = false;
+            _frontRightImuTelemetry = {};
+            _backLeftImuTelemetry = {};
+            _imuTiming = {};
+        }
+
+        if (!frontWallObserved)
+        {
+            _frontLeftDistanceM = 0.0f;
+            _frontRightDistanceM = 0.0f;
+            _frontLeftDifferentialLight = 0.0f;
+            _frontRightDifferentialLight = 0.0f;
+            _frontSkewM = 0.0f;
+            _frontWall = false;
+            _frontLeftWall = false;
+            _frontRightWall = false;
+            _frontWallObservationValid = false;
+            _frontWallUsesFallbackDetection = false;
+            _frontWallUsesCharacterizationDetection = false;
+            _frontLeftTelemetry = {};
+            _frontRightTelemetry = {};
+            _frontLeftWallSensorObservation = {};
+            _frontRightWallSensorObservation = {};
+            _frontTiming = {};
+        }
+
+        if (!leftWallObserved)
+        {
+            _sideLeftDistanceM = 0.0f;
+            _sideLeftDifferentialLight = 0.0f;
+            _leftWall = false;
+            _leftDistanceValidForControl = false;
+            _leftWallObservation = false;
+            _leftWallObservationWindowValid = false;
+            _leftTransitionDetected = false;
+            _sideLeftTelemetry = {};
+            _sideLeftWallSensorObservation = {};
+            _leftTiming = {};
+        }
+
+        if (!rightWallObserved)
+        {
+            _sideRightDistanceM = 0.0f;
+            _sideRightDifferentialLight = 0.0f;
+            _rightWall = false;
+            _rightDistanceValidForControl = false;
+            _rightWallObservation = false;
+            _rightWallObservationWindowValid = false;
+            _rightTransitionDetected = false;
+            _sideRightTelemetry = {};
+            _sideRightWallSensorObservation = {};
+            _rightTiming = {};
+        }
+    }
+
+    constexpr void RecomputeCorridorErrorM(float expectedSideWallDistanceM) noexcept
+    {
+        if (_leftDistanceValidForControl && _rightDistanceValidForControl)
+        {
+            _corridorErrorM = 0.5f * (_sideLeftDistanceM - _sideRightDistanceM);
+            return;
+        }
+        if (_leftDistanceValidForControl)
+        {
+            _corridorErrorM = _sideLeftDistanceM - expectedSideWallDistanceM;
+            return;
+        }
+        if (_rightDistanceValidForControl)
+        {
+            _corridorErrorM = expectedSideWallDistanceM - _sideRightDistanceM;
+            return;
+        }
+
+        _corridorErrorM = 0.0f;
+    }
 
 private:
     float _frontLeftDistanceM = 0.0f;

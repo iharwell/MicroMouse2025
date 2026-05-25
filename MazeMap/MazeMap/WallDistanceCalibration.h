@@ -1,7 +1,7 @@
 #pragma once
 
+#include "Direction.h"
 #include "WallSensorCalibration.h"
-#include "WallSensorRuntimeTypes.h"
 
 #include <stdint.h>
 
@@ -16,82 +16,166 @@ public:
     WallDistanceCalibration();
 
     void Clear();
-    bool AddPoint(WallSensorId sensorId, float measuredValue, float actualDistanceM, float ambientLight = 0.0f);
-    float Apply(WallSensorId sensorId, float measuredValue, float fallbackDistanceM) const;
+    bool AddFrontLeftPoint(float measuredValue, float actualDistanceM, float ambientLight = 0.0f);
+    bool AddFrontRightPoint(float measuredValue, float actualDistanceM, float ambientLight = 0.0f);
+    bool AddSidePoint(MazeMap::RelativeDirection side, float measuredValue, float actualDistanceM, float ambientLight = 0.0f);
+    float ApplyFrontLeft(float measuredValue, float fallbackDistanceM) const;
+    float ApplyFrontRight(float measuredValue, float fallbackDistanceM) const;
+    float ApplySide(MazeMap::RelativeDirection side, float measuredValue, float fallbackDistanceM) const;
     void SetExpectedSideWallDistanceM(float expectedDistanceM);
     float GetExpectedSideWallDistanceM() const;
-    void SetFrontWallBaselineDifferentialLight(WallSensorId sensorId, float differentialLight);
-    void SetFrontWallBaselineDifferentialLightBand(WallSensorId sensorId, float lowDifferentialLight, float highDifferentialLight);
-    bool TryGetFrontWallBaselineDifferentialLight(WallSensorId sensorId, float& differentialLight) const;
-    bool TryGetFrontWallBaselineDifferentialLightBand(
-        WallSensorId sensorId,
+    void SetFrontLeftWallBaselineDifferentialLight(float differentialLight);
+    void SetFrontRightWallBaselineDifferentialLight(float differentialLight);
+    void SetFrontLeftWallBaselineDifferentialLightBand(float lowDifferentialLight, float highDifferentialLight);
+    void SetFrontRightWallBaselineDifferentialLightBand(float lowDifferentialLight, float highDifferentialLight);
+    bool TryGetFrontLeftWallBaselineDifferentialLight(float& differentialLight) const;
+    bool TryGetFrontRightWallBaselineDifferentialLight(float& differentialLight) const;
+    bool TryGetFrontLeftWallBaselineDifferentialLightBand(
         float& lowDifferentialLight,
         float& highDifferentialLight) const;
-    void SetFrontWeakestCalibrationDifferentialLightBand(
-        WallSensorId sensorId,
+    bool TryGetFrontRightWallBaselineDifferentialLightBand(
+        float& lowDifferentialLight,
+        float& highDifferentialLight) const;
+    void SetFrontLeftWeakestCalibrationDifferentialLightBand(
         float measuredValue,
         float lowDifferentialLight,
         float highDifferentialLight);
-    bool TryGetFrontWeakestCalibrationDifferentialLightBand(
-        WallSensorId sensorId,
+    void SetFrontRightWeakestCalibrationDifferentialLightBand(
+        float measuredValue,
+        float lowDifferentialLight,
+        float highDifferentialLight);
+    bool TryGetFrontLeftWeakestCalibrationDifferentialLightBand(
         float& lowDifferentialLight,
         float& highDifferentialLight) const;
-    void SetFrontDirectRiseThresholds(
-        WallSensorId sensorId,
+    bool TryGetFrontRightWeakestCalibrationDifferentialLightBand(
+        float& lowDifferentialLight,
+        float& highDifferentialLight) const;
+    void SetFrontLeftDirectRiseThresholds(
         float signalBaseline,
         float onRiseThreshold,
         float offRiseThreshold);
-    bool TryGetFrontDirectRiseThresholds(
-        WallSensorId sensorId,
+    void SetFrontRightDirectRiseThresholds(
+        float signalBaseline,
+        float onRiseThreshold,
+        float offRiseThreshold);
+    bool TryGetFrontLeftDirectRiseThresholds(
+        float& signalBaseline,
+        float& onRiseThreshold,
+        float& offRiseThreshold) const;
+    bool TryGetFrontRightDirectRiseThresholds(
         float& signalBaseline,
         float& onRiseThreshold,
         float& offRiseThreshold) const;
     bool TryComputeSideWallDistanceThresholds(float latchSignalFraction, float releaseSignalFraction, float& onThresholdM, float& offThresholdM) const;
-    void SetSideWallReferenceDifferentialLight(WallSensorId sensorId, float differentialLight);
-    void SetSideWallReferenceDifferentialLightBand(WallSensorId sensorId, float lowDifferentialLight, float highDifferentialLight);
-    void SetSideWallReferenceDistanceM(WallSensorId sensorId, float distanceM);
-    void SetSideWallBaselineDifferentialLight(WallSensorId sensorId, float differentialLight);
-    void SetSideWallBaselineDifferentialLightBand(WallSensorId sensorId, float lowDifferentialLight, float highDifferentialLight);
-    bool TryGetSideWallBaselineDifferentialLight(WallSensorId sensorId, float& differentialLight) const;
-    bool TryGetSideWallReferenceDifferentialLightBand(WallSensorId sensorId, float& lowDifferentialLight, float& highDifferentialLight) const;
-    bool TryGetSideWallBaselineDifferentialLightBand(WallSensorId sensorId, float& lowDifferentialLight, float& highDifferentialLight) const;
-    bool TryComputeSideWallNormalizedReferenceDifferentialLight(WallSensorId sensorId, float& differentialLight) const;
+    void SetSideWallReferenceDifferentialLight(MazeMap::RelativeDirection side, float differentialLight);
+    void SetSideWallReferenceDifferentialLightBand(MazeMap::RelativeDirection side, float lowDifferentialLight, float highDifferentialLight);
+    void SetSideWallReferenceDistanceM(MazeMap::RelativeDirection side, float distanceM);
+    void SetSideWallBaselineDifferentialLight(MazeMap::RelativeDirection side, float differentialLight);
+    void SetSideWallBaselineDifferentialLightBand(MazeMap::RelativeDirection side, float lowDifferentialLight, float highDifferentialLight);
+    bool TryGetSideWallBaselineDifferentialLight(MazeMap::RelativeDirection side, float& differentialLight) const;
+    bool TryGetSideWallReferenceDifferentialLightBand(MazeMap::RelativeDirection side, float& lowDifferentialLight, float& highDifferentialLight) const;
+    bool TryGetSideWallBaselineDifferentialLightBand(MazeMap::RelativeDirection side, float& lowDifferentialLight, float& highDifferentialLight) const;
+    bool TryComputeSideWallNormalizedReferenceDifferentialLight(MazeMap::RelativeDirection side, float& differentialLight) const;
+    bool TryComputeSideWallSignalDistanceM(
+        MazeMap::RelativeDirection side,
+        float measuredSignal,
+        float& distanceM) const;
+    bool TryComputeSideWallSignalRiseMetrics(
+        MazeMap::RelativeDirection side,
+        float measuredDifferentialLight,
+        float latchSignalFraction,
+        float releaseSignalFraction,
+        float missSignalFractionOfLatch,
+        float& signalRise,
+        float& latchRiseThreshold,
+        float& missRiseThreshold) const;
+    bool IsSideWallSignalClassifiable(
+        bool signalMetricsValid,
+        float signalRise,
+        float latchRiseThreshold,
+        float missRiseThreshold) const noexcept;
+    bool IsSideWallFallbackDistanceValid(float fallbackDistanceM) const noexcept;
+    bool IsSideWallObservationEligible(
+        bool detectionWindowValid,
+        bool signalClassifiable,
+        bool fallbackDistanceValid) const noexcept;
+    bool IsSideWallControlRangeValid(
+        bool observationEligible,
+        bool transitionDetected,
+        bool signalMetricsValid,
+        float signalRise,
+        float latchRiseThreshold,
+        bool fallbackDistanceValid,
+        float fallbackDistanceM,
+        float offThresholdM) const noexcept;
+    bool DetectSideWallTransitionFromSignalRise(
+        bool detectionWindowValid,
+        bool signalMetricsValid,
+        float signalRise,
+        float latchRiseThreshold,
+        float transitionSignalFractionOfLatch,
+        float& previousSignalRise,
+        bool& previousValid) const noexcept;
+    bool ComputeSideWallObservationHit(
+        MazeMap::RelativeDirection side,
+        float measuredDifferentialLight,
+        float fallbackDistanceM,
+        float onThresholdM,
+        bool detectionWindowValid) const;
+    bool UpdateSideWallState(
+        MazeMap::RelativeDirection side,
+        float measuredDifferentialLight,
+        float fallbackDistanceM,
+        float onThresholdM,
+        float offThresholdM,
+        bool detectionWindowValid,
+        float& filteredSignal,
+        bool& signalInitialized,
+        bool& currentState) const;
     bool TryComputeSideWallMeasuredThresholds(
-        WallSensorId sensorId,
+        MazeMap::RelativeDirection side,
         float latchSignalFraction,
         float releaseSignalFraction,
         float& onMeasuredThreshold,
         float& offMeasuredThreshold,
         float& signalBaseline) const;
-    bool TryGetSideWallReferenceDifferentialLight(WallSensorId sensorId, float& differentialLight) const;
-    bool TryGetSideWallReferenceDistanceM(WallSensorId sensorId, float& distanceM) const;
-    bool TryGetWeakestFrontCalibrationMeasuredValue(WallSensorId sensorId, float& measuredValue) const;
+    bool TryGetSideWallReferenceDifferentialLight(MazeMap::RelativeDirection side, float& differentialLight) const;
+    bool TryGetSideWallReferenceDistanceM(MazeMap::RelativeDirection side, float& distanceM) const;
+    bool TryGetFrontLeftWeakestCalibrationMeasuredValue(float& measuredValue) const;
+    bool TryGetFrontRightWeakestCalibrationMeasuredValue(float& measuredValue) const;
     bool TryComputeFrontWallDistanceThresholds(
         const MazeMap::Vehicle& vehicle,
         float releaseHysteresisDistanceM,
         float& onDistanceThresholdM,
         float& offDistanceThresholdM) const;
-    bool TryComputeFrontSensorMeasuredThresholds(
-        WallSensorId sensorId,
+    bool TryComputeFrontLeftSensorMeasuredThresholds(
         const MazeMap::Vehicle& vehicle,
         float releaseHysteresisDistanceM,
         float ambientLight,
         float& onMeasuredThreshold,
         float& offMeasuredThreshold,
         float& signalBaseline) const;
-    bool TryComputeFrontSensorRepresentativeAmbientLight(WallSensorId sensorId, float& ambientLight) const;
-    const MazeMap::WallSensorCalibrationCurve& GetCurve(WallSensorId sensorId) const;
+    bool TryComputeFrontRightSensorMeasuredThresholds(
+        const MazeMap::Vehicle& vehicle,
+        float releaseHysteresisDistanceM,
+        float ambientLight,
+        float& onMeasuredThreshold,
+        float& offMeasuredThreshold,
+        float& signalBaseline) const;
 
 private:
-    struct FrontSignalModelCache
-    {
-        bool valid = false;
-        float gain = 0.0f;
-        float lightScale = 0.0f;
-    };
+    static constexpr uint8_t kFrontLeftIndex = 0U;
+    static constexpr uint8_t kFrontRightIndex = 1U;
+    static constexpr uint8_t kSideLeftIndex = 0U;
+    static constexpr uint8_t kSideRightIndex = 1U;
 
-    MazeMap::WallSensorCalibrationCurve _curves[static_cast<uint8_t>(WallSensorId::Count)];
-    mutable FrontSignalModelCache _frontSignalModelCache[2];
+    MazeMap::WallSensorCalibrationCurve _frontLeftCurve;
+    MazeMap::WallSensorCalibrationCurve _frontRightCurve;
+    MazeMap::WallSensorCalibrationCurve _sideLeftCurve;
+    MazeMap::WallSensorCalibrationCurve _sideRightCurve;
+    mutable bool _frontSignalModelCacheValid[2] = {};
+    mutable float _frontSignalModelCacheGain[2] = {};
+    mutable float _frontSignalModelCacheLightScale[2] = {};
     float _frontWallBaselineDifferentialLight[2] = {};
     bool _frontWallBaselineValid[2] = {};
     float _frontWallBaselineDifferentialLightLow[2] = {};
@@ -119,12 +203,51 @@ private:
     bool _sideWallReferenceDistanceValid[2] = {};
     float _expectedSideWallDistanceM;
 
-    static bool IsSideWallSensor(WallSensorId sensorId);
-    static uint8_t SideWallIndex(WallSensorId sensorId);
-    static uint8_t FrontWallIndex(WallSensorId sensorId);
+    bool AddFrontPoint(uint8_t frontIndex, MazeMap::WallSensorCalibrationCurve& curve, float measuredValue, float actualDistanceM, float ambientLight);
+    bool AddSidePointAt(uint8_t sideIndex, float measuredValue, float actualDistanceM, float ambientLight);
+    float ApplyCurve(
+        const MazeMap::WallSensorCalibrationCurve& curve,
+        MazeMap::WallSensorCalibrationMode mode,
+        float measuredValue,
+        float fallbackDistanceM) const;
+    static bool IsSideDirection(MazeMap::RelativeDirection side);
+    static uint8_t SideWallIndex(MazeMap::RelativeDirection side);
+    MazeMap::WallSensorCalibrationCurve& SideCurve(MazeMap::RelativeDirection side);
+    const MazeMap::WallSensorCalibrationCurve& SideCurve(MazeMap::RelativeDirection side) const;
+    void SetFrontWallBaselineDifferentialLight(uint8_t frontIndex, float differentialLight);
+    void SetFrontWallBaselineDifferentialLightBand(uint8_t frontIndex, float lowDifferentialLight, float highDifferentialLight);
+    bool TryGetFrontWallBaselineDifferentialLight(uint8_t frontIndex, float& differentialLight) const;
+    bool TryGetFrontWallBaselineDifferentialLightBand(uint8_t frontIndex, float& lowDifferentialLight, float& highDifferentialLight) const;
+    void SetFrontWeakestCalibrationDifferentialLightBand(
+        uint8_t frontIndex,
+        float measuredValue,
+        float lowDifferentialLight,
+        float highDifferentialLight);
+    bool TryGetFrontWeakestCalibrationDifferentialLightBand(
+        uint8_t frontIndex,
+        float& lowDifferentialLight,
+        float& highDifferentialLight) const;
+    void SetFrontDirectRiseThresholds(uint8_t frontIndex, float signalBaseline, float onRiseThreshold, float offRiseThreshold);
+    bool TryGetFrontDirectRiseThresholds(
+        uint8_t frontIndex,
+        float& signalBaseline,
+        float& onRiseThreshold,
+        float& offRiseThreshold) const;
+    bool TryGetWeakestFrontCalibrationMeasuredValue(const MazeMap::WallSensorCalibrationCurve& curve, float& measuredValue) const;
+    bool TryComputeFrontSensorMeasuredThresholds(
+        uint8_t frontIndex,
+        const MazeMap::WallSensorCalibrationCurve& curve,
+        const MazeMap::Vehicle& vehicle,
+        float releaseHysteresisDistanceM,
+        float ambientLight,
+        float& onMeasuredThreshold,
+        float& offMeasuredThreshold,
+        float& signalBaseline) const;
+    bool TryComputeFrontSensorRepresentativeAmbientLight(const MazeMap::WallSensorCalibrationCurve& curve, float& ambientLight) const;
     void InvalidateFrontSignalModelCache();
-    void InvalidateFrontSignalModelCache(WallSensorId sensorId);
-    bool TryGetFrontSignalModel(WallSensorId sensorId, float& gain, float& lightScale) const;
+    void InvalidateFrontSignalModelCache(uint8_t frontIndex);
+    bool TryGetFrontSignalModel(uint8_t frontIndex, const MazeMap::WallSensorCalibrationCurve& curve, float& gain, float& lightScale) const;
+    static float ComputeCalibratedSideSignalRise(float measuredDifferentialLight, float signalBaseline) noexcept;
 };
 
 extern WallDistanceCalibration gWallDistanceCalibration;
@@ -133,21 +256,6 @@ float ComputeDiagonalWallCenterOmegaRadps(
     const WallDistanceCalibration& wallCalibration,
     float leftMeasuredSignal,
     float rightMeasuredSignal);
-
-bool TryComputeSideWallSignalDistanceM(
-    const WallDistanceCalibration& wallCalibration,
-    WallSensorId sensorId,
-    float measuredSignal,
-    float& distanceM);
-
-float ComputeSignalRiseAboveBaselineValue(
-    float measuredDifferentialLight,
-    float signalBaseline);
-
-bool IsCalibratedSideDistanceValidForControl(
-    const WallDistanceCalibration& wallCalibration,
-    WallSensorId sensorId,
-    float measuredDifferentialLight);
 
 bool TryComputeStraightWallCenterErrorM(
     const WallDistanceCalibration& wallCalibration,

@@ -10,18 +10,20 @@
 #include <cmath>
 
 WallDistanceCalibration::WallDistanceCalibration()
-    : _curves{}
-    , _frontSignalModelCache{}
+    : _frontLeftCurve{}
+    , _frontRightCurve{}
+    , _sideLeftCurve{}
+    , _sideRightCurve{}
     , _expectedSideWallDistanceM(MazeMap::Config::kExpectedSideWallDistanceM)
 {
 }
 
 void WallDistanceCalibration::Clear()
 {
-    for (uint8_t i = 0U; i < static_cast<uint8_t>(WallSensorId::Count); ++i)
-    {
-        _curves[i].Clear();
-    }
+    _frontLeftCurve.Clear();
+    _frontRightCurve.Clear();
+    _sideLeftCurve.Clear();
+    _sideRightCurve.Clear();
     InvalidateFrontSignalModelCache();
     _frontWallBaselineDifferentialLight[0] = 0.0f;
     _frontWallBaselineDifferentialLight[1] = 0.0f;
@@ -76,41 +78,58 @@ void WallDistanceCalibration::Clear()
     _expectedSideWallDistanceM = MazeMap::Config::kExpectedSideWallDistanceM;
 }
 
-bool WallDistanceCalibration::AddPoint(WallSensorId sensorId, float measuredValue, float actualDistanceM, float ambientLight)
+bool WallDistanceCalibration::AddFrontLeftPoint(float measuredValue, float actualDistanceM, float ambientLight)
 {
-    const bool stored = _curves[static_cast<uint8_t>(sensorId)].AddPoint(measuredValue, actualDistanceM, ambientLight);
-    if (stored && IsFrontWallSensor(sensorId))
-    {
-        InvalidateFrontSignalModelCache(sensorId);
-    }
-
-    return stored;
+    return AddFrontPoint(kFrontLeftIndex, _frontLeftCurve, measuredValue, actualDistanceM, ambientLight);
 }
 
-float WallDistanceCalibration::Apply(WallSensorId sensorId, float measuredValue, float fallbackDistanceM) const
+bool WallDistanceCalibration::AddFrontRightPoint(float measuredValue, float actualDistanceM, float ambientLight)
 {
-    if (!std::isfinite(fallbackDistanceM) || fallbackDistanceM <= 0.0f)
-    {
-        fallbackDistanceM = measuredValue;
-    }
-    if (!std::isfinite(measuredValue) || measuredValue <= 0.0f)
+    return AddFrontPoint(kFrontRightIndex, _frontRightCurve, measuredValue, actualDistanceM, ambientLight);
+}
+
+bool WallDistanceCalibration::AddSidePoint(
+    MazeMap::RelativeDirection side,
+    float measuredValue,
+    float actualDistanceM,
+    float ambientLight)
+{
+    return IsSideDirection(side) && AddSidePointAt(SideWallIndex(side), measuredValue, actualDistanceM, ambientLight);
+}
+
+float WallDistanceCalibration::ApplyFrontLeft(float measuredValue, float fallbackDistanceM) const
+{
+    return ApplyCurve(
+        _frontLeftCurve,
+        MazeMap::WallSensorCalibrationMode::DirectInterpolation,
+        measuredValue,
+        fallbackDistanceM);
+}
+
+float WallDistanceCalibration::ApplyFrontRight(float measuredValue, float fallbackDistanceM) const
+{
+    return ApplyCurve(
+        _frontRightCurve,
+        MazeMap::WallSensorCalibrationMode::DirectInterpolation,
+        measuredValue,
+        fallbackDistanceM);
+}
+
+float WallDistanceCalibration::ApplySide(
+    MazeMap::RelativeDirection side,
+    float measuredValue,
+    float fallbackDistanceM) const
+{
+    if (!IsSideDirection(side))
     {
         return fallbackDistanceM;
     }
 
-    const MazeMap::WallSensorCalibrationCurve& curve = _curves[static_cast<uint8_t>(sensorId)];
-    if (curve.GetCount() == 0U)
-    {
-        return fallbackDistanceM;
-    }
-
-    const MazeMap::WallSensorCalibrationMode mode = WallSensorCalibrationModeFor(sensorId);
-    if (mode == MazeMap::WallSensorCalibrationMode::DirectInterpolation && curve.GetCount() < 2U)
-    {
-        return fallbackDistanceM;
-    }
-
-    return curve.Apply(measuredValue, mode);
+    return ApplyCurve(
+        SideCurve(side),
+        MazeMap::WallSensorCalibrationMode::DistanceOffset,
+        measuredValue,
+        fallbackDistanceM);
 }
 
 void WallDistanceCalibration::SetExpectedSideWallDistanceM(float expectedDistanceM)
@@ -126,23 +145,149 @@ float WallDistanceCalibration::GetExpectedSideWallDistanceM() const
     return _expectedSideWallDistanceM;
 }
 
-void WallDistanceCalibration::SetFrontWallBaselineDifferentialLight(WallSensorId sensorId, float differentialLight)
+void WallDistanceCalibration::SetFrontLeftWallBaselineDifferentialLight(float differentialLight)
 {
-    if (!IsFrontWallSensor(sensorId) ||
+    SetFrontWallBaselineDifferentialLight(kFrontLeftIndex, differentialLight);
+}
+
+void WallDistanceCalibration::SetFrontRightWallBaselineDifferentialLight(float differentialLight)
+{
+    SetFrontWallBaselineDifferentialLight(kFrontRightIndex, differentialLight);
+}
+
+void WallDistanceCalibration::SetFrontLeftWallBaselineDifferentialLightBand(
+    float lowDifferentialLight,
+    float highDifferentialLight)
+{
+    SetFrontWallBaselineDifferentialLightBand(kFrontLeftIndex, lowDifferentialLight, highDifferentialLight);
+}
+
+void WallDistanceCalibration::SetFrontRightWallBaselineDifferentialLightBand(
+    float lowDifferentialLight,
+    float highDifferentialLight)
+{
+    SetFrontWallBaselineDifferentialLightBand(kFrontRightIndex, lowDifferentialLight, highDifferentialLight);
+}
+
+bool WallDistanceCalibration::TryGetFrontLeftWallBaselineDifferentialLight(float& differentialLight) const
+{
+    return TryGetFrontWallBaselineDifferentialLight(kFrontLeftIndex, differentialLight);
+}
+
+bool WallDistanceCalibration::TryGetFrontRightWallBaselineDifferentialLight(float& differentialLight) const
+{
+    return TryGetFrontWallBaselineDifferentialLight(kFrontRightIndex, differentialLight);
+}
+
+bool WallDistanceCalibration::TryGetFrontLeftWallBaselineDifferentialLightBand(
+    float& lowDifferentialLight,
+    float& highDifferentialLight) const
+{
+    return TryGetFrontWallBaselineDifferentialLightBand(kFrontLeftIndex, lowDifferentialLight, highDifferentialLight);
+}
+
+bool WallDistanceCalibration::TryGetFrontRightWallBaselineDifferentialLightBand(
+    float& lowDifferentialLight,
+    float& highDifferentialLight) const
+{
+    return TryGetFrontWallBaselineDifferentialLightBand(kFrontRightIndex, lowDifferentialLight, highDifferentialLight);
+}
+
+void WallDistanceCalibration::SetFrontLeftWeakestCalibrationDifferentialLightBand(
+    float measuredValue,
+    float lowDifferentialLight,
+    float highDifferentialLight)
+{
+    SetFrontWeakestCalibrationDifferentialLightBand(
+        kFrontLeftIndex,
+        measuredValue,
+        lowDifferentialLight,
+        highDifferentialLight);
+}
+
+void WallDistanceCalibration::SetFrontRightWeakestCalibrationDifferentialLightBand(
+    float measuredValue,
+    float lowDifferentialLight,
+    float highDifferentialLight)
+{
+    SetFrontWeakestCalibrationDifferentialLightBand(
+        kFrontRightIndex,
+        measuredValue,
+        lowDifferentialLight,
+        highDifferentialLight);
+}
+
+bool WallDistanceCalibration::TryGetFrontLeftWeakestCalibrationDifferentialLightBand(
+    float& lowDifferentialLight,
+    float& highDifferentialLight) const
+{
+    return TryGetFrontWeakestCalibrationDifferentialLightBand(
+        kFrontLeftIndex,
+        lowDifferentialLight,
+        highDifferentialLight);
+}
+
+bool WallDistanceCalibration::TryGetFrontRightWeakestCalibrationDifferentialLightBand(
+    float& lowDifferentialLight,
+    float& highDifferentialLight) const
+{
+    return TryGetFrontWeakestCalibrationDifferentialLightBand(
+        kFrontRightIndex,
+        lowDifferentialLight,
+        highDifferentialLight);
+}
+
+void WallDistanceCalibration::SetFrontLeftDirectRiseThresholds(
+    float signalBaseline,
+    float onRiseThreshold,
+    float offRiseThreshold)
+{
+    SetFrontDirectRiseThresholds(kFrontLeftIndex, signalBaseline, onRiseThreshold, offRiseThreshold);
+}
+
+void WallDistanceCalibration::SetFrontRightDirectRiseThresholds(
+    float signalBaseline,
+    float onRiseThreshold,
+    float offRiseThreshold)
+{
+    SetFrontDirectRiseThresholds(kFrontRightIndex, signalBaseline, onRiseThreshold, offRiseThreshold);
+}
+
+bool WallDistanceCalibration::TryGetFrontLeftDirectRiseThresholds(
+    float& signalBaseline,
+    float& onRiseThreshold,
+    float& offRiseThreshold) const
+{
+    return TryGetFrontDirectRiseThresholds(kFrontLeftIndex, signalBaseline, onRiseThreshold, offRiseThreshold);
+}
+
+bool WallDistanceCalibration::TryGetFrontRightDirectRiseThresholds(
+    float& signalBaseline,
+    float& onRiseThreshold,
+    float& offRiseThreshold) const
+{
+    return TryGetFrontDirectRiseThresholds(kFrontRightIndex, signalBaseline, onRiseThreshold, offRiseThreshold);
+}
+
+void WallDistanceCalibration::SetFrontWallBaselineDifferentialLight(uint8_t frontIndex, float differentialLight)
+{
+    if ((frontIndex > kFrontRightIndex) ||
         !std::isfinite(differentialLight) ||
         differentialLight < 0.0f)
     {
         return;
     }
 
-    const uint8_t index = FrontWallIndex(sensorId);
-    _frontWallBaselineDifferentialLight[index] = differentialLight;
-    _frontWallBaselineValid[index] = true;
+    _frontWallBaselineDifferentialLight[frontIndex] = differentialLight;
+    _frontWallBaselineValid[frontIndex] = true;
 }
 
-void WallDistanceCalibration::SetFrontWallBaselineDifferentialLightBand(WallSensorId sensorId, float lowDifferentialLight, float highDifferentialLight)
+void WallDistanceCalibration::SetFrontWallBaselineDifferentialLightBand(
+    uint8_t frontIndex,
+    float lowDifferentialLight,
+    float highDifferentialLight)
 {
-    if (!IsFrontWallSensor(sensorId) ||
+    if ((frontIndex > kFrontRightIndex) ||
         !std::isfinite(lowDifferentialLight) ||
         !std::isfinite(highDifferentialLight) ||
         lowDifferentialLight < 0.0f ||
@@ -151,50 +296,47 @@ void WallDistanceCalibration::SetFrontWallBaselineDifferentialLightBand(WallSens
         return;
     }
 
-    const uint8_t index = FrontWallIndex(sensorId);
-    _frontWallBaselineDifferentialLightLow[index] = lowDifferentialLight;
-    _frontWallBaselineDifferentialLightHigh[index] = highDifferentialLight;
-    _frontWallBaselineBandValid[index] = true;
+    _frontWallBaselineDifferentialLightLow[frontIndex] = lowDifferentialLight;
+    _frontWallBaselineDifferentialLightHigh[frontIndex] = highDifferentialLight;
+    _frontWallBaselineBandValid[frontIndex] = true;
 }
 
-bool WallDistanceCalibration::TryGetFrontWallBaselineDifferentialLight(WallSensorId sensorId, float& differentialLight) const
+bool WallDistanceCalibration::TryGetFrontWallBaselineDifferentialLight(uint8_t frontIndex, float& differentialLight) const
 {
     differentialLight = 0.0f;
-    if (!IsFrontWallSensor(sensorId))
+    if (frontIndex > kFrontRightIndex)
     {
         return false;
     }
 
-    const uint8_t index = FrontWallIndex(sensorId);
-    if (!_frontWallBaselineValid[index])
+    if (!_frontWallBaselineValid[frontIndex])
     {
         return false;
     }
 
-    differentialLight = _frontWallBaselineDifferentialLight[index];
+    differentialLight = _frontWallBaselineDifferentialLight[frontIndex];
     return std::isfinite(differentialLight) && differentialLight >= 0.0f;
 }
 
 bool WallDistanceCalibration::TryGetFrontWallBaselineDifferentialLightBand(
-    WallSensorId sensorId,
+    uint8_t frontIndex,
     float& lowDifferentialLight,
     float& highDifferentialLight) const
 {
     lowDifferentialLight = 0.0f;
     highDifferentialLight = 0.0f;
-    if (!IsFrontWallSensor(sensorId))
+    if (frontIndex > kFrontRightIndex)
     {
         return false;
     }
 
-    const uint8_t index = FrontWallIndex(sensorId);
-    if (!_frontWallBaselineBandValid[index])
+    if (!_frontWallBaselineBandValid[frontIndex])
     {
         return false;
     }
 
-    lowDifferentialLight = _frontWallBaselineDifferentialLightLow[index];
-    highDifferentialLight = _frontWallBaselineDifferentialLightHigh[index];
+    lowDifferentialLight = _frontWallBaselineDifferentialLightLow[frontIndex];
+    highDifferentialLight = _frontWallBaselineDifferentialLightHigh[frontIndex];
     return
         std::isfinite(lowDifferentialLight) &&
         std::isfinite(highDifferentialLight) &&
@@ -203,12 +345,12 @@ bool WallDistanceCalibration::TryGetFrontWallBaselineDifferentialLightBand(
 }
 
 void WallDistanceCalibration::SetFrontWeakestCalibrationDifferentialLightBand(
-    WallSensorId sensorId,
+    uint8_t frontIndex,
     float measuredValue,
     float lowDifferentialLight,
     float highDifferentialLight)
 {
-    if (!IsFrontWallSensor(sensorId) ||
+    if ((frontIndex > kFrontRightIndex) ||
         !std::isfinite(measuredValue) ||
         !std::isfinite(lowDifferentialLight) ||
         !std::isfinite(highDifferentialLight) ||
@@ -219,39 +361,37 @@ void WallDistanceCalibration::SetFrontWeakestCalibrationDifferentialLightBand(
         return;
     }
 
-    const uint8_t index = FrontWallIndex(sensorId);
-    if (_frontWallWeakestCalibrationBandValid[index] &&
-        (measuredValue > (_frontWallWeakestCalibrationMeasuredValue[index] + 0.001f)))
+    if (_frontWallWeakestCalibrationBandValid[frontIndex] &&
+        (measuredValue > (_frontWallWeakestCalibrationMeasuredValue[frontIndex] + 0.001f)))
     {
         return;
     }
 
-    _frontWallWeakestCalibrationMeasuredValue[index] = measuredValue;
-    _frontWallWeakestCalibrationDifferentialLightLow[index] = lowDifferentialLight;
-    _frontWallWeakestCalibrationDifferentialLightHigh[index] = highDifferentialLight;
-    _frontWallWeakestCalibrationBandValid[index] = true;
+    _frontWallWeakestCalibrationMeasuredValue[frontIndex] = measuredValue;
+    _frontWallWeakestCalibrationDifferentialLightLow[frontIndex] = lowDifferentialLight;
+    _frontWallWeakestCalibrationDifferentialLightHigh[frontIndex] = highDifferentialLight;
+    _frontWallWeakestCalibrationBandValid[frontIndex] = true;
 }
 
 bool WallDistanceCalibration::TryGetFrontWeakestCalibrationDifferentialLightBand(
-    WallSensorId sensorId,
+    uint8_t frontIndex,
     float& lowDifferentialLight,
     float& highDifferentialLight) const
 {
     lowDifferentialLight = 0.0f;
     highDifferentialLight = 0.0f;
-    if (!IsFrontWallSensor(sensorId))
+    if (frontIndex > kFrontRightIndex)
     {
         return false;
     }
 
-    const uint8_t index = FrontWallIndex(sensorId);
-    if (!_frontWallWeakestCalibrationBandValid[index])
+    if (!_frontWallWeakestCalibrationBandValid[frontIndex])
     {
         return false;
     }
 
-    lowDifferentialLight = _frontWallWeakestCalibrationDifferentialLightLow[index];
-    highDifferentialLight = _frontWallWeakestCalibrationDifferentialLightHigh[index];
+    lowDifferentialLight = _frontWallWeakestCalibrationDifferentialLightLow[frontIndex];
+    highDifferentialLight = _frontWallWeakestCalibrationDifferentialLightHigh[frontIndex];
     return
         std::isfinite(lowDifferentialLight) &&
         std::isfinite(highDifferentialLight) &&
@@ -260,12 +400,12 @@ bool WallDistanceCalibration::TryGetFrontWeakestCalibrationDifferentialLightBand
 }
 
 void WallDistanceCalibration::SetFrontDirectRiseThresholds(
-    WallSensorId sensorId,
+    uint8_t frontIndex,
     float signalBaseline,
     float onRiseThreshold,
     float offRiseThreshold)
 {
-    if (!IsFrontWallSensor(sensorId) ||
+    if ((frontIndex > kFrontRightIndex) ||
         !std::isfinite(signalBaseline) ||
         signalBaseline < 0.0f ||
         !std::isfinite(onRiseThreshold) ||
@@ -277,15 +417,14 @@ void WallDistanceCalibration::SetFrontDirectRiseThresholds(
         return;
     }
 
-    const uint8_t index = FrontWallIndex(sensorId);
-    _frontWallDirectSignalBaseline[index] = signalBaseline;
-    _frontWallDirectOnRiseThreshold[index] = onRiseThreshold;
-    _frontWallDirectOffRiseThreshold[index] = offRiseThreshold;
-    _frontWallDirectThresholdValid[index] = true;
+    _frontWallDirectSignalBaseline[frontIndex] = signalBaseline;
+    _frontWallDirectOnRiseThreshold[frontIndex] = onRiseThreshold;
+    _frontWallDirectOffRiseThreshold[frontIndex] = offRiseThreshold;
+    _frontWallDirectThresholdValid[frontIndex] = true;
 }
 
 bool WallDistanceCalibration::TryGetFrontDirectRiseThresholds(
-    WallSensorId sensorId,
+    uint8_t frontIndex,
     float& signalBaseline,
     float& onRiseThreshold,
     float& offRiseThreshold) const
@@ -293,20 +432,19 @@ bool WallDistanceCalibration::TryGetFrontDirectRiseThresholds(
     signalBaseline = 0.0f;
     onRiseThreshold = 0.0f;
     offRiseThreshold = 0.0f;
-    if (!IsFrontWallSensor(sensorId))
+    if (frontIndex > kFrontRightIndex)
     {
         return false;
     }
 
-    const uint8_t index = FrontWallIndex(sensorId);
-    if (!_frontWallDirectThresholdValid[index])
+    if (!_frontWallDirectThresholdValid[frontIndex])
     {
         return false;
     }
 
-    signalBaseline = _frontWallDirectSignalBaseline[index];
-    onRiseThreshold = _frontWallDirectOnRiseThreshold[index];
-    offRiseThreshold = _frontWallDirectOffRiseThreshold[index];
+    signalBaseline = _frontWallDirectSignalBaseline[frontIndex];
+    onRiseThreshold = _frontWallDirectOnRiseThreshold[frontIndex];
+    offRiseThreshold = _frontWallDirectOffRiseThreshold[frontIndex];
     return
         std::isfinite(signalBaseline) &&
         signalBaseline >= 0.0f &&
@@ -349,23 +487,28 @@ bool WallDistanceCalibration::TryComputeSideWallDistanceThresholds(float latchSi
     return true;
 }
 
-void WallDistanceCalibration::SetSideWallReferenceDifferentialLight(WallSensorId sensorId, float differentialLight)
+void WallDistanceCalibration::SetSideWallReferenceDifferentialLight(
+    MazeMap::RelativeDirection side,
+    float differentialLight)
 {
-    if (!IsSideWallSensor(sensorId) ||
+    if (!IsSideDirection(side) ||
         !std::isfinite(differentialLight) ||
         differentialLight <= 0.0f)
     {
         return;
     }
 
-    const uint8_t index = SideWallIndex(sensorId);
+    const uint8_t index = SideWallIndex(side);
     _sideWallReferenceDifferentialLight[index] = differentialLight;
     _sideWallReferenceValid[index] = true;
 }
 
-void WallDistanceCalibration::SetSideWallReferenceDifferentialLightBand(WallSensorId sensorId, float lowDifferentialLight, float highDifferentialLight)
+void WallDistanceCalibration::SetSideWallReferenceDifferentialLightBand(
+    MazeMap::RelativeDirection side,
+    float lowDifferentialLight,
+    float highDifferentialLight)
 {
-    if (!IsSideWallSensor(sensorId) ||
+    if (!IsSideDirection(side) ||
         !std::isfinite(lowDifferentialLight) ||
         !std::isfinite(highDifferentialLight) ||
         lowDifferentialLight <= 0.0f ||
@@ -374,43 +517,48 @@ void WallDistanceCalibration::SetSideWallReferenceDifferentialLightBand(WallSens
         return;
     }
 
-    const uint8_t index = SideWallIndex(sensorId);
+    const uint8_t index = SideWallIndex(side);
     _sideWallReferenceDifferentialLightLow[index] = lowDifferentialLight;
     _sideWallReferenceDifferentialLightHigh[index] = highDifferentialLight;
     _sideWallReferenceBandValid[index] = true;
 }
 
-void WallDistanceCalibration::SetSideWallReferenceDistanceM(WallSensorId sensorId, float distanceM)
+void WallDistanceCalibration::SetSideWallReferenceDistanceM(MazeMap::RelativeDirection side, float distanceM)
 {
-    if (!IsSideWallSensor(sensorId) ||
+    if (!IsSideDirection(side) ||
         !std::isfinite(distanceM) ||
         distanceM <= 0.0f)
     {
         return;
     }
 
-    const uint8_t index = SideWallIndex(sensorId);
+    const uint8_t index = SideWallIndex(side);
     _sideWallReferenceDistanceM[index] = distanceM;
     _sideWallReferenceDistanceValid[index] = true;
 }
 
-void WallDistanceCalibration::SetSideWallBaselineDifferentialLight(WallSensorId sensorId, float differentialLight)
+void WallDistanceCalibration::SetSideWallBaselineDifferentialLight(
+    MazeMap::RelativeDirection side,
+    float differentialLight)
 {
-    if (!IsSideWallSensor(sensorId) ||
+    if (!IsSideDirection(side) ||
         !std::isfinite(differentialLight) ||
         differentialLight < 0.0f)
     {
         return;
     }
 
-    const uint8_t index = SideWallIndex(sensorId);
+    const uint8_t index = SideWallIndex(side);
     _sideWallBaselineDifferentialLight[index] = differentialLight;
     _sideWallBaselineValid[index] = true;
 }
 
-void WallDistanceCalibration::SetSideWallBaselineDifferentialLightBand(WallSensorId sensorId, float lowDifferentialLight, float highDifferentialLight)
+void WallDistanceCalibration::SetSideWallBaselineDifferentialLightBand(
+    MazeMap::RelativeDirection side,
+    float lowDifferentialLight,
+    float highDifferentialLight)
 {
-    if (!IsSideWallSensor(sensorId) ||
+    if (!IsSideDirection(side) ||
         !std::isfinite(lowDifferentialLight) ||
         !std::isfinite(highDifferentialLight) ||
         lowDifferentialLight < 0.0f ||
@@ -419,21 +567,23 @@ void WallDistanceCalibration::SetSideWallBaselineDifferentialLightBand(WallSenso
         return;
     }
 
-    const uint8_t index = SideWallIndex(sensorId);
+    const uint8_t index = SideWallIndex(side);
     _sideWallBaselineDifferentialLightLow[index] = lowDifferentialLight;
     _sideWallBaselineDifferentialLightHigh[index] = highDifferentialLight;
     _sideWallBaselineBandValid[index] = true;
 }
 
-bool WallDistanceCalibration::TryGetSideWallBaselineDifferentialLight(WallSensorId sensorId, float& differentialLight) const
+bool WallDistanceCalibration::TryGetSideWallBaselineDifferentialLight(
+    MazeMap::RelativeDirection side,
+    float& differentialLight) const
 {
     differentialLight = 0.0f;
-    if (!IsSideWallSensor(sensorId))
+    if (!IsSideDirection(side))
     {
         return false;
     }
 
-    const uint8_t index = SideWallIndex(sensorId);
+    const uint8_t index = SideWallIndex(side);
     if (!_sideWallBaselineValid[index])
     {
         return false;
@@ -443,16 +593,19 @@ bool WallDistanceCalibration::TryGetSideWallBaselineDifferentialLight(WallSensor
     return std::isfinite(differentialLight) && differentialLight >= 0.0f;
 }
 
-bool WallDistanceCalibration::TryGetSideWallReferenceDifferentialLightBand(WallSensorId sensorId, float& lowDifferentialLight, float& highDifferentialLight) const
+bool WallDistanceCalibration::TryGetSideWallReferenceDifferentialLightBand(
+    MazeMap::RelativeDirection side,
+    float& lowDifferentialLight,
+    float& highDifferentialLight) const
 {
     lowDifferentialLight = 0.0f;
     highDifferentialLight = 0.0f;
-    if (!IsSideWallSensor(sensorId))
+    if (!IsSideDirection(side))
     {
         return false;
     }
 
-    const uint8_t index = SideWallIndex(sensorId);
+    const uint8_t index = SideWallIndex(side);
     if (!_sideWallReferenceBandValid[index])
     {
         return false;
@@ -467,16 +620,19 @@ bool WallDistanceCalibration::TryGetSideWallReferenceDifferentialLightBand(WallS
         highDifferentialLight >= lowDifferentialLight;
 }
 
-bool WallDistanceCalibration::TryGetSideWallBaselineDifferentialLightBand(WallSensorId sensorId, float& lowDifferentialLight, float& highDifferentialLight) const
+bool WallDistanceCalibration::TryGetSideWallBaselineDifferentialLightBand(
+    MazeMap::RelativeDirection side,
+    float& lowDifferentialLight,
+    float& highDifferentialLight) const
 {
     lowDifferentialLight = 0.0f;
     highDifferentialLight = 0.0f;
-    if (!IsSideWallSensor(sensorId))
+    if (!IsSideDirection(side))
     {
         return false;
     }
 
-    const uint8_t index = SideWallIndex(sensorId);
+    const uint8_t index = SideWallIndex(side);
     if (!_sideWallBaselineBandValid[index])
     {
         return false;
@@ -492,15 +648,15 @@ bool WallDistanceCalibration::TryGetSideWallBaselineDifferentialLightBand(WallSe
 }
 
 bool WallDistanceCalibration::TryComputeSideWallNormalizedReferenceDifferentialLight(
-    WallSensorId sensorId,
+    MazeMap::RelativeDirection side,
     float& differentialLight) const
 {
     differentialLight = 0.0f;
-    return TryGetSideWallReferenceDifferentialLight(sensorId, differentialLight);
+    return TryGetSideWallReferenceDifferentialLight(side, differentialLight);
 }
 
 bool WallDistanceCalibration::TryComputeSideWallMeasuredThresholds(
-    WallSensorId sensorId,
+    MazeMap::RelativeDirection side,
     float latchSignalFraction,
     float releaseSignalFraction,
     float& onMeasuredThreshold,
@@ -510,14 +666,14 @@ bool WallDistanceCalibration::TryComputeSideWallMeasuredThresholds(
     onMeasuredThreshold = 0.0f;
     offMeasuredThreshold = 0.0f;
     signalBaseline = 0.0f;
-    if (!IsSideWallSensor(sensorId))
+    if (!IsSideDirection(side))
     {
         return false;
     }
 
     float referenceDifferentialLight = 0.0f;
     if (!TryGetSideWallReferenceDifferentialLight(
-            sensorId,
+            side,
             referenceDifferentialLight))
     {
         return false;
@@ -529,7 +685,7 @@ bool WallDistanceCalibration::TryComputeSideWallMeasuredThresholds(
     float referenceDifferentialLightLow = 0.0f;
     float referenceDifferentialLightHigh = 0.0f;
     if (TryGetSideWallReferenceDifferentialLightBand(
-            sensorId,
+            side,
             referenceDifferentialLightLow,
             referenceDifferentialLightHigh))
     {
@@ -542,12 +698,12 @@ bool WallDistanceCalibration::TryComputeSideWallMeasuredThresholds(
     }
 
     if (TryGetSideWallBaselineDifferentialLightBand(
-            sensorId,
+            side,
             baselineDifferentialLightLow,
             baselineDifferentialLightHigh))
     {
     }
-    else if (TryGetSideWallBaselineDifferentialLight(sensorId, baselineDifferentialLight))
+    else if (TryGetSideWallBaselineDifferentialLight(side, baselineDifferentialLight))
     {
         baselineDifferentialLightLow = baselineDifferentialLight;
         baselineDifferentialLightHigh = baselineDifferentialLight;
@@ -567,7 +723,7 @@ bool WallDistanceCalibration::TryComputeSideWallMeasuredThresholds(
         return true;
     }
 
-    if (TryGetSideWallBaselineDifferentialLight(sensorId, baselineDifferentialLight) &&
+    if (TryGetSideWallBaselineDifferentialLight(side, baselineDifferentialLight) &&
         MazeMap::TryComputeSignalRiseThresholds(
             baselineDifferentialLight,
             referenceDifferentialLight,
@@ -588,15 +744,17 @@ bool WallDistanceCalibration::TryComputeSideWallMeasuredThresholds(
         offMeasuredThreshold);
 }
 
-bool WallDistanceCalibration::TryGetSideWallReferenceDifferentialLight(WallSensorId sensorId, float& differentialLight) const
+bool WallDistanceCalibration::TryGetSideWallReferenceDifferentialLight(
+    MazeMap::RelativeDirection side,
+    float& differentialLight) const
 {
     differentialLight = 0.0f;
-    if (!IsSideWallSensor(sensorId))
+    if (!IsSideDirection(side))
     {
         return false;
     }
 
-    const uint8_t index = SideWallIndex(sensorId);
+    const uint8_t index = SideWallIndex(side);
     if (!_sideWallReferenceValid[index])
     {
         return false;
@@ -606,22 +764,24 @@ bool WallDistanceCalibration::TryGetSideWallReferenceDifferentialLight(WallSenso
     return std::isfinite(differentialLight) && differentialLight > 0.0f;
 }
 
-bool WallDistanceCalibration::TryGetSideWallReferenceDistanceM(WallSensorId sensorId, float& distanceM) const
+bool WallDistanceCalibration::TryGetSideWallReferenceDistanceM(
+    MazeMap::RelativeDirection side,
+    float& distanceM) const
 {
     distanceM = 0.0f;
-    if (!IsSideWallSensor(sensorId))
+    if (!IsSideDirection(side))
     {
         return false;
     }
 
-    const uint8_t index = SideWallIndex(sensorId);
+    const uint8_t index = SideWallIndex(side);
     if (_sideWallReferenceDistanceValid[index])
     {
         distanceM = _sideWallReferenceDistanceM[index];
         return std::isfinite(distanceM) && distanceM > 0.0f;
     }
 
-    const MazeMap::WallSensorCalibrationCurve& curve = _curves[static_cast<uint8_t>(sensorId)];
+    const MazeMap::WallSensorCalibrationCurve& curve = SideCurve(side);
     if (curve.GetCount() == 0U)
     {
         return false;
@@ -650,24 +810,14 @@ bool WallDistanceCalibration::TryGetSideWallReferenceDistanceM(WallSensorId sens
     return std::isfinite(distanceM) && distanceM > 0.0f;
 }
 
-bool WallDistanceCalibration::TryGetWeakestFrontCalibrationMeasuredValue(
-    WallSensorId sensorId,
-    float& measuredValue) const
+bool WallDistanceCalibration::TryGetFrontLeftWeakestCalibrationMeasuredValue(float& measuredValue) const
 {
-    measuredValue = 0.0f;
-    if (!IsFrontWallSensor(sensorId))
-    {
-        return false;
-    }
+    return TryGetWeakestFrontCalibrationMeasuredValue(_frontLeftCurve, measuredValue);
+}
 
-    const MazeMap::WallSensorCalibrationCurve& curve = _curves[static_cast<uint8_t>(sensorId)];
-    if (curve.GetCount() == 0U)
-    {
-        return false;
-    }
-
-    measuredValue = curve.GetPoint(0U).measuredValue;
-    return std::isfinite(measuredValue) && measuredValue > 0.0f;
+bool WallDistanceCalibration::TryGetFrontRightWeakestCalibrationMeasuredValue(float& measuredValue) const
+{
+    return TryGetWeakestFrontCalibrationMeasuredValue(_frontRightCurve, measuredValue);
 }
 
 bool WallDistanceCalibration::TryComputeFrontWallDistanceThresholds(
@@ -701,8 +851,143 @@ bool WallDistanceCalibration::TryComputeFrontWallDistanceThresholds(
         offDistanceThresholdM);
 }
 
+bool WallDistanceCalibration::TryComputeFrontLeftSensorMeasuredThresholds(
+    const MazeMap::Vehicle& vehicle,
+    float releaseHysteresisDistanceM,
+    float ambientLight,
+    float& onMeasuredThreshold,
+    float& offMeasuredThreshold,
+    float& signalBaseline) const
+{
+    return TryComputeFrontSensorMeasuredThresholds(
+        kFrontLeftIndex,
+        _frontLeftCurve,
+        vehicle,
+        releaseHysteresisDistanceM,
+        ambientLight,
+        onMeasuredThreshold,
+        offMeasuredThreshold,
+        signalBaseline);
+}
+
+bool WallDistanceCalibration::TryComputeFrontRightSensorMeasuredThresholds(
+    const MazeMap::Vehicle& vehicle,
+    float releaseHysteresisDistanceM,
+    float ambientLight,
+    float& onMeasuredThreshold,
+    float& offMeasuredThreshold,
+    float& signalBaseline) const
+{
+    return TryComputeFrontSensorMeasuredThresholds(
+        kFrontRightIndex,
+        _frontRightCurve,
+        vehicle,
+        releaseHysteresisDistanceM,
+        ambientLight,
+        onMeasuredThreshold,
+        offMeasuredThreshold,
+        signalBaseline);
+}
+
+bool WallDistanceCalibration::AddFrontPoint(
+    uint8_t frontIndex,
+    MazeMap::WallSensorCalibrationCurve& curve,
+    float measuredValue,
+    float actualDistanceM,
+    float ambientLight)
+{
+    if (frontIndex > kFrontRightIndex)
+    {
+        return false;
+    }
+
+    const bool stored = curve.AddPoint(measuredValue, actualDistanceM, ambientLight);
+    if (stored)
+    {
+        InvalidateFrontSignalModelCache(frontIndex);
+    }
+
+    return stored;
+}
+
+bool WallDistanceCalibration::AddSidePointAt(
+    uint8_t sideIndex,
+    float measuredValue,
+    float actualDistanceM,
+    float ambientLight)
+{
+    if (sideIndex > kSideRightIndex)
+    {
+        return false;
+    }
+
+    MazeMap::WallSensorCalibrationCurve& curve = (sideIndex == kSideLeftIndex) ? _sideLeftCurve : _sideRightCurve;
+    return curve.AddPoint(measuredValue, actualDistanceM, ambientLight);
+}
+
+float WallDistanceCalibration::ApplyCurve(
+    const MazeMap::WallSensorCalibrationCurve& curve,
+    MazeMap::WallSensorCalibrationMode mode,
+    float measuredValue,
+    float fallbackDistanceM) const
+{
+    if (!std::isfinite(fallbackDistanceM) || fallbackDistanceM <= 0.0f)
+    {
+        fallbackDistanceM = measuredValue;
+    }
+    if (!std::isfinite(measuredValue) || measuredValue <= 0.0f)
+    {
+        return fallbackDistanceM;
+    }
+    if (curve.GetCount() == 0U)
+    {
+        return fallbackDistanceM;
+    }
+    if ((mode == MazeMap::WallSensorCalibrationMode::DirectInterpolation) && (curve.GetCount() < 2U))
+    {
+        return fallbackDistanceM;
+    }
+
+    return curve.Apply(measuredValue, mode);
+}
+
+bool WallDistanceCalibration::IsSideDirection(MazeMap::RelativeDirection side)
+{
+    return side == MazeMap::RelativeDirection::Left90 || side == MazeMap::RelativeDirection::Right90;
+}
+
+uint8_t WallDistanceCalibration::SideWallIndex(MazeMap::RelativeDirection side)
+{
+    return (side == MazeMap::RelativeDirection::Right90) ? kSideRightIndex : kSideLeftIndex;
+}
+
+MazeMap::WallSensorCalibrationCurve& WallDistanceCalibration::SideCurve(MazeMap::RelativeDirection side)
+{
+    return (side == MazeMap::RelativeDirection::Right90) ? _sideRightCurve : _sideLeftCurve;
+}
+
+const MazeMap::WallSensorCalibrationCurve& WallDistanceCalibration::SideCurve(MazeMap::RelativeDirection side) const
+{
+    return (side == MazeMap::RelativeDirection::Right90) ? _sideRightCurve : _sideLeftCurve;
+}
+
+bool WallDistanceCalibration::TryGetWeakestFrontCalibrationMeasuredValue(
+    const MazeMap::WallSensorCalibrationCurve& curve,
+    float& measuredValue) const
+{
+    measuredValue = 0.0f;
+    if (curve.GetCount() == 0U)
+    {
+        return false;
+    }
+
+    measuredValue = curve.GetPoint(0U).measuredValue;
+    return std::isfinite(measuredValue) && measuredValue > 0.0f;
+}
+
 bool WallDistanceCalibration::TryComputeFrontSensorMeasuredThresholds(
-    WallSensorId sensorId,
+    uint8_t frontIndex,
+    const MazeMap::WallSensorCalibrationCurve& curve,
     const MazeMap::Vehicle& vehicle,
     float releaseHysteresisDistanceM,
     float ambientLight,
@@ -713,14 +998,13 @@ bool WallDistanceCalibration::TryComputeFrontSensorMeasuredThresholds(
     onMeasuredThreshold = 0.0f;
     offMeasuredThreshold = 0.0f;
     signalBaseline = 0.0f;
-
-    if (!IsFrontWallSensor(sensorId))
+    if (frontIndex > kFrontRightIndex)
     {
         return false;
     }
 
     if (TryGetFrontDirectRiseThresholds(
-            sensorId,
+            frontIndex,
             signalBaseline,
             onMeasuredThreshold,
             offMeasuredThreshold))
@@ -733,11 +1017,11 @@ bool WallDistanceCalibration::TryComputeFrontSensorMeasuredThresholds(
     float baselineDifferentialLightLow = 0.0f;
     float baselineDifferentialLightHigh = 0.0f;
     if (TryGetFrontWeakestCalibrationDifferentialLightBand(
-            sensorId,
+            frontIndex,
             weakestCalibrationDifferentialLightLow,
             weakestCalibrationDifferentialLightHigh) &&
         TryGetFrontWallBaselineDifferentialLightBand(
-            sensorId,
+            frontIndex,
             baselineDifferentialLightLow,
             baselineDifferentialLightHigh) &&
         MazeMap::TryComputeConservativeSignalRiseThresholdsFromBands(
@@ -756,8 +1040,8 @@ bool WallDistanceCalibration::TryComputeFrontSensorMeasuredThresholds(
 
     float weakestCalibrationSignal = 0.0f;
     float baselineDifferentialLight = 0.0f;
-    if (TryGetWeakestFrontCalibrationMeasuredValue(sensorId, weakestCalibrationSignal) &&
-        TryGetFrontWallBaselineDifferentialLight(sensorId, baselineDifferentialLight) &&
+    if (TryGetWeakestFrontCalibrationMeasuredValue(curve, weakestCalibrationSignal) &&
+        TryGetFrontWallBaselineDifferentialLight(frontIndex, baselineDifferentialLight) &&
         MazeMap::TryComputeSignalRiseThresholds(
             baselineDifferentialLight,
             weakestCalibrationSignal,
@@ -783,14 +1067,14 @@ bool WallDistanceCalibration::TryComputeFrontSensorMeasuredThresholds(
 
     float effectiveAmbientLight = ambientLight;
     if (!(std::isfinite(effectiveAmbientLight) && effectiveAmbientLight >= 0.0f) &&
-        !TryComputeFrontSensorRepresentativeAmbientLight(sensorId, effectiveAmbientLight))
+        !TryComputeFrontSensorRepresentativeAmbientLight(curve, effectiveAmbientLight))
     {
         return false;
     }
 
     float signalGain = 0.0f;
     float signalLightScale = 0.0f;
-    if (!TryGetFrontSignalModel(sensorId, signalGain, signalLightScale) ||
+    if (!TryGetFrontSignalModel(frontIndex, curve, signalGain, signalLightScale) ||
         !MazeMap::TryComputeMeasuredValueForActualDistanceUsingAmbientAwareLogSignalModel(
             signalGain,
             signalLightScale,
@@ -825,15 +1109,11 @@ bool WallDistanceCalibration::TryComputeFrontSensorMeasuredThresholds(
         offMeasuredThreshold < onMeasuredThreshold;
 }
 
-bool WallDistanceCalibration::TryComputeFrontSensorRepresentativeAmbientLight(WallSensorId sensorId, float& ambientLight) const
+bool WallDistanceCalibration::TryComputeFrontSensorRepresentativeAmbientLight(
+    const MazeMap::WallSensorCalibrationCurve& curve,
+    float& ambientLight) const
 {
     ambientLight = 0.0f;
-    if (!IsFrontWallSensor(sensorId))
-    {
-        return false;
-    }
-
-    const MazeMap::WallSensorCalibrationCurve& curve = _curves[static_cast<uint8_t>(sensorId)];
     if (curve.GetCount() < 2U)
     {
         return false;
@@ -862,67 +1142,56 @@ bool WallDistanceCalibration::TryComputeFrontSensorRepresentativeAmbientLight(Wa
     return std::isfinite(ambientLight) && ambientLight >= 0.0f;
 }
 
-const MazeMap::WallSensorCalibrationCurve& WallDistanceCalibration::GetCurve(WallSensorId sensorId) const
-{
-    return _curves[static_cast<uint8_t>(sensorId)];
-}
-
-bool WallDistanceCalibration::IsSideWallSensor(WallSensorId sensorId)
-{
-    return sensorId == WallSensorId::SideLeft || sensorId == WallSensorId::SideRight;
-}
-
-uint8_t WallDistanceCalibration::SideWallIndex(WallSensorId sensorId)
-{
-    return (sensorId == WallSensorId::SideRight) ? 1U : 0U;
-}
-
-uint8_t WallDistanceCalibration::FrontWallIndex(WallSensorId sensorId)
-{
-    return (sensorId == WallSensorId::FrontRight) ? 1U : 0U;
-}
-
 void WallDistanceCalibration::InvalidateFrontSignalModelCache()
 {
     for (uint8_t index = 0U; index < 2U; ++index)
     {
-        _frontSignalModelCache[index] = FrontSignalModelCache{};
+        _frontSignalModelCacheValid[index] = false;
+        _frontSignalModelCacheGain[index] = 0.0f;
+        _frontSignalModelCacheLightScale[index] = 0.0f;
     }
 }
 
-void WallDistanceCalibration::InvalidateFrontSignalModelCache(WallSensorId sensorId)
+void WallDistanceCalibration::InvalidateFrontSignalModelCache(uint8_t frontIndex)
 {
-    if (!IsFrontWallSensor(sensorId))
+    if (frontIndex > kFrontRightIndex)
     {
         return;
     }
 
-    _frontSignalModelCache[FrontWallIndex(sensorId)] = FrontSignalModelCache{};
+    _frontSignalModelCacheValid[frontIndex] = false;
+    _frontSignalModelCacheGain[frontIndex] = 0.0f;
+    _frontSignalModelCacheLightScale[frontIndex] = 0.0f;
 }
 
-bool WallDistanceCalibration::TryGetFrontSignalModel(WallSensorId sensorId, float& gain, float& lightScale) const
+bool WallDistanceCalibration::TryGetFrontSignalModel(
+    uint8_t frontIndex,
+    const MazeMap::WallSensorCalibrationCurve& curve,
+    float& gain,
+    float& lightScale) const
 {
     gain = 0.0f;
     lightScale = 0.0f;
-    if (!IsFrontWallSensor(sensorId))
+    if (frontIndex > kFrontRightIndex)
     {
         return false;
     }
 
-    FrontSignalModelCache& cache = _frontSignalModelCache[FrontWallIndex(sensorId)];
-    if (!cache.valid)
+    if (!_frontSignalModelCacheValid[frontIndex])
     {
-        const MazeMap::WallSensorCalibrationCurve& curve = _curves[static_cast<uint8_t>(sensorId)];
-        if (!MazeMap::TryFitAmbientAwareLogDifferentialSignalModel(curve, cache.gain, cache.lightScale))
+        if (!MazeMap::TryFitAmbientAwareLogDifferentialSignalModel(
+                curve,
+                _frontSignalModelCacheGain[frontIndex],
+                _frontSignalModelCacheLightScale[frontIndex]))
         {
             return false;
         }
 
-        cache.valid = true;
+        _frontSignalModelCacheValid[frontIndex] = true;
     }
 
-    gain = cache.gain;
-    lightScale = cache.lightScale;
+    gain = _frontSignalModelCacheGain[frontIndex];
+    lightScale = _frontSignalModelCacheLightScale[frontIndex];
     return std::isfinite(gain) && std::isfinite(lightScale) && gain > 0.0f && lightScale > 0.0f;
 }
 
@@ -935,8 +1204,8 @@ float ComputeDiagonalWallCenterOmegaRadps(
 {
     float leftReferenceSignal = 0.0f;
     float rightReferenceSignal = 0.0f;
-    if (!wallCalibration.TryComputeSideWallNormalizedReferenceDifferentialLight(WallSensorId::SideLeft, leftReferenceSignal) ||
-        !wallCalibration.TryComputeSideWallNormalizedReferenceDifferentialLight(WallSensorId::SideRight, rightReferenceSignal))
+    if (!wallCalibration.TryComputeSideWallNormalizedReferenceDifferentialLight(MazeMap::RelativeDirection::Left90, leftReferenceSignal) ||
+        !wallCalibration.TryComputeSideWallNormalizedReferenceDifferentialLight(MazeMap::RelativeDirection::Right90, rightReferenceSignal))
     {
         return 0.0f;
     }
@@ -956,18 +1225,17 @@ float ComputeDiagonalWallCenterOmegaRadps(
     return MazeMap::Config::kDiagonalWallCenterGain * balanceError;
 }
 
-bool TryComputeSideWallSignalDistanceM(
-    const WallDistanceCalibration& wallCalibration,
-    WallSensorId sensorId,
+bool WallDistanceCalibration::TryComputeSideWallSignalDistanceM(
+    MazeMap::RelativeDirection side,
     float measuredSignal,
-    float& distanceM)
+    float& distanceM) const
 {
     distanceM = 0.0f;
 
     float referenceSignal = 0.0f;
     float referenceDistanceM = 0.0f;
-    if (!wallCalibration.TryGetSideWallReferenceDifferentialLight(sensorId, referenceSignal) ||
-        !wallCalibration.TryGetSideWallReferenceDistanceM(sensorId, referenceDistanceM))
+    if (!TryGetSideWallReferenceDifferentialLight(side, referenceSignal) ||
+        !TryGetSideWallReferenceDistanceM(side, referenceDistanceM))
     {
         return false;
     }
@@ -979,11 +1247,195 @@ bool TryComputeSideWallSignalDistanceM(
         distanceM);
 }
 
-float ComputeSignalRiseAboveBaselineValue(
-    float measuredDifferentialLight,
-    float signalBaseline)
+bool WallDistanceCalibration::TryComputeSideWallSignalRiseMetrics(
+    const MazeMap::RelativeDirection side,
+    const float measuredDifferentialLight,
+    const float latchSignalFraction,
+    const float releaseSignalFraction,
+    const float missSignalFractionOfLatch,
+    float& signalRise,
+    float& latchRiseThreshold,
+    float& missRiseThreshold) const
 {
-    // Exclusively for the purpose of centering.
+    signalRise = 0.0f;
+    latchRiseThreshold = 0.0f;
+    missRiseThreshold = 0.0f;
+
+    float offMeasuredThreshold = 0.0f;
+    float signalBaseline = 0.0f;
+    if (!TryComputeSideWallMeasuredThresholds(
+            side,
+            latchSignalFraction,
+            releaseSignalFraction,
+            latchRiseThreshold,
+            offMeasuredThreshold,
+            signalBaseline))
+    {
+        return false;
+    }
+
+    signalRise = ComputeCalibratedSideSignalRise(measuredDifferentialLight, signalBaseline);
+    missRiseThreshold = missSignalFractionOfLatch * latchRiseThreshold;
+    return
+        std::isfinite(signalRise) &&
+        std::isfinite(latchRiseThreshold) &&
+        std::isfinite(missRiseThreshold) &&
+        (latchRiseThreshold > 0.0f) &&
+        (missRiseThreshold >= 0.0f);
+}
+
+bool WallDistanceCalibration::IsSideWallSignalClassifiable(
+    const bool signalMetricsValid,
+    const float signalRise,
+    const float latchRiseThreshold,
+    const float missRiseThreshold) const noexcept
+{
+    return
+        signalMetricsValid &&
+        ((signalRise >= latchRiseThreshold) ||
+            (signalRise <= missRiseThreshold));
+}
+
+bool WallDistanceCalibration::IsSideWallFallbackDistanceValid(const float fallbackDistanceM) const noexcept
+{
+    return std::isfinite(fallbackDistanceM) && (fallbackDistanceM > 0.0f);
+}
+
+bool WallDistanceCalibration::IsSideWallObservationEligible(
+    const bool detectionWindowValid,
+    const bool signalClassifiable,
+    const bool fallbackDistanceValid) const noexcept
+{
+    return detectionWindowValid && (signalClassifiable || fallbackDistanceValid);
+}
+
+bool WallDistanceCalibration::IsSideWallControlRangeValid(
+    const bool observationEligible,
+    const bool transitionDetected,
+    const bool signalMetricsValid,
+    const float signalRise,
+    const float latchRiseThreshold,
+    const bool fallbackDistanceValid,
+    const float fallbackDistanceM,
+    const float offThresholdM) const noexcept
+{
+    if (!observationEligible || transitionDetected)
+    {
+        return false;
+    }
+
+    if (signalMetricsValid)
+    {
+        return signalRise >= latchRiseThreshold;
+    }
+
+    return fallbackDistanceValid && (fallbackDistanceM < offThresholdM);
+}
+
+bool WallDistanceCalibration::DetectSideWallTransitionFromSignalRise(
+    const bool detectionWindowValid,
+    const bool signalMetricsValid,
+    const float signalRise,
+    const float latchRiseThreshold,
+    const float transitionSignalFractionOfLatch,
+    float& previousSignalRise,
+    bool& previousValid) const noexcept
+{
+    bool transitionDetected = false;
+    const float transitionThreshold = latchRiseThreshold * transitionSignalFractionOfLatch;
+    const bool currentValid =
+        detectionWindowValid &&
+        signalMetricsValid &&
+        std::isfinite(signalRise) &&
+        std::isfinite(transitionThreshold) &&
+        (transitionThreshold > 0.0f);
+    if (currentValid && previousValid)
+    {
+        transitionDetected = std::fabs(signalRise - previousSignalRise) >= transitionThreshold;
+    }
+
+    previousSignalRise = currentValid ? signalRise : 0.0f;
+    previousValid = currentValid;
+    return transitionDetected;
+}
+
+bool WallDistanceCalibration::ComputeSideWallObservationHit(
+    const MazeMap::RelativeDirection side,
+    const float measuredDifferentialLight,
+    const float fallbackDistanceM,
+    const float onThresholdM,
+    const bool detectionWindowValid) const
+{
+    if (!detectionWindowValid)
+    {
+        return false;
+    }
+
+    float onMeasuredThreshold = 0.0f;
+    float offMeasuredThreshold = 0.0f;
+    float signalBaseline = 0.0f;
+    if (TryComputeSideWallMeasuredThresholds(
+            side,
+            MazeMap::Config::kSideWallMeasuredSignalLatchThreshold,
+            MazeMap::Config::kSideWallMeasuredSignalReleaseThreshold,
+            onMeasuredThreshold,
+            offMeasuredThreshold,
+            signalBaseline))
+    {
+        return ComputeCalibratedSideSignalRise(measuredDifferentialLight, signalBaseline) >= onMeasuredThreshold;
+    }
+
+    return std::isfinite(fallbackDistanceM) && (fallbackDistanceM < onThresholdM);
+}
+
+bool WallDistanceCalibration::UpdateSideWallState(
+    const MazeMap::RelativeDirection side,
+    const float measuredDifferentialLight,
+    const float fallbackDistanceM,
+    const float onThresholdM,
+    const float offThresholdM,
+    const bool detectionWindowValid,
+    float& filteredSignal,
+    bool& signalInitialized,
+    bool& currentState) const
+{
+    if (!detectionWindowValid)
+    {
+        filteredSignal = 0.0f;
+        signalInitialized = false;
+        currentState = false;
+        return false;
+    }
+
+    float onMeasuredThreshold = 0.0f;
+    float offMeasuredThreshold = 0.0f;
+    float signalBaseline = 0.0f;
+    if (TryComputeSideWallMeasuredThresholds(
+            side,
+            MazeMap::Config::kSideWallMeasuredSignalLatchThreshold,
+            MazeMap::Config::kSideWallMeasuredSignalReleaseThreshold,
+            onMeasuredThreshold,
+            offMeasuredThreshold,
+            signalBaseline))
+    {
+        const float signalRise = ComputeCalibratedSideSignalRise(measuredDifferentialLight, signalBaseline);
+        filteredSignal = signalRise;
+        signalInitialized = true;
+        currentState = currentState ?
+            (signalRise >= offMeasuredThreshold) :
+            (signalRise >= onMeasuredThreshold);
+        return currentState;
+    }
+
+    signalInitialized = false;
+    currentState = currentState ? (fallbackDistanceM < offThresholdM) : (fallbackDistanceM < onThresholdM);
+    return currentState;
+}
+
+float WallDistanceCalibration::ComputeCalibratedSideSignalRise(
+    const float measuredDifferentialLight,
+    const float signalBaseline) noexcept
+{
     if (!std::isfinite(measuredDifferentialLight) ||
         !std::isfinite(signalBaseline))
     {
@@ -993,29 +1445,6 @@ float ComputeSignalRiseAboveBaselineValue(
     return (measuredDifferentialLight > signalBaseline) ?
         (measuredDifferentialLight - signalBaseline) :
         0.0f;
-}
-
-bool IsCalibratedSideDistanceValidForControl(
-    const WallDistanceCalibration& wallCalibration,
-    WallSensorId sensorId,
-    float measuredDifferentialLight)
-{
-    // Exclusively for the purpose of deciding whether a side distance estimate is trustworthy for control.
-    float onMeasuredThreshold = 0.0f;
-    float offMeasuredThreshold = 0.0f;
-    float signalBaseline = 0.0f;
-    if (!wallCalibration.TryComputeSideWallMeasuredThresholds(
-            sensorId,
-            MazeMap::Config::kSideWallMeasuredSignalLatchThreshold,
-            MazeMap::Config::kSideWallMeasuredSignalReleaseThreshold,
-            onMeasuredThreshold,
-            offMeasuredThreshold,
-            signalBaseline))
-    {
-        return false;
-    }
-
-    return ComputeSignalRiseAboveBaselineValue(measuredDifferentialLight, signalBaseline) >= onMeasuredThreshold;
 }
 
 bool TryComputeStraightWallCenterErrorM(
@@ -1039,8 +1468,8 @@ bool TryComputeStraightWallCenterErrorM(
         float leftReferenceSignal = 0.0f;
         float rightReferenceSignal = 0.0f;
         float balanceError = 0.0f;
-        if (wallCalibration.TryComputeSideWallNormalizedReferenceDifferentialLight(WallSensorId::SideLeft, leftReferenceSignal) &&
-            wallCalibration.TryComputeSideWallNormalizedReferenceDifferentialLight(WallSensorId::SideRight, rightReferenceSignal) &&
+        if (wallCalibration.TryComputeSideWallNormalizedReferenceDifferentialLight(MazeMap::RelativeDirection::Left90, leftReferenceSignal) &&
+            wallCalibration.TryComputeSideWallNormalizedReferenceDifferentialLight(MazeMap::RelativeDirection::Right90, rightReferenceSignal) &&
             MazeMap::TryComputeNormalizedWallSignalBalanceError(
                 leftMeasuredSignal,
                 leftReferenceSignal,
@@ -1057,9 +1486,8 @@ bool TryComputeStraightWallCenterErrorM(
     if (leftWall)
     {
         float leftDistanceM = 0.0f;
-        if (TryComputeSideWallSignalDistanceM(
-                wallCalibration,
-                WallSensorId::SideLeft,
+        if (wallCalibration.TryComputeSideWallSignalDistanceM(
+                MazeMap::RelativeDirection::Left90,
                 leftMeasuredSignal,
                 leftDistanceM))
         {
@@ -1071,9 +1499,8 @@ bool TryComputeStraightWallCenterErrorM(
     if (rightWall)
     {
         float rightDistanceM = 0.0f;
-        if (TryComputeSideWallSignalDistanceM(
-                wallCalibration,
-                WallSensorId::SideRight,
+        if (wallCalibration.TryComputeSideWallSignalDistanceM(
+                MazeMap::RelativeDirection::Right90,
                 rightMeasuredSignal,
                 rightDistanceM))
         {

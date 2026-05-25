@@ -2,112 +2,136 @@
 #include "StartupCalibration.h"
 
 #include "Drive.h"
-#include "SharedRobotRuntime.h"
+#include "MazeMapRuntimeCore.h"
 #include "RuntimeSensorSuite.h"
+#include "SharedRobotRuntime.h"
+#include "Vehicle.h"
+#include "WallDetectionThresholds.h"
 #include "WallDistanceCalibration.h"
+#include "WallSensor.h"
 #include "WallTouch.h"
 
 #include <cmath>
+#include <limits>
 
 namespace MazeMap::App::Internal
 {
-    namespace
+    float StartupCalibration::StartupCellCenterCoordinateM() noexcept
     {
-        constexpr const char* kStartupCalibrationLogSource = "startup_calibration";
+        return 0.5f * Config::kCellSizeM;
+    }
 
-        float StartupCellCenterCoordinateM() noexcept
+    MotionLimits StartupCalibration::BuildStartupTravelLimits() noexcept
+    {
+        MotionLimits limits{};
+        limits.SetMaxSpeedMps(Config::kStartupWallCalibrationSpeedMps);
+        limits.SetAccelMps2(Config::kStartupWallCalibrationAccelMps2);
+        limits.SetDecelMps2(Config::kStartupWallCalibrationDecelMps2);
+        limits.SetMaxAngularSpeedRadps(Config::kStartupWallCalibrationTurnMaxOmegaRadps);
+        limits.SetAngularAccelRadps2(Config::kStartupWallCalibrationTurnAccelRadps2);
+        return limits;
+    }
+
+    bool StartupCalibration::IsValidPositiveBand(const float low, const float high) noexcept
+    {
+        return std::isfinite(low) && std::isfinite(high) && (low > 0.0f) && (high >= low);
+    }
+
+    bool StartupCalibration::IsValidNonNegativeBand(const float low, const float high) noexcept
+    {
+        return std::isfinite(low) && std::isfinite(high) && (low >= 0.0f) && (high >= low);
+    }
+
+    bool StartupCalibration::HasFrontLeftBaselineCalibration() noexcept
+    {
+        float differentialLight = 0.0f;
+        float lowDifferentialLight = 0.0f;
+        float highDifferentialLight = 0.0f;
+        return gWallDistanceCalibration.TryGetFrontLeftWallBaselineDifferentialLight(differentialLight) &&
+            gWallDistanceCalibration.TryGetFrontLeftWallBaselineDifferentialLightBand(
+                lowDifferentialLight,
+                highDifferentialLight) &&
+            std::isfinite(differentialLight) &&
+            (differentialLight >= 0.0f) &&
+            IsValidNonNegativeBand(lowDifferentialLight, highDifferentialLight);
+    }
+
+    bool StartupCalibration::HasFrontRightBaselineCalibration() noexcept
+    {
+        float differentialLight = 0.0f;
+        float lowDifferentialLight = 0.0f;
+        float highDifferentialLight = 0.0f;
+        return gWallDistanceCalibration.TryGetFrontRightWallBaselineDifferentialLight(differentialLight) &&
+            gWallDistanceCalibration.TryGetFrontRightWallBaselineDifferentialLightBand(
+                lowDifferentialLight,
+                highDifferentialLight) &&
+            std::isfinite(differentialLight) &&
+            (differentialLight >= 0.0f) &&
+            IsValidNonNegativeBand(lowDifferentialLight, highDifferentialLight);
+    }
+
+    bool StartupCalibration::HasFullSideCalibration(const MazeMap::RelativeDirection side) noexcept
+    {
+        float baselineDifferentialLight = 0.0f;
+        float referenceDifferentialLight = 0.0f;
+        float referenceDistanceM = 0.0f;
+        return gWallDistanceCalibration.TryGetSideWallBaselineDifferentialLight(side, baselineDifferentialLight) &&
+            gWallDistanceCalibration.TryGetSideWallReferenceDifferentialLight(side, referenceDifferentialLight) &&
+            gWallDistanceCalibration.TryGetSideWallReferenceDistanceM(side, referenceDistanceM) &&
+            std::isfinite(baselineDifferentialLight) &&
+            (baselineDifferentialLight >= 0.0f) &&
+            std::isfinite(referenceDifferentialLight) &&
+            (referenceDifferentialLight > 0.0f) &&
+            std::isfinite(referenceDistanceM) &&
+            (referenceDistanceM > 0.0f);
+    }
+
+    bool StartupCalibration::HasAnySideCalibrationData(const MazeMap::RelativeDirection side) noexcept
+    {
+        float differentialLight = 0.0f;
+        float distanceM = 0.0f;
+        return gWallDistanceCalibration.TryGetSideWallBaselineDifferentialLight(side, differentialLight) ||
+            gWallDistanceCalibration.TryGetSideWallReferenceDifferentialLight(side, differentialLight) ||
+            gWallDistanceCalibration.TryGetSideWallReferenceDistanceM(side, distanceM);
+    }
+
+    bool StartupCalibration::HasAnyWallCalibrationData() noexcept
+    {
+        return HasFrontLeftBaselineCalibration() ||
+            HasFrontRightBaselineCalibration() ||
+            HasAnySideCalibrationData(MazeMap::RelativeDirection::Left90) ||
+            HasAnySideCalibrationData(MazeMap::RelativeDirection::Right90);
+    }
+
+    bool StartupCalibration::TryComputeDistanceToSouthStartWall(
+        const MazeMap::VehicleState& state,
+        const MazeMap::WallSensor& sensor,
+        float& distanceM) noexcept
+    {
+        distanceM = 0.0f;
+        const Eigen::Vector2f sensorPosition = sensor.WorldPosition(state);
+        const Eigen::Vector2f sensorFacing = sensor.WorldFacing(state);
+        const float southWallYM = MazeMap::ComputeCellInnerMinCoordinateM(MazeMap::Config::kMazeWallThicknessM);
+        const float westWallXM = MazeMap::ComputeCellInnerMinCoordinateM(MazeMap::Config::kMazeWallThicknessM);
+        const float eastWallXM = MazeMap::ComputeCellInnerMaxCoordinateM(
+            MazeMap::Config::kCellSizeM,
+            MazeMap::Config::kMazeWallThicknessM);
+        if (sensorFacing.y() >= -0.1f)
         {
-            return 0.5f * Config::kCellSizeM;
+            return false;
         }
 
-        MotionLimits BuildStartupTravelLimits() noexcept
+        const float candidateDistanceM = (southWallYM - sensorPosition.y()) / sensorFacing.y();
+        const float intersectionX = sensorPosition.x() + (candidateDistanceM * sensorFacing.x());
+        if (candidateDistanceM <= 0.0f ||
+            intersectionX < (westWallXM - 0.005f) ||
+            intersectionX > (eastWallXM + 0.005f))
         {
-            MotionLimits limits{};
-            limits.SetMaxSpeedMps(Config::kStartupWallCalibrationSpeedMps);
-            limits.SetAccelMps2(Config::kStartupWallCalibrationAccelMps2);
-            limits.SetDecelMps2(Config::kStartupWallCalibrationDecelMps2);
-            limits.SetMaxAngularSpeedRadps(Config::kStartupWallCalibrationTurnMaxOmegaRadps);
-            limits.SetAngularAccelRadps2(Config::kStartupWallCalibrationTurnAccelRadps2);
-            return limits;
+            return false;
         }
 
-        bool IsValidPositiveBand(const RobustSignalBand& band) noexcept
-        {
-            return std::isfinite(band.low) &&
-                std::isfinite(band.high) &&
-                (band.low > 0.0f) &&
-                (band.high >= band.low);
-        }
-
-        bool IsValidNonNegativeBand(const RobustSignalBand& band) noexcept
-        {
-            return std::isfinite(band.low) &&
-                std::isfinite(band.high) &&
-                (band.low >= 0.0f) &&
-                (band.high >= band.low);
-        }
-
-        bool HasFrontBaselineCalibration(const WallSensorId sensorId) noexcept
-        {
-            float differentialLight = 0.0f;
-            float lowDifferentialLight = 0.0f;
-            float highDifferentialLight = 0.0f;
-            return gWallDistanceCalibration.TryGetFrontWallBaselineDifferentialLight(
-                    sensorId,
-                    differentialLight) &&
-                gWallDistanceCalibration.TryGetFrontWallBaselineDifferentialLightBand(
-                    sensorId,
-                    lowDifferentialLight,
-                    highDifferentialLight) &&
-                std::isfinite(differentialLight) &&
-                (differentialLight >= 0.0f) &&
-                IsValidNonNegativeBand(RobustSignalBand{ lowDifferentialLight, highDifferentialLight });
-        }
-
-        bool HasFullSideCalibration(const WallSensorId sensorId) noexcept
-        {
-            float baselineDifferentialLight = 0.0f;
-            float referenceDifferentialLight = 0.0f;
-            float referenceDistanceM = 0.0f;
-            return gWallDistanceCalibration.TryGetSideWallBaselineDifferentialLight(
-                    sensorId,
-                    baselineDifferentialLight) &&
-                gWallDistanceCalibration.TryGetSideWallReferenceDifferentialLight(
-                    sensorId,
-                    referenceDifferentialLight) &&
-                gWallDistanceCalibration.TryGetSideWallReferenceDistanceM(
-                    sensorId,
-                    referenceDistanceM) &&
-                std::isfinite(baselineDifferentialLight) &&
-                (baselineDifferentialLight >= 0.0f) &&
-                std::isfinite(referenceDifferentialLight) &&
-                (referenceDifferentialLight > 0.0f) &&
-                std::isfinite(referenceDistanceM) &&
-                (referenceDistanceM > 0.0f);
-        }
-
-        bool HasAnySideCalibrationData(const WallSensorId sensorId) noexcept
-        {
-            float differentialLight = 0.0f;
-            float distanceM = 0.0f;
-            return gWallDistanceCalibration.TryGetSideWallBaselineDifferentialLight(
-                    sensorId,
-                    differentialLight) ||
-                gWallDistanceCalibration.TryGetSideWallReferenceDifferentialLight(
-                    sensorId,
-                    differentialLight) ||
-                gWallDistanceCalibration.TryGetSideWallReferenceDistanceM(
-                    sensorId,
-                    distanceM);
-        }
-
-        bool HasAnyWallCalibrationData() noexcept
-        {
-            return HasFrontBaselineCalibration(WallSensorId::FrontLeft) ||
-                HasFrontBaselineCalibration(WallSensorId::FrontRight) ||
-                HasAnySideCalibrationData(WallSensorId::SideLeft) ||
-                HasAnySideCalibrationData(WallSensorId::SideRight);
-        }
+        distanceM = candidateDistanceM;
+        return std::isfinite(distanceM) && (distanceM > 0.0f);
     }
 
     StartupCalibration::StartupCalibration()
@@ -142,17 +166,11 @@ namespace MazeMap::App::Internal
             return false;
         }
 
+        _controlPeriodUs = Config::kControlPeriodUs;
         const bool ok = _sensors->Begin(Config::kControlPeriodUs);
         _broughtUp = ok;
-        _sensorsCalibrated = ok ? SensorCalibration::Imu : SensorCalibration::None;
-        if (ok)
-        {
-            if (_runtime != nullptr)
-            {
-                (void)_runtime->Estimator().SetGyroBiasZ(_sensors->GetGyroBiasRadps());
-            }
-            RefreshSensorsCalibrated();
-        }
+        _imuCalibrationComplete = false;
+        RefreshSensorsCalibrated();
         return ok;
     }
 
@@ -181,38 +199,16 @@ namespace MazeMap::App::Internal
             CompleteBestEffort("StartupCalibration was started without a successful BringUp");
             return;
         }
-        if (!_isInMaze)
-        {
-            _phase = Phase::ReportCompletion;
-            return;
-        }
-        _useFallbackWallCalibration = !HasAnyWallCalibrationData();
 
-        if ((_runtime == nullptr) ||
-            (_sensors == nullptr) ||
-            (_driveService == nullptr) ||
-            (_wallTouch == nullptr) ||
-            (_vehicle == nullptr))
+        if ((_runtime == nullptr) || (_sensors == nullptr) || (_vehicle == nullptr))
         {
             CompleteBestEffort("StartupCalibration could not begin because shared runtime services were unavailable");
             return;
         }
-        if (_useFallbackWallCalibration)
-        {
-            LogIssue("StartupCalibration is falling back to live wall calibration because no saved wall-calibration dataset was available");
-        }
 
-        if (!_runtime->Estimator().ResetPose(
-                StartupCellCenterCoordinateM(),
-                Config::kMissionStartRearWallInsetM,
-                DirectionToYawRad(MazeMap::Up)))
+        if (!BeginImuCalibration())
         {
-            CompleteBestEffort(_runtime->Estimator().FaultReason());
-            return;
-        }
-        if (!BeginDriveHoldPhase(Phase::SouthStartHold, Config::kStartupWallCalibrationSettleMs))
-        {
-            CompleteBestEffort("StartupCalibration could not begin the initial startup settle");
+            FailCalibration("StartupCalibration could not begin IMU calibration");
         }
     }
 
@@ -229,6 +225,16 @@ namespace MazeMap::App::Internal
             _phase = Phase::None;
             done = true;
             return CommandVector::Brake();
+        }
+
+        if ((_phase == Phase::ImuBaselineSettle) ||
+            (_phase == Phase::ImuBaselineSample) ||
+            (_phase == Phase::ImuStimulatedSettle) ||
+            (_phase == Phase::ImuStimulatedSample) ||
+            (_phase == Phase::ImuDisabledSettle) ||
+            (_phase == Phase::ImuBiasSample))
+        {
+            return RunImuCalibrationPhase(done);
         }
 
         if ((_phase == Phase::SampleWest) ||
@@ -313,10 +319,45 @@ namespace MazeMap::App::Internal
 
     void StartupCalibration::ResetState() noexcept
     {
+        if (_vehicle != nullptr)
+        {
+            _vehicle->BackLeftImu().DisableSelfTest();
+        }
+
         _phase = Phase::None;
         _useFallbackWallCalibration = false;
-        _sideReferenceDistancesM = {};
-        _sideReferenceValid = {};
+        _leftSideReferenceDistanceM = 0.0f;
+        _rightSideReferenceDistanceM = 0.0f;
+        _leftSideReferenceValid = false;
+        _rightSideReferenceValid = false;
+        ResetWallSamplingState();
+        ResetImuCalibrationState();
+    }
+
+    void StartupCalibration::ResetImuCalibrationState() noexcept
+    {
+        _imuCalibrationComplete = false;
+        _imuPhaseTicksRemaining = 0U;
+        _imuSampleCountdownTicks = 0U;
+        _imuRequiredSamples = 0UL;
+        _imuCollectedSamples = 0UL;
+        _imuStartLeftEncoderCounts = 0;
+        _imuStartRightEncoderCounts = 0;
+        _imuAccelMgSumX = 0.0;
+        _imuAccelMgSumY = 0.0;
+        _imuAccelMgSumZ = 0.0;
+        _imuGyroDpsSumX = 0.0;
+        _imuGyroDpsSumY = 0.0;
+        _imuGyroDpsSumZ = 0.0;
+        _imuGyroBiasRadpsSum = 0.0;
+        _imuAccelBiasRightGSum = 0.0;
+        _imuAccelBiasForwardGSum = 0.0;
+        _imuBaselineAccelMgX = 0.0f;
+        _imuBaselineAccelMgY = 0.0f;
+        _imuBaselineAccelMgZ = 0.0f;
+        _imuBaselineGyroDpsX = 0.0f;
+        _imuBaselineGyroDpsY = 0.0f;
+        _imuBaselineGyroDpsZ = 0.0f;
     }
 
     void StartupCalibration::UpdateDoneState(bool& done) noexcept
@@ -336,7 +377,7 @@ namespace MazeMap::App::Internal
         if ((_runtime != nullptr) && (reason != nullptr) && (reason[0] != '\0'))
         {
             (void)_runtime->WriteTextLogEntry(
-                kStartupCalibrationLogSource,
+                kLogSource,
                 micros(),
                 "issue",
                 reason);
@@ -349,27 +390,47 @@ namespace MazeMap::App::Internal
         {
             _wallTouch->Cancel();
         }
+        ResetWallSamplingState();
+        if (_vehicle != nullptr)
+        {
+            _vehicle->BackLeftImu().DisableSelfTest();
+        }
 
         LogIssue(reason);
         _phase = Phase::ReportCompletion;
     }
 
+    [[noreturn]] void StartupCalibration::FailCalibration(const char* const reason) noexcept
+    {
+        if (_vehicle != nullptr)
+        {
+            _vehicle->BackLeftImu().DisableSelfTest();
+        }
+        if (_runtime != nullptr)
+        {
+            _runtime->FailActiveMode(reason);
+        }
+        while (true)
+        {
+        }
+    }
+
     void StartupCalibration::RefreshSensorsCalibrated() noexcept
     {
-        SensorCalibration calibrated = _broughtUp ? SensorCalibration::Imu : SensorCalibration::None;
-        if (HasFrontBaselineCalibration(WallSensorId::FrontLeft))
+        SensorCalibration calibrated = _imuCalibrationComplete ? SensorCalibration::Imu : SensorCalibration::None;
+        if (HasFrontLeftBaselineCalibration())
         {
             calibrated |= SensorCalibration::FrontLeft;
         }
-        if (HasFrontBaselineCalibration(WallSensorId::FrontRight))
+        if (HasFrontRightBaselineCalibration())
         {
             calibrated |= SensorCalibration::FrontRight;
         }
-        if (HasFullSideCalibration(WallSensorId::SideLeft))
+        if (HasFullSideCalibration(MazeMap::RelativeDirection::Left90))
         {
             calibrated |= SensorCalibration::SideLeft;
         }
-        if (HasFullSideCalibration(WallSensorId::SideRight))
+        if (HasFullSideCalibration(MazeMap::RelativeDirection::Right90))
         {
             calibrated |= SensorCalibration::SideRight;
         }
@@ -381,25 +442,427 @@ namespace MazeMap::App::Internal
     {
         float leftReferenceDistanceM = 0.0f;
         if (gWallDistanceCalibration.TryGetSideWallReferenceDistanceM(
-                WallSensorId::SideLeft,
+                MazeMap::RelativeDirection::Left90,
                 leftReferenceDistanceM) &&
             std::isfinite(leftReferenceDistanceM) &&
             (leftReferenceDistanceM > 0.0f))
         {
-            _sideReferenceDistancesM[0] = leftReferenceDistanceM;
-            _sideReferenceValid[0] = true;
+            _leftSideReferenceDistanceM = leftReferenceDistanceM;
+            _leftSideReferenceValid = true;
         }
 
         float rightReferenceDistanceM = 0.0f;
         if (gWallDistanceCalibration.TryGetSideWallReferenceDistanceM(
-                WallSensorId::SideRight,
+                MazeMap::RelativeDirection::Right90,
                 rightReferenceDistanceM) &&
             std::isfinite(rightReferenceDistanceM) &&
             (rightReferenceDistanceM > 0.0f))
         {
-            _sideReferenceDistancesM[1] = rightReferenceDistanceM;
-            _sideReferenceValid[1] = true;
+            _rightSideReferenceDistanceM = rightReferenceDistanceM;
+            _rightSideReferenceValid = true;
         }
+    }
+
+    std::uint32_t StartupCalibration::TicksForDurationUs(const std::uint32_t durationUs) const noexcept
+    {
+        if (durationUs == 0U)
+        {
+            return 0U;
+        }
+
+        const unsigned long controlPeriodUs =
+            (_controlPeriodUs == 0UL) ? Config::kControlPeriodUs : _controlPeriodUs;
+        if (controlPeriodUs == 0UL)
+        {
+            return 1U;
+        }
+
+        const std::uint32_t ticks = static_cast<std::uint32_t>(
+            (static_cast<unsigned long>(durationUs) + controlPeriodUs - 1UL) / controlPeriodUs);
+        return (ticks == 0U) ? 1U : ticks;
+    }
+
+    std::uint32_t StartupCalibration::TicksForDurationMs(const std::uint32_t durationMs) const noexcept
+    {
+        if (durationMs > ((std::numeric_limits<std::uint32_t>::max)() / 1000U))
+        {
+            return TicksForDurationUs((std::numeric_limits<std::uint32_t>::max)());
+        }
+        return TicksForDurationUs(durationMs * 1000U);
+    }
+
+    std::uint32_t StartupCalibration::ImuCalibrationSampleIntervalTicks() const noexcept
+    {
+        const std::uint32_t ticks = TicksForDurationUs(kImuCalibrationSampleIntervalUs);
+        return (ticks == 0U) ? 1U : ticks;
+    }
+
+    unsigned long StartupCalibration::RequiredGyroBiasSamples() const noexcept
+    {
+        const std::uint32_t sampleIntervalTicks = ImuCalibrationSampleIntervalTicks();
+        const unsigned long controlPeriodUs =
+            (_controlPeriodUs == 0UL) ? Config::kControlPeriodUs : _controlPeriodUs;
+        const unsigned long sampleIntervalUs =
+            static_cast<unsigned long>(sampleIntervalTicks) * controlPeriodUs;
+        if (sampleIntervalUs == 0UL)
+        {
+            return static_cast<unsigned long>(Config::kGyroBiasSamples);
+        }
+
+        const unsigned long minimumWindowUs =
+            static_cast<unsigned long>(Config::kGyroBiasMinimumAveragingWindowMs) * 1000UL;
+        const unsigned long minimumSamples =
+            (minimumWindowUs + sampleIntervalUs - 1UL) / sampleIntervalUs;
+        return (static_cast<unsigned long>(Config::kGyroBiasSamples) >= minimumSamples) ?
+            static_cast<unsigned long>(Config::kGyroBiasSamples) :
+            minimumSamples;
+    }
+
+    void StartupCalibration::CaptureCurrentEncoderTotalsForImuCalibration() noexcept
+    {
+        if (_sensors == nullptr)
+        {
+            _imuStartLeftEncoderCounts = 0;
+            _imuStartRightEncoderCounts = 0;
+            return;
+        }
+
+        std::int32_t leftCounts = 0;
+        std::int32_t rightCounts = 0;
+        _sensors->CaptureEncoderCountsForCalibration(leftCounts, rightCounts);
+        _imuStartLeftEncoderCounts = static_cast<std::int64_t>(leftCounts);
+        _imuStartRightEncoderCounts = static_cast<std::int64_t>(rightCounts);
+    }
+
+    bool StartupCalibration::EncoderTotalsChangedDuringImuCalibration() const noexcept
+    {
+        if (_sensors == nullptr)
+        {
+            return false;
+        }
+
+        return _sensors->HaveEncoderCountsChangedForCalibration(
+            static_cast<std::int32_t>(_imuStartLeftEncoderCounts),
+            static_cast<std::int32_t>(_imuStartRightEncoderCounts));
+    }
+
+    void StartupCalibration::RestartImuCalibrationAfterMotion(const char* const reason) noexcept
+    {
+        LogIssue(reason);
+        if (!BeginImuCalibration())
+        {
+            FailCalibration("StartupCalibration could not restart IMU calibration after encoder motion");
+        }
+    }
+
+    bool StartupCalibration::BeginImuCalibration() noexcept
+    {
+        if ((_vehicle == nullptr) || (_sensors == nullptr))
+        {
+            return false;
+        }
+
+        ResetImuCalibrationState();
+        _vehicle->BackLeftImu().ResetRuntimeCalibration();
+        if (!_vehicle->BackLeftImu().ConfigureRuntimeForControlPeriod(
+                _controlPeriodUs,
+                true,
+                Config::kMissionRuntimeAccelFilterFreq))
+        {
+            LogIssue("StartupCalibration could not configure IMU runtime sampling");
+            return false;
+        }
+
+        _vehicle->BackLeftImu().DisableSelfTest();
+        std::int32_t ignoredLeftCounts = 0;
+        std::int32_t ignoredRightCounts = 0;
+        _sensors->CaptureEncoderCountsForCalibration(ignoredLeftCounts, ignoredRightCounts);
+        CaptureCurrentEncoderTotalsForImuCalibration();
+        BeginImuSettlePhase(Phase::ImuBaselineSettle);
+        return true;
+    }
+
+    CommandVector StartupCalibration::RunImuCalibrationPhase(bool& done)
+    {
+        done = false;
+        if (EncoderTotalsChangedDuringImuCalibration())
+        {
+            RestartImuCalibrationAfterMotion(
+                "Encoder motion detected during stationary IMU calibration; restarting IMU self-test");
+            return CommandVector::Brake();
+        }
+
+        if ((_phase == Phase::ImuBaselineSettle) ||
+            (_phase == Phase::ImuStimulatedSettle) ||
+            (_phase == Phase::ImuDisabledSettle))
+        {
+            if (_imuPhaseTicksRemaining > 0U)
+            {
+                --_imuPhaseTicksRemaining;
+                return CommandVector::Brake();
+            }
+
+            if (_phase == Phase::ImuBaselineSettle)
+            {
+                BeginImuSamplePhase(Phase::ImuBaselineSample, kImuSelfTestAverageSamples);
+                return CommandVector::Brake();
+            }
+            if (_phase == Phase::ImuStimulatedSettle)
+            {
+                BeginImuSamplePhase(Phase::ImuStimulatedSample, kImuSelfTestAverageSamples);
+                return CommandVector::Brake();
+            }
+
+            CaptureCurrentEncoderTotalsForImuCalibration();
+            BeginImuSamplePhase(Phase::ImuBiasSample, RequiredGyroBiasSamples());
+            return CommandVector::Brake();
+        }
+
+        if ((_phase == Phase::ImuBaselineSample) ||
+            (_phase == Phase::ImuStimulatedSample) ||
+            (_phase == Phase::ImuBiasSample))
+        {
+            if (_imuSampleCountdownTicks > 0U)
+            {
+                --_imuSampleCountdownTicks;
+                return CommandVector::Brake();
+            }
+
+            if (_phase == Phase::ImuBiasSample)
+            {
+                AccumulateCurrentImuBiasSample();
+            }
+            else
+            {
+                AccumulateCurrentImuSelfTestSample();
+            }
+
+            if (_imuCollectedSamples < _imuRequiredSamples)
+            {
+                const std::uint32_t intervalTicks = ImuCalibrationSampleIntervalTicks();
+                _imuSampleCountdownTicks = (intervalTicks > 0U) ? (intervalTicks - 1U) : 0U;
+                return CommandVector::Brake();
+            }
+
+            if (_phase == Phase::ImuBaselineSample)
+            {
+                StoreCurrentSelfTestAverageAsBaseline();
+                _vehicle->BackLeftImu().EnablePositiveSelfTest();
+                BeginImuSettlePhase(Phase::ImuStimulatedSettle);
+                return CommandVector::Brake();
+            }
+            if (_phase == Phase::ImuStimulatedSample)
+            {
+                if (!ValidateAndStoreStimulatedSelfTestAverage())
+                {
+                    FailCalibration("StartupCalibration IMU self-test failed");
+                }
+                _vehicle->BackLeftImu().DisableSelfTest();
+                BeginImuSettlePhase(Phase::ImuDisabledSettle);
+                return CommandVector::Brake();
+            }
+
+            if (!CompleteImuBiasMeasurement())
+            {
+                FailCalibration("StartupCalibration could not complete IMU bias measurement");
+            }
+            if (!BeginMazeWallCalibration())
+            {
+                CompleteBestEffort("StartupCalibration could not begin wall calibration after IMU calibration");
+            }
+            UpdateDoneState(done);
+            return CommandVector::Brake();
+        }
+
+        CompleteBestEffort("StartupCalibration encountered an unexpected IMU calibration phase");
+        UpdateDoneState(done);
+        return CommandVector::Brake();
+    }
+
+    void StartupCalibration::BeginImuSettlePhase(const Phase phase) noexcept
+    {
+        _imuPhaseTicksRemaining = TicksForDurationUs(kImuSelfTestSettleUs);
+        _imuSampleCountdownTicks = 0U;
+        _phase = phase;
+    }
+
+    void StartupCalibration::BeginImuSamplePhase(
+        const Phase phase,
+        const unsigned long requiredSamples) noexcept
+    {
+        _imuRequiredSamples = requiredSamples;
+        _imuCollectedSamples = 0UL;
+        _imuSampleCountdownTicks = 0U;
+        _imuAccelMgSumX = 0.0;
+        _imuAccelMgSumY = 0.0;
+        _imuAccelMgSumZ = 0.0;
+        _imuGyroDpsSumX = 0.0;
+        _imuGyroDpsSumY = 0.0;
+        _imuGyroDpsSumZ = 0.0;
+        _imuGyroBiasRadpsSum = 0.0;
+        _imuAccelBiasRightGSum = 0.0;
+        _imuAccelBiasForwardGSum = 0.0;
+        _phase = phase;
+    }
+
+    void StartupCalibration::AccumulateCurrentImuSelfTestSample() noexcept
+    {
+        if (_vehicle == nullptr)
+        {
+            return;
+        }
+
+        const float accelMgPerLsb = _vehicle->BackLeftImu().AccelSensitivityMgPerLsb();
+        const float gyroDpsPerLsb = _vehicle->BackLeftImu().GyroSensitivityMdpsPerLsb() / 1000.0f;
+        _imuAccelMgSumX += static_cast<double>(_vehicle->BackLeftImu().ReadAccelX()) * accelMgPerLsb;
+        _imuAccelMgSumY += static_cast<double>(_vehicle->BackLeftImu().ReadAccelY()) * accelMgPerLsb;
+        _imuAccelMgSumZ += static_cast<double>(_vehicle->BackLeftImu().ReadAccelZ()) * accelMgPerLsb;
+        _imuGyroDpsSumX += static_cast<double>(_vehicle->BackLeftImu().ReadGyroX()) * gyroDpsPerLsb;
+        _imuGyroDpsSumY += static_cast<double>(_vehicle->BackLeftImu().ReadGyroY()) * gyroDpsPerLsb;
+        _imuGyroDpsSumZ += static_cast<double>(_vehicle->BackLeftImu().ReadGyroZ()) * gyroDpsPerLsb;
+        ++_imuCollectedSamples;
+    }
+
+    void StartupCalibration::AccumulateCurrentImuBiasSample() noexcept
+    {
+        if (_vehicle == nullptr)
+        {
+            return;
+        }
+
+        const Eigen::Vector2f accelBodyG = _vehicle->BackLeftImu().AccelRawToBodyPlanarG(
+            _vehicle->BackLeftImu().ReadAccelX(),
+            _vehicle->BackLeftImu().ReadAccelY());
+        _imuAccelBiasRightGSum += static_cast<double>(accelBodyG.x());
+        _imuAccelBiasForwardGSum += static_cast<double>(accelBodyG.y());
+        _imuGyroBiasRadpsSum += static_cast<double>(_vehicle->BackLeftImu().ReadBodyYawRateRadps());
+        ++_imuCollectedSamples;
+    }
+
+    void StartupCalibration::StoreCurrentSelfTestAverageAsBaseline() noexcept
+    {
+        if (_imuCollectedSamples == 0UL)
+        {
+            _imuBaselineAccelMgX = 0.0f;
+            _imuBaselineAccelMgY = 0.0f;
+            _imuBaselineAccelMgZ = 0.0f;
+            _imuBaselineGyroDpsX = 0.0f;
+            _imuBaselineGyroDpsY = 0.0f;
+            _imuBaselineGyroDpsZ = 0.0f;
+            return;
+        }
+
+        const double normalization = 1.0 / static_cast<double>(_imuCollectedSamples);
+        _imuBaselineAccelMgX = static_cast<float>(_imuAccelMgSumX * normalization);
+        _imuBaselineAccelMgY = static_cast<float>(_imuAccelMgSumY * normalization);
+        _imuBaselineAccelMgZ = static_cast<float>(_imuAccelMgSumZ * normalization);
+        _imuBaselineGyroDpsX = static_cast<float>(_imuGyroDpsSumX * normalization);
+        _imuBaselineGyroDpsY = static_cast<float>(_imuGyroDpsSumY * normalization);
+        _imuBaselineGyroDpsZ = static_cast<float>(_imuGyroDpsSumZ * normalization);
+    }
+
+    bool StartupCalibration::ValidateAndStoreStimulatedSelfTestAverage() noexcept
+    {
+        if ((_vehicle == nullptr) || (_imuCollectedSamples == 0UL))
+        {
+            return false;
+        }
+
+        const double normalization = 1.0 / static_cast<double>(_imuCollectedSamples);
+        const float stimulatedAccelMgX = static_cast<float>(_imuAccelMgSumX * normalization);
+        const float stimulatedAccelMgY = static_cast<float>(_imuAccelMgSumY * normalization);
+        const float stimulatedAccelMgZ = static_cast<float>(_imuAccelMgSumZ * normalization);
+        const float stimulatedGyroDpsX = static_cast<float>(_imuGyroDpsSumX * normalization);
+        const float stimulatedGyroDpsY = static_cast<float>(_imuGyroDpsSumY * normalization);
+        const float stimulatedGyroDpsZ = static_cast<float>(_imuGyroDpsSumZ * normalization);
+        const float accelDeltaMgX = std::fabs(stimulatedAccelMgX - _imuBaselineAccelMgX);
+        const float accelDeltaMgY = std::fabs(stimulatedAccelMgY - _imuBaselineAccelMgY);
+        const float accelDeltaMgZ = std::fabs(stimulatedAccelMgZ - _imuBaselineAccelMgZ);
+        const float gyroDeltaDpsX = std::fabs(stimulatedGyroDpsX - _imuBaselineGyroDpsX);
+        const float gyroDeltaDpsY = std::fabs(stimulatedGyroDpsY - _imuBaselineGyroDpsY);
+        const float gyroDeltaDpsZ = std::fabs(stimulatedGyroDpsZ - _imuBaselineGyroDpsZ);
+        const bool ok = _vehicle->BackLeftImu().SelfTestDeltasValid(
+            accelDeltaMgX,
+            accelDeltaMgY,
+            accelDeltaMgZ,
+            gyroDeltaDpsX,
+            gyroDeltaDpsY,
+            gyroDeltaDpsZ);
+        if (!ok && (_runtime != nullptr))
+        {
+            (void)_runtime->AppendTextLogFormatted(
+                "IMU stationary self-test failed; accel_delta_mg=[%.1f,%.1f,%.1f], gyro_delta_dps=[%.1f,%.1f,%.1f]",
+                accelDeltaMgX,
+                accelDeltaMgY,
+                accelDeltaMgZ,
+                gyroDeltaDpsX,
+                gyroDeltaDpsY,
+                gyroDeltaDpsZ);
+        }
+        return ok;
+    }
+
+    bool StartupCalibration::CompleteImuBiasMeasurement() noexcept
+    {
+        if ((_vehicle == nullptr) || (_imuCollectedSamples == 0UL))
+        {
+            return false;
+        }
+
+        const double normalization = 1.0 / static_cast<double>(_imuCollectedSamples);
+        const float gyroBiasRadps = static_cast<float>(_imuGyroBiasRadpsSum * normalization);
+        const float accelBiasRightG = static_cast<float>(_imuAccelBiasRightGSum * normalization);
+        const float accelBiasForwardG = static_cast<float>(_imuAccelBiasForwardGSum * normalization);
+        _vehicle->BackLeftImu().SetRuntimeCalibration(
+            gyroBiasRadps,
+            true,
+            accelBiasRightG,
+            accelBiasForwardG);
+        _imuCalibrationComplete = true;
+        if (_runtime != nullptr)
+        {
+            (void)_runtime->Estimator().SetGyroBiasZ(gyroBiasRadps);
+        }
+        RefreshSensorsCalibrated();
+        return true;
+    }
+
+    bool StartupCalibration::BeginMazeWallCalibration() noexcept
+    {
+        if (!_isInMaze)
+        {
+            _phase = Phase::ReportCompletion;
+            return true;
+        }
+
+        _useFallbackWallCalibration = !HasAnyWallCalibrationData();
+        if ((_runtime == nullptr) ||
+            (_sensors == nullptr) ||
+            (_driveService == nullptr) ||
+            (_wallTouch == nullptr) ||
+            (_vehicle == nullptr))
+        {
+            return false;
+        }
+        if (_useFallbackWallCalibration)
+        {
+            LogIssue("StartupCalibration is falling back to live wall calibration because no saved wall-calibration dataset was available");
+        }
+
+        if (!_runtime->Estimator().ResetPose(
+                StartupCellCenterCoordinateM(),
+                Config::kMissionStartRearWallInsetM,
+                DirectionToYawRad(MazeMap::Up)))
+        {
+            CompleteBestEffort(_runtime->Estimator().FaultReason());
+            return true;
+        }
+        if (!BeginDriveHoldPhase(Phase::SouthStartHold, Config::kStartupWallCalibrationSettleMs))
+        {
+            CompleteBestEffort("StartupCalibration could not begin the initial startup settle");
+            return true;
+        }
+        return true;
     }
 
     bool StartupCalibration::BeginDriveHoldPhase(const Phase phase, const std::uint16_t durationMs) noexcept
@@ -564,20 +1027,20 @@ namespace MazeMap::App::Internal
         case Phase::RotateSouth:
             if (!BeginWallTouchPhase(Phase::SouthTouch, MazeMap::Down))
             {
-                LogIssue("StartupCalibration could not begin the south-wall advisory touch and will try a west-wall fallback");
+                LogIssue("StartupCalibration could not begin the south-wall advisory touch and will try to continue");
                 if (!BeginDriveTurnPhase(Phase::RotateWestReseat, MazeMap::Left))
                 {
-                    CompleteBestEffort("StartupCalibration could not rotate west for fallback reseat");
+                    CompleteBestEffort("StartupCalibration could not rotate west after the failed south-wall advisory touch");
                 }
             }
             return;
         case Phase::RotateWestReseat:
             if (!BeginWallTouchPhase(Phase::WestTouch, MazeMap::Left))
             {
-                LogIssue("StartupCalibration could not begin the west-wall advisory touch and will finish without pose reseat");
+                LogIssue("StartupCalibration could not begin the west-wall advisory touch and will try to finish without that reseat");
                 if (!BeginDriveTurnPhase(Phase::RotateNorth, MazeMap::Up))
                 {
-                    CompleteBestEffort("StartupCalibration could not rotate north for the final front-baseline capture");
+                    CompleteBestEffort("StartupCalibration could not rotate north after the failed west-wall advisory touch");
                 }
             }
             return;
@@ -634,37 +1097,71 @@ namespace MazeMap::App::Internal
             return false;
         }
 
-        WallSensorCalibrationCapture leftCapture{};
-        WallSensorCalibrationCapture rightCapture{};
-        SampleWallCalibrationCaptureAverageRawPair(
-            WallSensorId::SideLeft,
-            _vehicle->SideLeftWallSensor(),
-            WallSensorId::SideRight,
-            _vehicle->SideRightWallSensor(),
-            leftCapture,
-            rightCapture);
+        bool sampleComplete = false;
+        if (!SampleSideWallPair(sampleComplete))
+        {
+            return false;
+        }
+        if (!sampleComplete)
+        {
+            return true;
+        }
+
+        const float leftMeasuredValue = _wallFirstMeasuredValue;
+        const float leftAmbientLight = _wallFirstAmbientLight;
+        const float leftDifferentialLight = _wallFirstDifferentialLight;
+        const bool leftDifferentialLightBandValid = _wallFirstDifferentialLightBandValid;
+        const float leftDifferentialLightBandLow = _wallFirstDifferentialLightBandLow;
+        const float leftDifferentialLightBandHigh = _wallFirstDifferentialLightBandHigh;
+        const float rightMeasuredValue = _wallSecondMeasuredValue;
+        const float rightAmbientLight = _wallSecondAmbientLight;
+        const float rightDifferentialLight = _wallSecondDifferentialLight;
+        const bool rightDifferentialLightBandValid = _wallSecondDifferentialLightBandValid;
+        const float rightDifferentialLightBandLow = _wallSecondDifferentialLightBandLow;
+        const float rightDifferentialLightBandHigh = _wallSecondDifferentialLightBandHigh;
 
         if (_useFallbackWallCalibration)
         {
             float actualDistanceM = 0.0f;
             const bool storedReference =
-                TryDistanceToSouthWall(_runtime->RuntimeState(), _vehicle->SideLeftWallSensor(), actualDistanceM) &&
-                StoreSideReference(WallSensorId::SideLeft, leftCapture, actualDistanceM);
+                TryComputeDistanceToSouthStartWall(
+                    _runtime->RuntimeState(),
+                    _vehicle->SideLeftWallSensor(),
+                    actualDistanceM) &&
+                StoreSideReference(
+                    MazeMap::RelativeDirection::Left90,
+                    leftMeasuredValue,
+                    leftAmbientLight,
+                    leftDifferentialLight,
+                    leftDifferentialLightBandValid,
+                    leftDifferentialLightBandLow,
+                    leftDifferentialLightBandHigh,
+                    actualDistanceM);
             if (storedReference)
             {
-                _sideReferenceDistancesM[0] = actualDistanceM;
-                _sideReferenceValid[0] = true;
+                _leftSideReferenceDistanceM = actualDistanceM;
+                _leftSideReferenceValid = true;
             }
             else
             {
                 LogIssue("StartupCalibration could not derive the west-facing left-side wall reference and will retain baseline-only coverage");
-                if (!StoreSideBaseline(WallSensorId::SideLeft, leftCapture))
+                if (!StoreSideBaseline(
+                        MazeMap::RelativeDirection::Left90,
+                        leftDifferentialLight,
+                        leftDifferentialLightBandValid,
+                        leftDifferentialLightBandLow,
+                        leftDifferentialLightBandHigh))
                 {
                     LogIssue("StartupCalibration could not store the west-facing left-side baseline");
                 }
             }
         }
-        if (!StoreSideBaseline(WallSensorId::SideRight, rightCapture))
+        if (!StoreSideBaseline(
+                MazeMap::RelativeDirection::Right90,
+                rightDifferentialLight,
+                rightDifferentialLightBandValid,
+                rightDifferentialLightBandLow,
+                rightDifferentialLightBandHigh))
         {
             LogIssue("StartupCalibration could not store the west-facing right-side baseline");
         }
@@ -686,40 +1183,75 @@ namespace MazeMap::App::Internal
             return false;
         }
 
-        WallSensorCalibrationCapture leftCapture{};
-        WallSensorCalibrationCapture rightCapture{};
-        SampleWallCalibrationCaptureAverageRawPair(
-            WallSensorId::SideLeft,
-            _vehicle->SideLeftWallSensor(),
-            WallSensorId::SideRight,
-            _vehicle->SideRightWallSensor(),
-            leftCapture,
-            rightCapture);
+        bool sampleComplete = false;
+        if (!SampleSideWallPair(sampleComplete))
+        {
+            return false;
+        }
+        if (!sampleComplete)
+        {
+            return true;
+        }
+
+        const float leftMeasuredValue = _wallFirstMeasuredValue;
+        const float leftAmbientLight = _wallFirstAmbientLight;
+        const float leftDifferentialLight = _wallFirstDifferentialLight;
+        const bool leftDifferentialLightBandValid = _wallFirstDifferentialLightBandValid;
+        const float leftDifferentialLightBandLow = _wallFirstDifferentialLightBandLow;
+        const float leftDifferentialLightBandHigh = _wallFirstDifferentialLightBandHigh;
+        const float rightMeasuredValue = _wallSecondMeasuredValue;
+        const float rightAmbientLight = _wallSecondAmbientLight;
+        const float rightDifferentialLight = _wallSecondDifferentialLight;
+        const bool rightDifferentialLightBandValid = _wallSecondDifferentialLightBandValid;
+        const float rightDifferentialLightBandLow = _wallSecondDifferentialLightBandLow;
+        const float rightDifferentialLightBandHigh = _wallSecondDifferentialLightBandHigh;
 
         if (_useFallbackWallCalibration)
         {
             float actualDistanceM = 0.0f;
             const bool storedReference =
-                TryDistanceToSouthWall(_runtime->RuntimeState(), _vehicle->SideRightWallSensor(), actualDistanceM) &&
-                StoreSideReference(WallSensorId::SideRight, rightCapture, actualDistanceM);
+                TryComputeDistanceToSouthStartWall(
+                    _runtime->RuntimeState(),
+                    _vehicle->SideRightWallSensor(),
+                    actualDistanceM) &&
+                StoreSideReference(
+                    MazeMap::RelativeDirection::Right90,
+                    rightMeasuredValue,
+                    rightAmbientLight,
+                    rightDifferentialLight,
+                    rightDifferentialLightBandValid,
+                    rightDifferentialLightBandLow,
+                    rightDifferentialLightBandHigh,
+                    actualDistanceM);
             if (storedReference)
             {
-                _sideReferenceDistancesM[1] = actualDistanceM;
-                _sideReferenceValid[1] = true;
+                _rightSideReferenceDistanceM = actualDistanceM;
+                _rightSideReferenceValid = true;
             }
             else
             {
                 LogIssue("StartupCalibration could not derive the east-facing right-side wall reference and will retain baseline-only coverage");
-                if (!StoreSideBaseline(WallSensorId::SideRight, rightCapture))
+                if (!StoreSideBaseline(
+                        MazeMap::RelativeDirection::Right90,
+                        rightDifferentialLight,
+                        rightDifferentialLightBandValid,
+                        rightDifferentialLightBandLow,
+                        rightDifferentialLightBandHigh))
                 {
                     LogIssue("StartupCalibration could not store the east-facing right-side baseline");
                 }
             }
         }
-        if (!StoreSideBaseline(WallSensorId::SideLeft, leftCapture))
+        if (!StoreSideBaseline(
+                MazeMap::RelativeDirection::Left90,
+                leftDifferentialLight,
+                leftDifferentialLightBandValid,
+                leftDifferentialLightBandLow,
+                leftDifferentialLightBandHigh))
         {
             LogIssue("StartupCalibration could not store the east-facing left-side baseline");
         }
+
         const Phase nextPhase = _useFallbackWallCalibration ? Phase::RotateSouth : Phase::RotateNorth;
         const MazeMap::Direction nextDirection = _useFallbackWallCalibration ? MazeMap::Down : MazeMap::Up;
         if (!BeginDriveTurnPhase(nextPhase, nextDirection))
@@ -742,49 +1274,60 @@ namespace MazeMap::App::Internal
             return false;
         }
 
-        WallSensorCalibrationCapture frontLeftCapture{};
-        WallSensorCalibrationCapture frontRightCapture{};
-        SampleWallCalibrationCaptureAverageRawPair(
-            WallSensorId::FrontLeft,
-            _vehicle->FrontLeftWallSensor(),
-            WallSensorId::FrontRight,
-            _vehicle->FrontRightWallSensor(),
-            frontLeftCapture,
-            frontRightCapture);
+        bool sampleComplete = false;
+        if (!SampleFrontWallPair(sampleComplete))
+        {
+            return false;
+        }
+        if (!sampleComplete)
+        {
+            return true;
+        }
 
-        if (!StoreFrontBaseline(WallSensorId::FrontLeft, frontLeftCapture))
+        const float frontLeftDifferentialLight = _wallFirstDifferentialLight;
+        const bool frontLeftDifferentialLightBandValid = _wallFirstDifferentialLightBandValid;
+        const float frontLeftDifferentialLightBandLow = _wallFirstDifferentialLightBandLow;
+        const float frontLeftDifferentialLightBandHigh = _wallFirstDifferentialLightBandHigh;
+        const float frontRightDifferentialLight = _wallSecondDifferentialLight;
+        const bool frontRightDifferentialLightBandValid = _wallSecondDifferentialLightBandValid;
+        const float frontRightDifferentialLightBandLow = _wallSecondDifferentialLightBandLow;
+        const float frontRightDifferentialLightBandHigh = _wallSecondDifferentialLightBandHigh;
+
+        if (!StoreFrontLeftBaseline(
+                frontLeftDifferentialLight,
+                frontLeftDifferentialLightBandValid,
+                frontLeftDifferentialLightBandLow,
+                frontLeftDifferentialLightBandHigh))
         {
             LogIssue("StartupCalibration could not store the front-left baseline");
         }
-        if (!StoreFrontBaseline(WallSensorId::FrontRight, frontRightCapture))
+        if (!StoreFrontRightBaseline(
+                frontRightDifferentialLight,
+                frontRightDifferentialLightBandValid,
+                frontRightDifferentialLightBandLow,
+                frontRightDifferentialLightBandHigh))
         {
             LogIssue("StartupCalibration could not store the front-right baseline");
         }
 
-        if (_sideReferenceValid[0] && _sideReferenceValid[1])
+        if (_leftSideReferenceValid && _rightSideReferenceValid)
         {
             const float expectedSideWallDistanceM =
-                0.5f * (_sideReferenceDistancesM[0] + _sideReferenceDistancesM[1]);
+                0.5f * (_leftSideReferenceDistanceM + _rightSideReferenceDistanceM);
             gWallDistanceCalibration.SetExpectedSideWallDistanceM(expectedSideWallDistanceM);
         }
         else
         {
             LogIssue("StartupCalibration completed without full side-wall references and will keep the best available side-wall distance model");
         }
-        if (_runtime != nullptr)
+
+        if (!_runtime->Estimator().ResetPose(
+                StartupCellCenterCoordinateM(),
+                StartupCellCenterCoordinateM(),
+                DirectionToYawRad(MazeMap::Up)))
         {
-            if (!_runtime->Estimator().ResetPose(
-                    StartupCellCenterCoordinateM(),
-                    StartupCellCenterCoordinateM(),
-                    DirectionToYawRad(MazeMap::Up)))
-            {
-                CompleteBestEffort(_runtime->Estimator().FaultReason());
-                return false;
-            }
-        }
-        else
-        {
-            LogIssue("StartupCalibration could not reseat the final startup pose because shared runtime was unavailable");
+            CompleteBestEffort(_runtime->Estimator().FaultReason());
+            return false;
         }
         if (!BeginDriveHoldPhase(Phase::FinalHold, Config::kStartupWallCalibrationSettleMs))
         {
@@ -795,31 +1338,305 @@ namespace MazeMap::App::Internal
         return true;
     }
 
-    bool StartupCalibration::StoreSideReference(
-        const WallSensorId sensorId,
-        const WallSensorCalibrationCapture& capture,
-        const float actualDistanceM) noexcept
+    bool StartupCalibration::SampleSideWallPair(bool& sampleComplete) noexcept
     {
-        const WallSensorCalibrationInput& input = capture.input;
-        if (!(std::isfinite(actualDistanceM) &&
-            (actualDistanceM > 0.0f) &&
-            std::isfinite(input.measuredValue) &&
-            (input.measuredValue > 0.0f) &&
-            std::isfinite(input.differentialLight) &&
-            (input.differentialLight > 0.0f) &&
-            gWallDistanceCalibration.AddPoint(sensorId, input.measuredValue, actualDistanceM, input.ambientLight)))
+        sampleComplete = false;
+        if (_vehicle == nullptr)
         {
             return false;
         }
 
-        gWallDistanceCalibration.SetSideWallReferenceDifferentialLight(sensorId, input.differentialLight);
-        gWallDistanceCalibration.SetSideWallReferenceDistanceM(sensorId, actualDistanceM);
-        if (capture.haveDifferentialLightBand && IsValidPositiveBand(capture.differentialLightBand))
+        if (!_wallSampleActive)
+        {
+            if (!BeginWallSensorPairSampling(
+                    _vehicle->SideLeftWallSensor(),
+                    _vehicle->SideRightWallSensor(),
+                    true))
+            {
+                return false;
+            }
+        }
+
+        return ServiceWallSensorPairSampling(sampleComplete);
+    }
+
+    bool StartupCalibration::SampleFrontWallPair(bool& sampleComplete) noexcept
+    {
+        sampleComplete = false;
+        if (_vehicle == nullptr)
+        {
+            return false;
+        }
+
+        if (!_wallSampleActive)
+        {
+            if (!BeginWallSensorPairSampling(
+                    _vehicle->FrontLeftWallSensor(),
+                    _vehicle->FrontRightWallSensor(),
+                    false))
+            {
+                return false;
+            }
+        }
+
+        return ServiceWallSensorPairSampling(sampleComplete);
+    }
+
+    bool StartupCalibration::BeginWallSensorPairSampling(
+        MazeMap::WallSensor& first,
+        MazeMap::WallSensor& second,
+        const bool measuredValueFromRawDistance) noexcept
+    {
+        ResetWallSamplingState();
+        _wallSampleFirstSensor = &first;
+        _wallSampleSecondSensor = &second;
+        _wallSampleMeasuredValueFromRawDistance = measuredValueFromRawDistance;
+        _wallSampleTicksRemaining = TicksForDurationMs(kWallCalibrationPairSamplingTimeoutMs);
+        if (_wallSampleTicksRemaining == 0U)
+        {
+            _wallSampleTicksRemaining = 1U;
+        }
+        _wallSampleActive = true;
+
+        const std::uint32_t ledOffCommandUs = micros();
+        first.CommandLedOff(ledOffCommandUs);
+        second.CommandLedOff(ledOffCommandUs);
+        return true;
+    }
+
+    bool StartupCalibration::ServiceWallSensorPairSampling(bool& sampleComplete) noexcept
+    {
+        sampleComplete = false;
+        if (!_wallSampleActive ||
+            (_wallSampleFirstSensor == nullptr) ||
+            (_wallSampleSecondSensor == nullptr))
+        {
+            return false;
+        }
+
+        if (_wallSampleTicksRemaining == 0U)
+        {
+            _wallSampleTimedOut = true;
+            FinishWallSensorPairSampling();
+            sampleComplete = true;
+            return true;
+        }
+        --_wallSampleTicksRemaining;
+
+        MazeMap::WallSensor& first = *_wallSampleFirstSensor;
+        MazeMap::WallSensor& second = *_wallSampleSecondSensor;
+        if (!_wallSampleAmbientCaptured)
+        {
+            const std::uint32_t ambientNowUs = micros();
+            if (!first.IsAmbientReadReady(ambientNowUs) || !second.IsAmbientReadReady(ambientNowUs))
+            {
+                return true;
+            }
+
+            first.CaptureAmbientRead();
+            second.CaptureAmbientRead();
+            const std::uint32_t ledOnCommandUs = micros();
+            first.CommandLedOn(ledOnCommandUs);
+            second.CommandLedOn(ledOnCommandUs);
+            _wallSampleAmbientCaptured = true;
+        }
+
+        const std::uint32_t litNowUs = micros();
+        if (!first.IsLitReadReady(litNowUs) || !second.IsLitReadReady(litNowUs))
+        {
+            return true;
+        }
+
+        first.CaptureLitRead();
+        second.CaptureLitRead();
+        const std::uint32_t completeUs = micros();
+        first.CompleteCapture(completeUs);
+        second.CompleteCapture(completeUs);
+        AccumulateWallSensorPairSample();
+
+        if (_wallSampleCount >= kWallCalibrationSampleCount)
+        {
+            FinishWallSensorPairSampling();
+            sampleComplete = true;
+            return true;
+        }
+
+        const std::uint32_t nextLedOffCommandUs = micros();
+        first.CommandLedOff(nextLedOffCommandUs);
+        second.CommandLedOff(nextLedOffCommandUs);
+        _wallSampleAmbientCaptured = false;
+        return true;
+    }
+
+    void StartupCalibration::AccumulateWallSensorPairSample() noexcept
+    {
+        if ((_wallSampleFirstSensor == nullptr) ||
+            (_wallSampleSecondSensor == nullptr) ||
+            (_wallSampleCount >= kWallCalibrationSampleCount))
+        {
+            return;
+        }
+
+        const MazeMap::WallSensor& first = *_wallSampleFirstSensor;
+        const MazeMap::WallSensor& second = *_wallSampleSecondSensor;
+        const std::uint16_t sampleIndex = _wallSampleCount;
+        const float firstMeasuredValue =
+            _wallSampleMeasuredValueFromRawDistance ? first.LatestRawDistanceM() : first.LatestDifferentialLight();
+        const float secondMeasuredValue =
+            _wallSampleMeasuredValueFromRawDistance ? second.LatestRawDistanceM() : second.LatestDifferentialLight();
+        const float firstDifferentialLight = first.LatestDifferentialLight();
+        const float secondDifferentialLight = second.LatestDifferentialLight();
+        _wallFirstDifferentialSamples[sampleIndex] = firstDifferentialLight;
+        _wallSecondDifferentialSamples[sampleIndex] = secondDifferentialLight;
+        AccumulateFiniteWallValue(firstMeasuredValue, _wallFirstMeasuredSum, _wallFirstMeasuredCount);
+        AccumulateFiniteWallValue(first.LatestAmbientLight(), _wallFirstAmbientSum, _wallFirstAmbientCount);
+        AccumulateFiniteWallValue(firstDifferentialLight, _wallFirstDifferentialSum, _wallFirstDifferentialCount);
+        AccumulateFiniteWallValue(secondMeasuredValue, _wallSecondMeasuredSum, _wallSecondMeasuredCount);
+        AccumulateFiniteWallValue(second.LatestAmbientLight(), _wallSecondAmbientSum, _wallSecondAmbientCount);
+        AccumulateFiniteWallValue(secondDifferentialLight, _wallSecondDifferentialSum, _wallSecondDifferentialCount);
+        ++_wallSampleCount;
+    }
+
+    void StartupCalibration::FinishWallSensorPairSampling() noexcept
+    {
+        if (_wallSampleTimedOut)
+        {
+            if ((_wallSampleFirstSensor != nullptr) && (_wallSampleSecondSensor != nullptr))
+            {
+                const std::uint32_t ledOffCommandUs = micros();
+                _wallSampleFirstSensor->CommandLedOff(ledOffCommandUs);
+                _wallSampleSecondSensor->CommandLedOff(ledOffCommandUs);
+            }
+            LogIssue(
+                (_wallSampleCount > 0U) ?
+                    "StartupCalibration wall-sensor sampling timed out and will continue with partial samples" :
+                    "StartupCalibration wall-sensor sampling timed out with no completed samples");
+        }
+
+        _wallFirstMeasuredValue = AverageWallCalibrationSum(_wallFirstMeasuredSum, _wallFirstMeasuredCount);
+        _wallFirstAmbientLight = AverageWallCalibrationSum(_wallFirstAmbientSum, _wallFirstAmbientCount);
+        _wallFirstDifferentialLight = AverageWallCalibrationSum(_wallFirstDifferentialSum, _wallFirstDifferentialCount);
+        float median = 0.0f;
+        _wallFirstDifferentialLightBandValid = MazeMap::TryComputeRobustSignalBandFromSamples(
+            _wallFirstDifferentialSamples,
+            _wallSampleCount,
+            MazeMap::Config::kWallCalibrationScaledMadMultiplier,
+            median,
+            _wallFirstDifferentialLightBandLow,
+            _wallFirstDifferentialLightBandHigh);
+
+        _wallSecondMeasuredValue = AverageWallCalibrationSum(_wallSecondMeasuredSum, _wallSecondMeasuredCount);
+        _wallSecondAmbientLight = AverageWallCalibrationSum(_wallSecondAmbientSum, _wallSecondAmbientCount);
+        _wallSecondDifferentialLight = AverageWallCalibrationSum(
+            _wallSecondDifferentialSum,
+            _wallSecondDifferentialCount);
+        median = 0.0f;
+        _wallSecondDifferentialLightBandValid = MazeMap::TryComputeRobustSignalBandFromSamples(
+            _wallSecondDifferentialSamples,
+            _wallSampleCount,
+            MazeMap::Config::kWallCalibrationScaledMadMultiplier,
+            median,
+            _wallSecondDifferentialLightBandLow,
+            _wallSecondDifferentialLightBandHigh);
+
+        _wallSampleFirstSensor = nullptr;
+        _wallSampleSecondSensor = nullptr;
+        _wallSampleActive = false;
+        _wallSampleAmbientCaptured = false;
+    }
+
+    void StartupCalibration::ResetWallSamplingState() noexcept
+    {
+        _wallSampleFirstSensor = nullptr;
+        _wallSampleSecondSensor = nullptr;
+        _wallFirstDifferentialSamples.fill(0.0f);
+        _wallSecondDifferentialSamples.fill(0.0f);
+        _wallSampleCount = 0U;
+        _wallFirstMeasuredCount = 0U;
+        _wallFirstAmbientCount = 0U;
+        _wallFirstDifferentialCount = 0U;
+        _wallSecondMeasuredCount = 0U;
+        _wallSecondAmbientCount = 0U;
+        _wallSecondDifferentialCount = 0U;
+        _wallSampleTicksRemaining = 0U;
+        _wallSampleActive = false;
+        _wallSampleAmbientCaptured = false;
+        _wallSampleMeasuredValueFromRawDistance = false;
+        _wallSampleTimedOut = false;
+        _wallFirstMeasuredSum = 0.0;
+        _wallFirstAmbientSum = 0.0;
+        _wallFirstDifferentialSum = 0.0;
+        _wallSecondMeasuredSum = 0.0;
+        _wallSecondAmbientSum = 0.0;
+        _wallSecondDifferentialSum = 0.0;
+        _wallFirstMeasuredValue = 0.0f;
+        _wallFirstAmbientLight = 0.0f;
+        _wallFirstDifferentialLight = 0.0f;
+        _wallFirstDifferentialLightBandValid = false;
+        _wallFirstDifferentialLightBandLow = 0.0f;
+        _wallFirstDifferentialLightBandHigh = 0.0f;
+        _wallSecondMeasuredValue = 0.0f;
+        _wallSecondAmbientLight = 0.0f;
+        _wallSecondDifferentialLight = 0.0f;
+        _wallSecondDifferentialLightBandValid = false;
+        _wallSecondDifferentialLightBandLow = 0.0f;
+        _wallSecondDifferentialLightBandHigh = 0.0f;
+    }
+
+    void StartupCalibration::AccumulateFiniteWallValue(
+        const float sample,
+        double& sum,
+        std::uint16_t& count) noexcept
+    {
+        if (!std::isfinite(sample))
+        {
+            return;
+        }
+
+        sum += static_cast<double>(sample);
+        ++count;
+    }
+
+    float StartupCalibration::AverageWallCalibrationSum(const double sum, const std::uint16_t count) noexcept
+    {
+        if (count == 0U)
+        {
+            return 0.0f;
+        }
+
+        return static_cast<float>(sum / static_cast<double>(count));
+    }
+
+    bool StartupCalibration::StoreSideReference(
+        const MazeMap::RelativeDirection side,
+        const float measuredValue,
+        const float ambientLight,
+        const float differentialLight,
+        const bool differentialLightBandValid,
+        const float differentialLightBandLow,
+        const float differentialLightBandHigh,
+        const float actualDistanceM) noexcept
+    {
+        if (!(std::isfinite(actualDistanceM) &&
+            (actualDistanceM > 0.0f) &&
+            std::isfinite(measuredValue) &&
+            (measuredValue > 0.0f) &&
+            std::isfinite(differentialLight) &&
+            (differentialLight > 0.0f) &&
+            gWallDistanceCalibration.AddSidePoint(side, measuredValue, actualDistanceM, ambientLight)))
+        {
+            return false;
+        }
+
+        gWallDistanceCalibration.SetSideWallReferenceDifferentialLight(side, differentialLight);
+        gWallDistanceCalibration.SetSideWallReferenceDistanceM(side, actualDistanceM);
+        if (differentialLightBandValid &&
+            IsValidPositiveBand(differentialLightBandLow, differentialLightBandHigh))
         {
             gWallDistanceCalibration.SetSideWallReferenceDifferentialLightBand(
-                sensorId,
-                capture.differentialLightBand.low,
-                capture.differentialLightBand.high);
+                side,
+                differentialLightBandLow,
+                differentialLightBandHigh);
         }
 
         RefreshSensorsCalibrated();
@@ -827,46 +1644,71 @@ namespace MazeMap::App::Internal
     }
 
     bool StartupCalibration::StoreSideBaseline(
-        const WallSensorId sensorId,
-        const WallSensorCalibrationCapture& capture) noexcept
+        const MazeMap::RelativeDirection side,
+        const float differentialLight,
+        const bool differentialLightBandValid,
+        const float differentialLightBandLow,
+        const float differentialLightBandHigh) noexcept
     {
-        const WallSensorCalibrationInput& input = capture.input;
-        if (!(std::isfinite(input.differentialLight) && (input.differentialLight >= 0.0f)))
+        if (!(std::isfinite(differentialLight) && (differentialLight >= 0.0f)))
         {
             return false;
         }
 
-        gWallDistanceCalibration.SetSideWallBaselineDifferentialLight(sensorId, input.differentialLight);
-        if (capture.haveDifferentialLightBand && IsValidNonNegativeBand(capture.differentialLightBand))
+        gWallDistanceCalibration.SetSideWallBaselineDifferentialLight(side, differentialLight);
+        if (differentialLightBandValid &&
+            IsValidNonNegativeBand(differentialLightBandLow, differentialLightBandHigh))
         {
             gWallDistanceCalibration.SetSideWallBaselineDifferentialLightBand(
-                sensorId,
-                capture.differentialLightBand.low,
-                capture.differentialLightBand.high);
+                side,
+                differentialLightBandLow,
+                differentialLightBandHigh);
         }
 
         RefreshSensorsCalibrated();
         return true;
     }
 
-    bool StartupCalibration::StoreFrontBaseline(
-        const WallSensorId sensorId,
-        const WallSensorCalibrationCapture& capture) noexcept
+    bool StartupCalibration::StoreFrontLeftBaseline(
+        const float differentialLight,
+        const bool differentialLightBandValid,
+        const float differentialLightBandLow,
+        const float differentialLightBandHigh) noexcept
     {
-        const WallSensorCalibrationInput& input = capture.input;
-        if (!(std::isfinite(input.differentialLight) &&
-            (input.differentialLight >= 0.0f) &&
-            capture.haveDifferentialLightBand &&
-            IsValidNonNegativeBand(capture.differentialLightBand)))
+        if (!(std::isfinite(differentialLight) &&
+            (differentialLight >= 0.0f) &&
+            differentialLightBandValid &&
+            IsValidNonNegativeBand(differentialLightBandLow, differentialLightBandHigh)))
         {
             return false;
         }
 
-        gWallDistanceCalibration.SetFrontWallBaselineDifferentialLight(sensorId, input.differentialLight);
-        gWallDistanceCalibration.SetFrontWallBaselineDifferentialLightBand(
-            sensorId,
-            capture.differentialLightBand.low,
-            capture.differentialLightBand.high);
+        gWallDistanceCalibration.SetFrontLeftWallBaselineDifferentialLight(differentialLight);
+        gWallDistanceCalibration.SetFrontLeftWallBaselineDifferentialLightBand(
+            differentialLightBandLow,
+            differentialLightBandHigh);
+        RefreshSensorsCalibrated();
+        return true;
+    }
+
+    bool StartupCalibration::StoreFrontRightBaseline(
+        const float differentialLight,
+        const bool differentialLightBandValid,
+        const float differentialLightBandLow,
+        const float differentialLightBandHigh) noexcept
+    {
+        if (!(std::isfinite(differentialLight) &&
+            (differentialLight >= 0.0f) &&
+            differentialLightBandValid &&
+            IsValidNonNegativeBand(differentialLightBandLow, differentialLightBandHigh)))
+        {
+            return false;
+        }
+
+        gWallDistanceCalibration.SetFrontRightWallBaselineDifferentialLight(differentialLight);
+        gWallDistanceCalibration.SetFrontRightWallBaselineDifferentialLightBand(
+            differentialLightBandLow,
+            differentialLightBandHigh);
         RefreshSensorsCalibrated();
         return true;
     }

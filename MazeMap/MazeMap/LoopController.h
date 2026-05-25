@@ -1,7 +1,7 @@
 #pragma once
 
 #include "CommandVector.h"
-#include "SensorSnapshot.h"
+#include "RuntimeSensorSuite.h"
 #include "VehicleState.h"
 
 #include <cstdint>
@@ -65,11 +65,11 @@ namespace MazeMap::App::Internal
         // capture/output behavior from this mask instead of from separate special-case flags.
         enum class WallMask : std::uint8_t
         {
-            None = 0x00,  // No wall-sensor groups selected.
-            Front = 0x01, // Front wall-sensor group selected.
-            Left = 0x02,  // Left wall-sensor group selected.
-            Right = 0x04, // Right wall-sensor group selected.
-            All = 0x07    // All wall-sensor groups selected.
+            None = 0x00, // No wall-sensor groups selected.
+            Front = RuntimeSensorSuite::kFrontWallSensorBit, // Front wall-sensor group selected.
+            Left = RuntimeSensorSuite::kLeftWallSensorBit,   // Left wall-sensor group selected.
+            Right = RuntimeSensorSuite::kRightWallSensorBit, // Right wall-sensor group selected.
+            All = RuntimeSensorSuite::kWallSensorBits        // All wall-sensor groups selected.
         };
 
         // Sequence number of the first RunTick-eligible tick in every session.
@@ -279,13 +279,7 @@ namespace MazeMap::App::Internal
             std::uint16_t _overrunUs{};
         };
 
-        static constexpr std::uint8_t kWallSensorBits = 0x07U;
-        static constexpr std::uint8_t kEncoderSensorBit = 0x08U;
-        static constexpr std::uint8_t kGyroSensorBit = 0x10U;
-        static constexpr std::uint8_t kAccelSensorBit = 0x20U;
-        static constexpr std::uint8_t kWallUpdateSensorBit = 0x40U;
-        static constexpr std::uint8_t kDefaultSensorWorkBits =
-            kWallSensorBits | kEncoderSensorBit | kGyroSensorBit | kAccelSensorBit | kWallUpdateSensorBit;
+        static constexpr std::uint8_t kDefaultSensorWorkBits = RuntimeSensorSuite::kDefaultSensorWorkBits;
 
         static CommandVector RunApplicationModeTick(
             void* context,
@@ -296,16 +290,7 @@ namespace MazeMap::App::Internal
         static bool IsZeroCommand(const CommandVector& command) noexcept;
         static std::uint32_t ReadCycleCounter() noexcept;
         static void WaitUntilUs(std::uint32_t absoluteDeadlineUs) noexcept;
-        static bool SensorWorkBitsRequestWallSensors(std::uint8_t sensorWorkBits) noexcept;
         static void ServiceInterlacedSensorCapture(void* context) noexcept;
-        static void ClearFrontWallSnapshot(SensorSnapshot& snapshot) noexcept;
-        static void ClearLeftWallSnapshot(SensorSnapshot& snapshot) noexcept;
-        static void ClearRightWallSnapshot(SensorSnapshot& snapshot) noexcept;
-        static void ClearImuSnapshot(SensorSnapshot& snapshot) noexcept;
-        static void ApplySensorWorkBitsToSnapshot(
-            std::uint8_t sensorWorkBits,
-            SensorSnapshot& snapshot,
-            float expectedSideWallDistanceM) noexcept;
 
         void RunSessionStartWallSensorAdcProbe() noexcept;
         void AttachRuntime(SharedRobotRuntime& runtime) noexcept;

@@ -1,208 +1,150 @@
 #pragma once
 
-
-
-
-#if defined(_WIN32) || defined(_WIN64)
-
-#else
-#include <Arduino.h>
-#endif
+#include "Defines.h"
 #include "EigenCompat.h"
-#include <array>
-#include <assert.h>
-#include <cmath>
-#include <stddef.h>
-#include <stdint.h>
-#include "defines.h"
+#include "SensorTelemetryTypes.h"
 
+#include <array>
+#include <cstddef>
+#include <cstdint>
 
 namespace MazeMap
 {
+    class VehicleState;
 
-    class WallSensor
+    class EXPORT WallSensor
     {
     public:
-
-        struct DistanceModel
+        class DistanceModel final
         {
-            float scale;          // Numerator in d = scale / (delta^exponent)
-            float exponent;       // Positive exponent
-            float minDeltaLight;  // Prevents divide-by-near-zero / excessive range
-            float maxDistance;    // Clamp for very weak returns
+        public:
+            constexpr DistanceModel(
+                float scale,
+                float exponent,
+                float minDeltaLight,
+                float maxDistance) noexcept
+                : _scale(scale)
+                , _exponent(exponent)
+                , _minDeltaLight(minDeltaLight)
+                , _maxDistance(maxDistance)
+            {
+            }
+
+            float Scale() const noexcept;
+            float Exponent() const noexcept;
+            float MinDeltaLight() const noexcept;
+            float MaxDistance() const noexcept;
+            float DistanceFromDifferentialLight(float deltaLightLevel) const noexcept;
+
+        private:
+            float _scale;
+            float _exponent;
+            float _minDeltaLight;
+            float _maxDistance;
         };
 
         WallSensor(
-            uint8_t wallSensorInPin,
-            uint8_t ledOutPin,
+            std::uint8_t wallSensorInPin,
+            std::uint8_t ledOutPin,
             const Eigen::Vector2f& position,
             const Eigen::Vector2f& facingDirection,
             const std::array<float, 8>& adcToLightTable,
             const DistanceModel& distanceModel,
-            float noHitRangeM = 0.30f
-        )
-            : _wallSensorInPin(wallSensorInPin),
-            _ledOutPin(ledOutPin),
-            _position(position),
-            _facingDirection(Normalize(facingDirection)),
-            _adcToLightTable(adcToLightTable),
-            _distanceModel(distanceModel),
-            _noHitRangeM((std::isfinite(noHitRangeM) && (noHitRangeM > 0.0f)) ? noHitRangeM : 0.30f)
-        {
-#ifndef NDEBUG
-            const float dirMagSq =
-                facingDirection.squaredNorm();
+            float noHitRangeM = 0.30f,
+            std::uint32_t ambientSettleTimeUs = 0U,
+            std::uint32_t litSettleTimeUs = 0U);
 
-            assert(dirMagSq > 0.0f);
-            assert(distanceModel.exponent > 0.0f);
-            assert(distanceModel.minDeltaLight >= 0.0f);
-            assert(distanceModel.maxDistance > 0.0f);
-#endif
+        std::uint8_t GetWallSensorInPin() const noexcept;
+        std::uint8_t GetLedOutPin() const noexcept;
+        const Eigen::Vector2f& GetPosition() const noexcept;
+        const Eigen::Vector2f& GetFacingDirection() const noexcept;
+        Eigen::Vector2f WorldPosition(const MazeMap::VehicleState& state) const noexcept;
+        Eigen::Vector2f WorldFacing(const MazeMap::VehicleState& state) const noexcept;
+        bool TryComputeWallAimCoordinateM(const MazeMap::VehicleState& state, float& alongWallCoordinateM) const noexcept;
+        bool IsWallSegmentCenterWindowValid(const MazeMap::VehicleState& state, float keptFraction) const noexcept;
+        bool IsSideWallSegmentCenterAligned(const MazeMap::VehicleState& state) const noexcept;
+        float GetNoHitRangeM() const noexcept;
+        std::uint32_t GetAmbientSettleTimeUs() const noexcept;
+        std::uint32_t GetLitSettleTimeUs() const noexcept;
 
-            pinMode(_wallSensorInPin, INPUT);
-            pinMode(_ledOutPin, OUTPUT);
-            digitalWrite(_ledOutPin, LOW);
-            _hasDedicatedWallSensorAdc1Channel =
-                MazeMap::Platform::ResolveWallSensorAdc1Channel(_wallSensorInPin, _wallSensorAdc1Channel);
-        }
+        void CommandLedOff(std::uint32_t commandUs) noexcept;
+        void CommandLedOff() noexcept;
+        void CommandLedOn(std::uint32_t commandUs) noexcept;
+        void CommandLedOn() noexcept;
+        bool IsLedEnabled() const noexcept;
+        std::uint32_t LatestLedOffCommandUs() const noexcept;
+        std::uint32_t LatestLedOnCommandUs() const noexcept;
+        std::uint32_t AmbientReadyUs() const noexcept;
+        std::uint32_t LitReadyUs() const noexcept;
+        bool IsAmbientReadReady(std::uint32_t nowUs) const noexcept;
+        bool IsLitReadReady(std::uint32_t nowUs) const noexcept;
+        void AwaitAmbientReady() const noexcept;
+        void AwaitLitReady() const noexcept;
 
-        uint8_t GetWallSensorInPin() const { return _wallSensorInPin; }
-        uint8_t GetLedOutPin() const { return _ledOutPin; }
-        const Eigen::Vector2f& GetPosition() const { return _position; }
-        const Eigen::Vector2f& GetFacingDirection() const { return _facingDirection; }
-        float GetNoHitRangeM() const { return _noHitRangeM; }
+        bool HasAmbientRead() const noexcept;
+        bool HasLitRead() const noexcept;
+        bool IsCaptureArmed() const noexcept;
+        bool HasCompletedCapture() const noexcept;
+        void CaptureAmbientRead() noexcept;
+        void CaptureLitRead() noexcept;
+        bool TryCompleteLitRead(std::uint32_t nowUs) noexcept;
+        void CompleteCapture(std::uint32_t ledOffCommandUs) noexcept;
+        void CaptureBlocking() noexcept;
 
-        void SetLedEnabled(bool enabled) const
-        {
-            digitalWrite(_ledOutPin, enabled ? HIGH : LOW);
-        }
+        std::uint16_t LatestAmbientAdcCode() const noexcept;
+        std::uint16_t LatestLitAdcCode() const noexcept;
+        float LatestAmbientLight() const noexcept;
+        float LatestLitLight() const noexcept;
+        float LatestDifferentialLight() const noexcept;
+        float LatestRawDistanceM() const noexcept;
+        const OpticalObservationTiming& LatestTiming() const noexcept;
 
-        uint16_t ReadAdcCode() const
-        {
-            if (_hasDedicatedWallSensorAdc1Channel)
-            {
-                return MazeMap::Platform::ReadWallSensorAdcCodeFromConfiguredChannel(_wallSensorAdc1Channel);
-            }
+        std::uint16_t ReadAdcCode() const noexcept;
+        float AdcCodeToLightLevel(std::uint16_t adcReading) const noexcept;
+        float ReadLightLevel() const noexcept;
 
-            return MazeMap::Platform::ReadWallSensorAdcCode(_wallSensorInPin);
-        }
+        static float DifferentialLightLevel(float ambientLightLevel, float litLightLevel) noexcept;
 
-        float AdcCodeToLightLevel(uint16_t adcReading) const
-        {
-            return AdcToLightLevel(adcReading);
-        }
-
-        float ReadLightLevel() const
-        {
-            return AdcCodeToLightLevel(ReadAdcCode());
-        }
-
-        static float DifferentialLightLevel(float ambientLightLevel, float litLightLevel)
-        {
-            const float deltaLightLevel = litLightLevel - ambientLightLevel;
-            return (deltaLightLevel > 0.0f) ? deltaLightLevel : 0.0f;
-        }
-
-        float DistanceFromDifferentialLight(float deltaLightLevel) const
-        {
-            if (deltaLightLevel < 0.0f)
-            {
-                deltaLightLevel = 0.0f;
-            }
-
-            return DeltaLightToDistance(deltaLightLevel);
-        }
-
-        float DistanceFromLightLevels(float ambientLightLevel, float litLightLevel) const
-        {
-            return DistanceFromDifferentialLight(DifferentialLightLevel(ambientLightLevel, litLightLevel));
-        }
-
-        float ReadDistance(float darkLightLevel) const
-        {
-            return DistanceFromLightLevels(darkLightLevel, ReadLightLevel());
-        }
+        float DistanceFromDifferentialLight(float deltaLightLevel) const noexcept;
+        float DistanceFromLightLevels(float ambientLightLevel, float litLightLevel) const noexcept;
+        float ReadDistance(float darkLightLevel) const noexcept;
 
     private:
-        static constexpr uint16_t kAdcMax = 4095U;
+        static constexpr std::uint16_t kAdcMax = 4095U;
         static constexpr float kTableSpan = 7.0f;
 
-        uint8_t _wallSensorInPin;
-        uint8_t _ledOutPin;
-        uint8_t _wallSensorAdc1Channel = 0U;
+        std::uint8_t _wallSensorInPin;
+        std::uint8_t _ledOutPin;
+        std::uint8_t _wallSensorAdc1Channel = 0U;
         bool _hasDedicatedWallSensorAdc1Channel = false;
         Eigen::Vector2f _position;
         Eigen::Vector2f _facingDirection;
         std::array<float, 8> _adcToLightTable;
         DistanceModel _distanceModel;
         float _noHitRangeM;
+        std::uint32_t _ambientSettleTimeUs;
+        std::uint32_t _litSettleTimeUs;
+        std::uint32_t _latestLedOffCommandUs = 0UL;
+        std::uint32_t _latestLedOnCommandUs = 0UL;
+        std::uint32_t _ambientReadyUs = 0UL;
+        std::uint32_t _litReadyUs = 0UL;
+        std::uint16_t _latestAmbientAdcCode = 0U;
+        std::uint16_t _latestLitAdcCode = 0U;
+        float _latestAmbientLight = 0.0f;
+        float _latestLitLight = 0.0f;
+        float _latestDifferentialLight = 0.0f;
+        float _latestRawDistanceM = 0.20f;
+        OpticalObservationTiming _latestTiming{};
+        bool _ledEnabled = false;
+        bool _ambientCaptured = false;
+        bool _litCaptured = false;
+        bool _captureArmed = false;
+        bool _captureComplete = false;
 
-        static Eigen::Vector2f Normalize(const Eigen::Vector2f& v)
-        {
-            const float magSq = v.squaredNorm();
-
-#ifndef NDEBUG
-            assert(magSq > 0.0f);
-#endif
-
-            if (magSq <= 0.0f)
-            {
-                return Eigen::Vector2f(1.0f, 0.0f);
-            }
-
-            return v.normalized();
-        }
-
-        static float Lerp(float a, float b, float t)
-        {
-            return a + (b - a) * t;
-        }
-
-        [[nodiscard]] float AdcToLightLevel(uint16_t adcReading) const
-        {
-            if (adcReading >= kAdcMax)
-            {
-                return _adcToLightTable[7];
-            }
-
-            const float scaledIndex =
-                (static_cast<float>(adcReading) * kTableSpan) /
-                static_cast<float>(kAdcMax);
-
-            const size_t index = static_cast<size_t>(scaledIndex);
-
-            if (index >= 7U)
-            {
-                return _adcToLightTable[7];
-            }
-
-            const float frac = scaledIndex - static_cast<float>(index);
-
-            return Lerp(
-                _adcToLightTable[index],
-                _adcToLightTable[index + 1U],
-                frac
-            );
-        }
-
-        [[nodiscard]] float DeltaLightToDistance(float deltaLightLevel) const
-        {
-            if (deltaLightLevel <= _distanceModel.minDeltaLight)
-            {
-                return _distanceModel.maxDistance;
-            }
-
-            const float distance =
-                _distanceModel.scale /
-                std::pow(deltaLightLevel, _distanceModel.exponent);
-
-            if (distance > _distanceModel.maxDistance)
-            {
-                return _distanceModel.maxDistance;
-            }
-
-            return distance;
-        }
+        static Eigen::Vector2f Normalize(const Eigen::Vector2f& v) noexcept;
+        static float Lerp(float a, float b, float t) noexcept;
+        static bool TimeReached(std::uint32_t nowUs, std::uint32_t readyUs) noexcept;
+        float AdcToLightLevelInternal(std::uint16_t adcReading) const noexcept;
+        float DeltaLightToDistance(float deltaLightLevel) const noexcept;
     };
-
 }

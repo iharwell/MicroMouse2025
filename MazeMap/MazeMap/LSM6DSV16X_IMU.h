@@ -1,6 +1,12 @@
 #pragma once
 
 #include "Defines.h"
+#include "ImuSamplingProfile.h"
+#include "SensorSnapshot.h"
+#include "SensorMount.h"
+#include "SensorTelemetryTypes.h"
+
+#include <cmath>
 
 #ifdef ARDUINO_TEENSY41
 
@@ -139,13 +145,6 @@ namespace MazeMap
         static constexpr uint8_t UI_CTRL2_OIS__ADR = UI_CTRL2_OIS_RW_ADR;
         static constexpr uint8_t UI_CTRL3_OIS__ADR = UI_CTRL3_OIS_RW_ADR;
 
-        struct Axes
-        {
-            int16_t x;
-            int16_t y;
-            int16_t z;
-        };
-
         enum class ACCEL_MODE : uint8_t
         {
             DISABLE = 0x00,
@@ -260,7 +259,10 @@ namespace MazeMap
             uint8_t data_;
         };
 
-        LSM6DSV16X_IMU() = default;
+        explicit LSM6DSV16X_IMU(const MazeMap::SensorMount& mount = MazeMap::SensorMount()) noexcept
+            : mount_(mount)
+        {
+        }
 
         bool Begin()
         {
@@ -292,6 +294,119 @@ namespace MazeMap
             }
 
             return true;
+        }
+
+        bool ConfigureRuntimeForControlPeriod(
+            unsigned long controlPeriodUs,
+            bool enableAccel,
+            ACCEL_FILTER_FREQ accelFilterFreq)
+        {
+            switch (MazeMap::SelectUiImuSamplingProfile(controlPeriodUs))
+            {
+            case MazeMap::UiImuSamplingProfile::Exact1000Hz:
+                ConfigureUiHighAccuracyOdr(
+                    HAODR_SELECTION::EXACT_1000_2000_4000_8000,
+                    enableAccel ? ODR_SETTING::ODR_0960HZ_HP_N_LP : ODR_SETTING::DISABLE,
+                    ODR_SETTING::ODR_0960HZ_HP_N_LP);
+                ConfigureRuntimeRanges(enableAccel, accelFilterFreq);
+                return true;
+            case MazeMap::UiImuSamplingProfile::Exact2000Hz:
+                ConfigureUiHighAccuracyOdr(
+                    HAODR_SELECTION::EXACT_1000_2000_4000_8000,
+                    enableAccel ? ODR_SETTING::ODR_1920HZ_HP_N_LP : ODR_SETTING::DISABLE,
+                    ODR_SETTING::ODR_1920HZ_HP_N_LP);
+                ConfigureRuntimeRanges(enableAccel, accelFilterFreq);
+                return true;
+            default:
+                return false;
+            }
+        }
+
+        void ConfigureRuntimeRanges(bool enableAccel, ACCEL_FILTER_FREQ accelFilterFreq)
+        {
+            SetSelfTest(SELF_TEST_MODE::DISABLED, SELF_TEST_MODE::DISABLED);
+            if (enableAccel)
+            {
+                SetAccelRange(accelFilterFreq, ACCEL_FULLSCALE::G8);
+            }
+            SetGyroRange(GYRO_LPF1_MODE::CUT_213, GYRO_FULLSCALE_RANGE::DPS2000);
+        }
+
+        void DisableSelfTest()
+        {
+            SetSelfTest(SELF_TEST_MODE::DISABLED, SELF_TEST_MODE::DISABLED);
+        }
+
+        void EnablePositiveSelfTest()
+        {
+            SetSelfTest(SELF_TEST_MODE::POSITIVE, SELF_TEST_MODE::POSITIVE);
+        }
+
+        bool SelfTestDeltasValid(
+            float accelDeltaMgX,
+            float accelDeltaMgY,
+            float accelDeltaMgZ,
+            float gyroDeltaDpsX,
+            float gyroDeltaDpsY,
+            float gyroDeltaDpsZ) const noexcept
+        {
+            return IsAccelSelfTestDeltaValidMg(accelDeltaMgX) &&
+                IsAccelSelfTestDeltaValidMg(accelDeltaMgY) &&
+                IsAccelSelfTestDeltaValidMg(accelDeltaMgZ) &&
+                IsGyroSelfTestDeltaValidDps(gyroDeltaDpsX) &&
+                IsGyroSelfTestDeltaValidDps(gyroDeltaDpsY) &&
+                IsGyroSelfTestDeltaValidDps(gyroDeltaDpsZ);
+        }
+
+        void ResetRuntimeCalibration() noexcept
+        {
+            gyro_bias_radps_ = 0.0f;
+            accel_bias_right_g_ = 0.0f;
+            accel_bias_forward_g_ = 0.0f;
+            accel_bias_initialized_ = false;
+        }
+
+        void SetRuntimeCalibration(
+            float gyroBiasRadps,
+            bool accelBiasInitialized,
+            float accelBiasRightG,
+            float accelBiasForwardG) noexcept
+        {
+            gyro_bias_radps_ = std::isfinite(gyroBiasRadps) ? gyroBiasRadps : 0.0f;
+            accel_bias_initialized_ =
+                accelBiasInitialized &&
+                std::isfinite(accelBiasRightG) &&
+                std::isfinite(accelBiasForwardG);
+            if (accel_bias_initialized_)
+            {
+                accel_bias_right_g_ = accelBiasRightG;
+                accel_bias_forward_g_ = accelBiasForwardG;
+            }
+            else
+            {
+                accel_bias_right_g_ = 0.0f;
+                accel_bias_forward_g_ = 0.0f;
+            }
+        }
+
+        float RuntimeGyroBiasRadps() const noexcept
+        {
+            return gyro_bias_radps_;
+        }
+
+        bool HasRuntimeAccelBias() const noexcept
+        {
+            return accel_bias_initialized_;
+        }
+
+        float RuntimeAccelBiasRightG() const noexcept
+        {
+            return accel_bias_right_g_;
+        }
+
+        float RuntimeAccelBiasForwardG() const noexcept
+        {
+            return accel_bias_forward_g_;
         }
 
         bool Reset(uint32_t timeout_ms = 50U)
@@ -495,14 +610,79 @@ namespace MazeMap
             return StatusReg(ReadRegister(STATUS_REG_R_ADR));
         }
 
-        Axes ReadGyro()
+        ImuTelemetry CaptureTelemetry(ImuObservationTiming* const timing = nullptr)
         {
-            return ReadAxesFrom(OUTX_L_G_R_ADR);
+            ImuTelemetry telemetry{};
+            const std::uint32_t readStartUs = micros();
+            if (timing != nullptr)
+            {
+                timing->readStartUs = readStartUs;
+                timing->drdyUs = (digitalRead(INT_PIN) == HIGH) ? readStartUs : 0UL;
+            }
+
+            const auto status = ReadStatus();
+            telemetry.status = status.Raw();
+            telemetry.gyroX = ReadGyroX();
+            telemetry.gyroY = ReadGyroY();
+            telemetry.gyroZ = ReadGyroZ();
+            telemetry.accelX = ReadAccelX();
+            telemetry.accelY = ReadAccelY();
+            telemetry.accelZ = ReadAccelZ();
+            telemetry.temp = ReadTemp();
+            telemetry.interruptHigh = (digitalRead(INT_PIN) == HIGH);
+            if (timing != nullptr)
+            {
+                timing->readDoneUs = micros();
+            }
+            return telemetry;
         }
 
-        Axes ReadAccel()
+        void CaptureInertialSnapshot(
+            bool stationary,
+            float maxAbsStationaryBiasUpdateRateRadps,
+            SensorSnapshot& snapshot)
         {
-            return ReadAxesFrom(OUTX_L_A_R_ADR);
+            ImuObservationTiming timing{};
+            const ImuTelemetry telemetry = CaptureTelemetry(&timing);
+            snapshot.SetFrontRightImuTelemetry(ImuTelemetry{});
+            snapshot.SetBackLeftImuTelemetry(telemetry);
+            snapshot.SetImuTiming(timing);
+
+            const float rawYawRateRadps = GyroRawToBodyYawRadps(telemetry.gyroZ);
+            const Eigen::Vector2f accelBodyG = AccelRawToBodyPlanarG(telemetry.accelX, telemetry.accelY);
+            snapshot.SetAccelerationBiasValid(accel_bias_initialized_);
+            if (accel_bias_initialized_ && stationary)
+            {
+                accel_bias_right_g_ = (0.998f * accel_bias_right_g_) + (0.002f * accelBodyG.x());
+                accel_bias_forward_g_ = (0.998f * accel_bias_forward_g_) + (0.002f * accelBodyG.y());
+            }
+
+            if (accel_bias_initialized_)
+            {
+                const float accelDeltaRightG = accelBodyG.x() - accel_bias_right_g_;
+                const float accelDeltaForwardG = accelBodyG.y() - accel_bias_forward_g_;
+                snapshot.SetBodyRightAccelerationMps2(GRAVITY_MPS2 * accelDeltaRightG);
+                snapshot.SetBodyForwardAccelerationMps2(GRAVITY_MPS2 * accelDeltaForwardG);
+                snapshot.SetPlanarAccelerationMps2(
+                    GRAVITY_MPS2 * MazeMap::Math::Sqrtf(
+                        (accelDeltaRightG * accelDeltaRightG) + (accelDeltaForwardG * accelDeltaForwardG)));
+            }
+            else
+            {
+                snapshot.SetBodyRightAccelerationMps2(0.0f);
+                snapshot.SetBodyForwardAccelerationMps2(0.0f);
+                snapshot.SetPlanarAccelerationMps2(0.0f);
+            }
+
+            if (stationary && ShouldAdaptRuntimeGyroBias(
+                    rawYawRateRadps,
+                    maxAbsStationaryBiasUpdateRateRadps))
+            {
+                gyro_bias_radps_ = (0.995f * gyro_bias_radps_) + (0.005f * rawYawRateRadps);
+            }
+            snapshot.SetRawYawRateRadps(rawYawRateRadps);
+            snapshot.SetYawRateBiasRadps(gyro_bias_radps_);
+            snapshot.SetYawRateRadps(rawYawRateRadps - gyro_bias_radps_);
         }
 
         int16_t ReadGyroX()
@@ -601,9 +781,27 @@ namespace MazeMap
             return ClockwiseYawFromSensorZSign() * GyroRawToDps(raw);
         }
 
+        float GyroRawToBodyYawRadps(int16_t raw) const
+        {
+            return mount_.TransformClockwiseYawRateToBody(GyroRawToClockwiseYawDps(raw) * DEG_TO_RAD_F);
+        }
+
         float ReadClockwiseYawDps()
         {
             return GyroRawToClockwiseYawDps(ReadGyroZ());
+        }
+
+        float ReadBodyYawRateRadps()
+        {
+            return GyroRawToBodyYawRadps(ReadGyroZ());
+        }
+
+        Eigen::Vector2f AccelRawToBodyPlanarG(int16_t rawX, int16_t rawY) const
+        {
+            return mount_.TransformPlanarVectorToBody(
+                Eigen::Vector2f(
+                    AccelRawToG(rawX),
+                    AccelRawToG(rawY)));
         }
 
     private:
@@ -643,6 +841,45 @@ namespace MazeMap
         static constexpr uint8_t ToU8(GYRO_FULLSCALE_RANGE value) { return static_cast<uint8_t>(value); }
         static constexpr uint8_t ToU8(SELF_TEST_MODE value) { return static_cast<uint8_t>(value); }
 
+        static bool ShouldAdaptRuntimeGyroBias(
+            float rawGyroRadps,
+            float maxAbsUpdateRateRadps) noexcept
+        {
+            return std::isfinite(rawGyroRadps) &&
+                std::isfinite(maxAbsUpdateRateRadps) &&
+                (maxAbsUpdateRateRadps > 0.0f) &&
+                (std::fabs(rawGyroRadps) <= maxAbsUpdateRateRadps);
+        }
+
+        static bool IsAccelSelfTestDeltaValidMg(float deltaMg) noexcept
+        {
+            const float absoluteDeltaMg = std::fabs(deltaMg);
+            return std::isfinite(absoluteDeltaMg) &&
+                (absoluteDeltaMg >= 50.0f) &&
+                (absoluteDeltaMg <= 1700.0f);
+        }
+
+        bool IsGyroSelfTestDeltaValidDps(float deltaDps) const noexcept
+        {
+            const float absoluteDeltaDps = std::fabs(deltaDps);
+            if (!std::isfinite(absoluteDeltaDps))
+            {
+                return false;
+            }
+
+            if (gyro_scale_ == GYRO_FULLSCALE_RANGE::DPS0250)
+            {
+                return (absoluteDeltaDps >= 20.0f) && (absoluteDeltaDps <= 80.0f);
+            }
+
+            if (gyro_scale_ == GYRO_FULLSCALE_RANGE::DPS2000)
+            {
+                return (absoluteDeltaDps >= 150.0f) && (absoluteDeltaDps <= 700.0f);
+            }
+
+            return false;
+        }
+
         static void Select()
         {
             digitalWrite(CS_PIN, LOW);
@@ -653,28 +890,15 @@ namespace MazeMap
             digitalWrite(CS_PIN, HIGH);
         }
 
-        static int16_t CombineLowHigh(uint8_t low, uint8_t high)
-        {
-            return static_cast<int16_t>(static_cast<uint16_t>(low) |
-                                        static_cast<uint16_t>(static_cast<uint16_t>(high) << 8U));
-        }
-
-        Axes ReadAxesFrom(uint8_t start_address)
-        {
-            uint8_t bytes[6] = {};
-            ReadRegisters(start_address, bytes, sizeof(bytes));
-
-            Axes axes = {};
-            axes.x = CombineLowHigh(bytes[0], bytes[1]);
-            axes.y = CombineLowHigh(bytes[2], bytes[3]);
-            axes.z = CombineLowHigh(bytes[4], bytes[5]);
-            return axes;
-        }
-
         ACCEL_FULLSCALE accel_scale_ = ACCEL_FULLSCALE::G2;
         GYRO_FULLSCALE_RANGE gyro_scale_ = GYRO_FULLSCALE_RANGE::DPS0125;
         BeginFailureReason last_begin_failure_reason_ = BeginFailureReason::None;
         uint8_t last_who_am_i_ = 0U;
+        MazeMap::SensorMount mount_;
+        float gyro_bias_radps_ = 0.0f;
+        float accel_bias_right_g_ = 0.0f;
+        float accel_bias_forward_g_ = 0.0f;
+        bool accel_bias_initialized_ = false;
     };
 
 }
@@ -803,20 +1027,98 @@ namespace MazeMap
             uint8_t data_ = 0U;
         };
 
-        struct Axes
+        explicit LSM6DSV16X_IMU(const MazeMap::SensorMount& mount = MazeMap::SensorMount()) noexcept
+            : mount_(mount)
         {
-            int16_t x = 0;
-            int16_t y = 0;
-            int16_t z = 0;
-        };
-
-        LSM6DSV16X_IMU() = default;
+        }
 
         bool Begin() { return true; }
         bool Reset(uint32_t timeout_ms = 50U)
         {
             (void)timeout_ms;
             return true;
+        }
+
+        bool ConfigureRuntimeForControlPeriod(
+            unsigned long controlPeriodUs,
+            bool enableAccel,
+            ACCEL_FILTER_FREQ accelFilterFreq)
+        {
+            (void)controlPeriodUs;
+            ConfigureRuntimeRanges(enableAccel, accelFilterFreq);
+            return true;
+        }
+
+        void ConfigureRuntimeRanges(bool enableAccel, ACCEL_FILTER_FREQ accelFilterFreq)
+        {
+            (void)accelFilterFreq;
+            if (enableAccel)
+            {
+                accel_scale_ = ACCEL_FULLSCALE::G8;
+            }
+            gyro_scale_ = GYRO_FULLSCALE_RANGE::DPS2000;
+        }
+
+        void DisableSelfTest() const {}
+        void EnablePositiveSelfTest() const {}
+        bool SelfTestDeltasValid(
+            float accelDeltaMgX,
+            float accelDeltaMgY,
+            float accelDeltaMgZ,
+            float gyroDeltaDpsX,
+            float gyroDeltaDpsY,
+            float gyroDeltaDpsZ) const noexcept
+        {
+            (void)accelDeltaMgX;
+            (void)accelDeltaMgY;
+            (void)accelDeltaMgZ;
+            (void)gyroDeltaDpsX;
+            (void)gyroDeltaDpsY;
+            (void)gyroDeltaDpsZ;
+            return true;
+        }
+
+        void ResetRuntimeCalibration() noexcept
+        {
+            gyro_bias_radps_ = 0.0f;
+            accel_bias_right_g_ = 0.0f;
+            accel_bias_forward_g_ = 0.0f;
+            accel_bias_initialized_ = false;
+        }
+
+        void SetRuntimeCalibration(
+            float gyroBiasRadps,
+            bool accelBiasInitialized,
+            float accelBiasRightG,
+            float accelBiasForwardG) noexcept
+        {
+            gyro_bias_radps_ = std::isfinite(gyroBiasRadps) ? gyroBiasRadps : 0.0f;
+            accel_bias_initialized_ =
+                accelBiasInitialized &&
+                std::isfinite(accelBiasRightG) &&
+                std::isfinite(accelBiasForwardG);
+            accel_bias_right_g_ = accel_bias_initialized_ ? accelBiasRightG : 0.0f;
+            accel_bias_forward_g_ = accel_bias_initialized_ ? accelBiasForwardG : 0.0f;
+        }
+
+        float RuntimeGyroBiasRadps() const noexcept
+        {
+            return gyro_bias_radps_;
+        }
+
+        bool HasRuntimeAccelBias() const noexcept
+        {
+            return accel_bias_initialized_;
+        }
+
+        float RuntimeAccelBiasRightG() const noexcept
+        {
+            return accel_bias_right_g_;
+        }
+
+        float RuntimeAccelBiasForwardG() const noexcept
+        {
+            return accel_bias_forward_g_;
         }
 
         uint8_t ReadWhoAmI() const { return 0U; }
@@ -864,8 +1166,31 @@ namespace MazeMap
         }
 
         StatusReg ReadStatus() const { return {}; }
-        Axes ReadGyro() const { return {}; }
-        Axes ReadAccel() const { return {}; }
+
+        ImuTelemetry CaptureTelemetry(ImuObservationTiming* const timing = nullptr) const
+        {
+            (void)timing;
+            return {};
+        }
+
+        void CaptureInertialSnapshot(
+            bool stationary,
+            float maxAbsStationaryBiasUpdateRateRadps,
+            SensorSnapshot& snapshot)
+        {
+            (void)stationary;
+            (void)maxAbsStationaryBiasUpdateRateRadps;
+            snapshot.SetFrontRightImuTelemetry(ImuTelemetry{});
+            snapshot.SetBackLeftImuTelemetry(ImuTelemetry{});
+            snapshot.SetImuTiming(ImuObservationTiming{});
+            snapshot.SetBodyRightAccelerationMps2(0.0f);
+            snapshot.SetBodyForwardAccelerationMps2(0.0f);
+            snapshot.SetPlanarAccelerationMps2(0.0f);
+            snapshot.SetAccelerationBiasValid(accel_bias_initialized_);
+            snapshot.SetRawYawRateRadps(0.0f);
+            snapshot.SetYawRateBiasRadps(gyro_bias_radps_);
+            snapshot.SetYawRateRadps(-gyro_bias_radps_);
+        }
 
         int16_t ReadGyroX() const { return 0; }
         int16_t ReadGyroY() const { return 0; }
@@ -930,17 +1255,39 @@ namespace MazeMap
             return ClockwiseYawFromSensorZSign() * GyroRawToDps(raw);
         }
 
+        float GyroRawToBodyYawRadps(int16_t raw) const
+        {
+            return mount_.TransformClockwiseYawRateToBody(GyroRawToClockwiseYawDps(raw) * DEG_TO_RAD_F);
+        }
+
         float ReadClockwiseYawDps() const
         {
             return GyroRawToClockwiseYawDps(ReadGyroZ());
         }
 
+        float ReadBodyYawRateRadps() const
+        {
+            return GyroRawToBodyYawRadps(ReadGyroZ());
+        }
+
+        Eigen::Vector2f AccelRawToBodyPlanarG(int16_t rawX, int16_t rawY) const
+        {
+            return mount_.TransformPlanarVectorToBody(
+                Eigen::Vector2f(
+                    AccelRawToG(rawX),
+                    AccelRawToG(rawY)));
+        }
+
     private:
         ACCEL_FULLSCALE accel_scale_ = ACCEL_FULLSCALE::G2;
         GYRO_FULLSCALE_RANGE gyro_scale_ = GYRO_FULLSCALE_RANGE::DPS0125;
+        MazeMap::SensorMount mount_;
+        float gyro_bias_radps_ = 0.0f;
+        float accel_bias_right_g_ = 0.0f;
+        float accel_bias_forward_g_ = 0.0f;
+        bool accel_bias_initialized_ = false;
     };
 
 }
 
 #endif
-

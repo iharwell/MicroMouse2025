@@ -34,11 +34,6 @@ namespace MazeMap::App::Internal
         }
     }
 
-    bool LoopController::SensorWorkBitsRequestWallSensors(const std::uint8_t sensorWorkBits) noexcept
-    {
-        return (sensorWorkBits & kWallSensorBits) != 0U;
-    }
-
     void LoopController::ServiceInterlacedSensorCapture(void* const context) noexcept
     {
         LoopController* const loopController = static_cast<LoopController*>(context);
@@ -54,103 +49,6 @@ namespace MazeMap::App::Internal
         sensors.ServiceRightWallCollection();
     }
 
-    void LoopController::ClearFrontWallSnapshot(SensorSnapshot& snapshot) noexcept
-    {
-        snapshot.SetFrontLeftDistanceM(0.0f);
-        snapshot.SetFrontRightDistanceM(0.0f);
-        snapshot.SetFrontLeftDifferentialLight(0.0f);
-        snapshot.SetFrontRightDifferentialLight(0.0f);
-        snapshot.SetFrontSkewM(0.0f);
-        snapshot.SetFrontWall(false);
-        snapshot.SetFrontLeftWall(false);
-        snapshot.SetFrontRightWall(false);
-        snapshot.SetFrontWallObservationValid(false);
-        snapshot.SetFrontWallUsesFallbackDetection(false);
-        snapshot.SetFrontWallUsesCharacterizationDetection(false);
-        snapshot.SetFrontLeftTelemetry(WallSensorTelemetry{});
-        snapshot.SetFrontRightTelemetry(WallSensorTelemetry{});
-        snapshot.SetFrontLeftWallSensorObservation(MazeMap::WallObs{});
-        snapshot.SetFrontRightWallSensorObservation(MazeMap::WallObs{});
-        snapshot.SetFrontTiming(OpticalObservationTiming{});
-    }
-
-    void LoopController::ClearLeftWallSnapshot(SensorSnapshot& snapshot) noexcept
-    {
-        snapshot.SetSideLeftDistanceM(0.0f);
-        snapshot.SetSideLeftDifferentialLight(0.0f);
-        snapshot.SetLeftWall(false);
-        snapshot.SetLeftDistanceValidForControl(false);
-        snapshot.SetLeftWallObservation(false);
-        snapshot.SetLeftWallObservationWindowValid(false);
-        snapshot.SetLeftTransitionDetected(false);
-        snapshot.SetSideLeftTelemetry(WallSensorTelemetry{});
-        snapshot.SetSideLeftWallSensorObservation(MazeMap::WallObs{});
-        snapshot.SetLeftTiming(OpticalObservationTiming{});
-    }
-
-    void LoopController::ClearRightWallSnapshot(SensorSnapshot& snapshot) noexcept
-    {
-        snapshot.SetSideRightDistanceM(0.0f);
-        snapshot.SetSideRightDifferentialLight(0.0f);
-        snapshot.SetRightWall(false);
-        snapshot.SetRightDistanceValidForControl(false);
-        snapshot.SetRightWallObservation(false);
-        snapshot.SetRightWallObservationWindowValid(false);
-        snapshot.SetRightTransitionDetected(false);
-        snapshot.SetSideRightTelemetry(WallSensorTelemetry{});
-        snapshot.SetSideRightWallSensorObservation(MazeMap::WallObs{});
-        snapshot.SetRightTiming(OpticalObservationTiming{});
-    }
-
-    void LoopController::ClearImuSnapshot(SensorSnapshot& snapshot) noexcept
-    {
-        constexpr float kNoImuObservation = std::numeric_limits<float>::quiet_NaN();
-
-        snapshot.SetBodyRightAccelerationMps2(0.0f);
-        snapshot.SetBodyForwardAccelerationMps2(0.0f);
-        snapshot.SetPlanarAccelerationMps2(0.0f);
-        snapshot.SetRawYawRateRadps(kNoImuObservation);
-        snapshot.SetYawRateBiasRadps(kNoImuObservation);
-        snapshot.SetYawRateRadps(kNoImuObservation);
-        snapshot.SetAccelerationBiasValid(false);
-        snapshot.SetFrontRightImuTelemetry(ImuTelemetry{});
-        snapshot.SetBackLeftImuTelemetry(ImuTelemetry{});
-        snapshot.SetImuTiming(ImuObservationTiming{});
-    }
-
-    void LoopController::ApplySensorWorkBitsToSnapshot(
-        const std::uint8_t sensorWorkBits,
-        SensorSnapshot& snapshot,
-        const float expectedSideWallDistanceM) noexcept
-    {
-        if ((sensorWorkBits & (kGyroSensorBit | kAccelSensorBit)) == 0U)
-        {
-            ClearImuSnapshot(snapshot);
-        }
-
-        if ((sensorWorkBits & static_cast<std::uint8_t>(WallMask::Front)) == 0U)
-        {
-            ClearFrontWallSnapshot(snapshot);
-        }
-
-        if ((sensorWorkBits & static_cast<std::uint8_t>(WallMask::Left)) == 0U)
-        {
-            ClearLeftWallSnapshot(snapshot);
-        }
-
-        if ((sensorWorkBits & static_cast<std::uint8_t>(WallMask::Right)) == 0U)
-        {
-            ClearRightWallSnapshot(snapshot);
-        }
-
-        snapshot.SetCorridorErrorM(MazeMap::App::Internal::Runtime::ComputeCorridorError(
-            snapshot.SideLeftDistanceM(),
-            snapshot.SideRightDistanceM(),
-            snapshot.LeftDistanceValidForControl(),
-            snapshot.RightDistanceValidForControl(),
-            expectedSideWallDistanceM));
-    }
-
     void LoopController::StageNextSessionState(
         const std::uint32_t controlPeriodUs,
         const float sessionStartPointX,
@@ -162,22 +60,22 @@ namespace MazeMap::App::Internal
         const bool useWallUpdates) noexcept
     {
         std::uint8_t sensorWorkBits =
-            static_cast<std::uint8_t>(static_cast<std::uint8_t>(wallMask) & kWallSensorBits);
+            static_cast<std::uint8_t>(static_cast<std::uint8_t>(wallMask) & RuntimeSensorSuite::kWallSensorBits);
         if (useEncoderUpdate)
         {
-            sensorWorkBits = static_cast<std::uint8_t>(sensorWorkBits | kEncoderSensorBit);
+            sensorWorkBits = static_cast<std::uint8_t>(sensorWorkBits | RuntimeSensorSuite::kEncoderSensorBit);
         }
         if (useGyroUpdate)
         {
-            sensorWorkBits = static_cast<std::uint8_t>(sensorWorkBits | kGyroSensorBit);
+            sensorWorkBits = static_cast<std::uint8_t>(sensorWorkBits | RuntimeSensorSuite::kGyroSensorBit);
         }
         if (useAccelUpdate)
         {
-            sensorWorkBits = static_cast<std::uint8_t>(sensorWorkBits | kAccelSensorBit);
+            sensorWorkBits = static_cast<std::uint8_t>(sensorWorkBits | RuntimeSensorSuite::kAccelSensorBit);
         }
         if (useWallUpdates)
         {
-            sensorWorkBits = static_cast<std::uint8_t>(sensorWorkBits | kWallUpdateSensorBit);
+            sensorWorkBits = static_cast<std::uint8_t>(sensorWorkBits | RuntimeSensorSuite::kWallUpdateSensorBit);
         }
 
         if (!ValidateSessionState(controlPeriodUs, sessionStartPointX, sessionStartPointY, sensorWorkBits))
@@ -434,7 +332,7 @@ namespace MazeMap::App::Internal
             _modeStartHeadingRad = _runtime->RuntimeState().GetHeading();
         }
         RestoreSessionStartPhysicalState();
-        _sessionStartWallSensorAdcProbePending = SensorWorkBitsRequestWallSensors(_sensorWorkBits);
+        _sessionStartWallSensorAdcProbePending = RuntimeSensorSuite::SensorWorkBitsRequestWallSensors(_sensorWorkBits);
         RunSessionStartWallSensorAdcProbe();
         _activeModeWorkCallback = &RunApplicationModeTick;
         _activeModeWorkContext = _boundMode;
@@ -714,8 +612,7 @@ namespace MazeMap::App::Internal
 
     bool LoopController::SupportsSensorWorkBits(const std::uint8_t sensorWorkBits) const noexcept
     {
-        if (((sensorWorkBits & kWallUpdateSensorBit) != 0U) &&
-            !SensorWorkBitsRequestWallSensors(sensorWorkBits))
+        if (!RuntimeSensorSuite::SensorWorkBitsSupportWallUpdates(sensorWorkBits))
         {
             return false;
         }
@@ -758,21 +655,13 @@ namespace MazeMap::App::Internal
         const bool stationaryHint = ShouldTreatCurrentControlAsStationary();
         timing._encoderLatchUs = static_cast<std::uint32_t>(micros());
         SensorSnapshot snapshot{};
-        const bool captureWalls = SensorWorkBitsRequestWallSensors(_sensorWorkBits);
-        const bool captureSensors =
-            captureWalls ||
-            ((_sensorWorkBits & (kGyroSensorBit | kAccelSensorBit)) != 0U) ||
-            ((_sensorWorkBits & kEncoderSensorBit) != 0U);
-        if (captureSensors)
-        {
-            _runtime->Sensors().BeginInterlacedCapture(
-                stationaryHint,
-                _runtime->RuntimeState(),
-                snapshot,
-                captureWalls,
-                (_sensorWorkBits & kEncoderSensorBit) != 0U,
-                dtSeconds);
-        }
+        const bool captureSensors = RuntimeSensorSuite::SensorWorkBitsRequestCapture(_sensorWorkBits);
+        _runtime->Sensors().BeginInterlacedCapture(
+            stationaryHint,
+            _runtime->RuntimeState(),
+            snapshot,
+            _sensorWorkBits,
+            dtSeconds);
 
         const CommandVector control = _currentControl;
         timing._encoderReadDoneUs = static_cast<std::uint32_t>(micros());
@@ -786,14 +675,7 @@ namespace MazeMap::App::Internal
 
         if (estimator.HasFault())
         {
-            if (captureSensors)
-            {
-                _runtime->Sensors().FinishInterlacedCapture();
-            }
-            ApplySensorWorkBitsToSnapshot(
-                _sensorWorkBits,
-                snapshot,
-                MazeMap::Config::kExpectedSideWallDistanceM);
+            _runtime->Sensors().FinishInterlacedCapture();
             runtimeState.SetSensorSnapshot(snapshot);
             return false;
         }
@@ -811,14 +693,7 @@ namespace MazeMap::App::Internal
                 captureSensors ? &LoopController::ServiceInterlacedSensorCapture : nullptr);
             if (!predictOk)
             {
-                if (captureSensors)
-                {
-                    _runtime->Sensors().FinishInterlacedCapture();
-                }
-                ApplySensorWorkBitsToSnapshot(
-                    _sensorWorkBits,
-                    snapshot,
-                    MazeMap::Config::kExpectedSideWallDistanceM);
+                _runtime->Sensors().FinishInterlacedCapture();
                 runtimeState.SetSensorSnapshot(snapshot);
                 timing._estimatorPredictEndUs = static_cast<std::uint32_t>(micros());
                 timing._estimatorPredictDurationUs =
@@ -837,14 +712,7 @@ namespace MazeMap::App::Internal
             timing._estimatorPredictDurationUs = 0U;
         }
 
-        if (captureSensors)
-        {
-            _runtime->Sensors().FinishInterlacedCapture();
-        }
-        ApplySensorWorkBitsToSnapshot(
-            _sensorWorkBits,
-            snapshot,
-            MazeMap::Config::kExpectedSideWallDistanceM);
+        _runtime->Sensors().FinishInterlacedCapture();
         runtimeState.SetSensorSnapshot(snapshot);
 
         if (std::isfinite(dtSeconds) && (dtSeconds > 0.0f))
@@ -864,8 +732,8 @@ namespace MazeMap::App::Internal
 
         timing._estimatorUpdateStartUs = static_cast<std::uint32_t>(micros());
 
-        if (((_sensorWorkBits & (kGyroSensorBit | kAccelSensorBit)) != 0U) &&
-            ((_sensorWorkBits & kGyroSensorBit) != 0U) &&
+        if (((_sensorWorkBits & (RuntimeSensorSuite::kGyroSensorBit | RuntimeSensorSuite::kAccelSensorBit)) != 0U) &&
+            ((_sensorWorkBits & RuntimeSensorSuite::kGyroSensorBit) != 0U) &&
             std::isfinite(snapshot.RawYawRateRadps()))
         {
             if (!estimator.updateYawRate(snapshot.RawYawRateRadps()))
@@ -879,8 +747,8 @@ namespace MazeMap::App::Internal
             }
         }
 
-        if (((_sensorWorkBits & (kGyroSensorBit | kAccelSensorBit)) != 0U) &&
-            ((_sensorWorkBits & kAccelSensorBit) != 0U))
+        if (((_sensorWorkBits & (RuntimeSensorSuite::kGyroSensorBit | RuntimeSensorSuite::kAccelSensorBit)) != 0U) &&
+            ((_sensorWorkBits & RuntimeSensorSuite::kAccelSensorBit) != 0U))
         {
             const bool accelObservationValid =
                 snapshot.AccelerationBiasValid() &&
@@ -893,7 +761,7 @@ namespace MazeMap::App::Internal
             (void)estimator.updatePlanarAccel(accelObservation);
         }
 
-        if ((_sensorWorkBits & kWallUpdateSensorBit) != 0U)
+        if ((_sensorWorkBits & RuntimeSensorSuite::kWallUpdateSensorBit) != 0U)
         {
             MazeMap::Maze& maze = _runtime->Maze();
             if ((_sensorWorkBits & static_cast<std::uint8_t>(WallMask::Front)) != 0U)

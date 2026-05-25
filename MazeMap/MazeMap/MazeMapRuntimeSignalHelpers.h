@@ -15,9 +15,6 @@ namespace MazeMap
 
 namespace MazeMap::App::Internal::Runtime
 {
-    // Computes the usable reflected-light rise above a calibrated open-space baseline.
-    EXPORT float ComputeSignalRiseAboveBaseline(float measuredDifferentialLight, float signalBaseline) noexcept;
-
     // Applies the shared hysteresis-based wall-signal latch used by both runtime sensor pipelines.
     EXPORT bool UpdateFilteredSignalState(
         float measuredDifferentialLight,
@@ -26,14 +23,6 @@ namespace MazeMap::App::Internal::Runtime
         float& filteredSignal,
         bool& currentState,
         bool& initialized) noexcept;
-
-    // Computes lateral corridor error from whichever side-wall observations are still valid for control.
-    EXPORT float ComputeCorridorError(
-        float leftDistanceM,
-        float rightDistanceM,
-        bool leftDistanceValidForControl,
-        bool rightDistanceValidForControl,
-        float expectedSideWallDistanceM) noexcept;
 
     // Resolves the map-qualified corridor coordinate from valid side-wall observations.
     EXPORT bool TryComputeWallGroundedCorridorCoordinateM(

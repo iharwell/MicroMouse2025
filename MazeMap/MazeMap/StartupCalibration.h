@@ -1,16 +1,19 @@
 #pragma once
 
 #include "CommandVector.h"
-#include "MazeMapRuntimeCore.h"
+#include "CoreConfig.h"
+#include "Direction.h"
+#include "MotionLimits.h"
 
 #include <array>
 #include <cstdint>
 
-class RuntimeSensorSuite;
-
 namespace MazeMap
 {
+    class RuntimeSensorSuite;
     class Vehicle;
+    class VehicleState;
+    class WallSensor;
 }
 
 namespace MazeMap::App::Internal
@@ -21,9 +24,8 @@ namespace MazeMap::App::Internal
 
     // Owns the shared startup-calibration service used by boot-selected modes. Like Drive, this
     // is a shared multi-tick helper that stays subordinate to the active LoopController callback:
-    // the mode performs any required pre-loop `BringUp()`, then arms the service with `Start()`
-    // and may call `GetNextControls(bool& done)` on each tick when it wants StartupCalibration's
-    // proposed controls for the current phase.
+    // modes perform required pre-loop `BringUp()`, then arm this service with `Start()` and call
+    // `GetNextControls(bool& done)` on each tick.
     class EXPORT StartupCalibration final
     {
     public:
@@ -40,44 +42,16 @@ namespace MazeMap::App::Internal
 
         StartupCalibration();
 
-        // `SetIsInMaze(isInMaze)`:
-        // Selects whether startup should include the maze-specific wall-calibration sequence after
-        // shared bring-up.
         void SetIsInMaze(bool isInMaze) noexcept;
-
-        // Returns whether the maze-specific startup sequence is enabled.
         bool GetIsInMaze() const noexcept;
 
-        // Infrastructure-only hardware bring-up. This is not suitable for mode tick code and must
-        // be called before LoopController execution begins.
+        // Infrastructure-only device bring-up. The IMU self-test and stationary bias capture are
+        // intentionally nonblocking phases run by Start()/GetNextControls(...).
         bool BringUp();
-
-        // Reports whether StartupCalibration currently owns an active startup sequence.
         bool Active() const noexcept;
-
-        // Cancels the active startup sequence immediately and clears private execution state.
         void Cancel() noexcept;
-
-        // Arms the best-effort startup-calibration advisory job using the currently configured
-        // startup mode. After `BringUp()`, this remains total: if the service cannot complete the
-        // full maze-oriented procedure, it must still accept the work and finish with the best
-        // calibration coverage it can provide. If controlled wall-calibration data already exists,
-        // `Start()` reuses it intact instead of overwriting it with startup-time samples.
         void Start();
-
-        // Returns the current best-known calibration coverage for the IMU and wall sensors.
         SensorCalibration GetSensorsCalibrated() const noexcept;
-
-        // Generic per-tick query used by the active mode callback.
-        //
-        // Parameters:
-        // `done`:
-        // Set to `true` when the active startup sequence completes to the best calibration result
-        // the service can produce on this tick.
-        //
-        // Return value:
-        // Proposed control vector for the present tick. The mode may return it directly to
-        // LoopController, replace it, or ignore it.
         CommandVector GetNextControls(bool& done);
 
     private:
@@ -87,6 +61,12 @@ namespace MazeMap::App::Internal
         {
             None,
             ReportCompletion,
+            ImuBaselineSettle,
+            ImuBaselineSample,
+            ImuStimulatedSettle,
+            ImuStimulatedSample,
+            ImuDisabledSettle,
+            ImuBiasSample,
             SouthStartHold,
             MoveToCenter,
             CenterHold,
@@ -109,11 +89,43 @@ namespace MazeMap::App::Internal
         void AttachRuntime(SharedRobotRuntime& runtime) noexcept;
 
         void ResetState() noexcept;
+        void ResetImuCalibrationState() noexcept;
         void UpdateDoneState(bool& done) noexcept;
         void LogIssue(const char* reason) noexcept;
         void CompleteBestEffort(const char* reason) noexcept;
+        [[noreturn]] void FailCalibration(const char* reason) noexcept;
         void RefreshSensorsCalibrated() noexcept;
         void RestoreSideReferenceStateFromCalibration() noexcept;
+        static float StartupCellCenterCoordinateM() noexcept;
+        static MotionLimits BuildStartupTravelLimits() noexcept;
+        static bool IsValidPositiveBand(float low, float high) noexcept;
+        static bool IsValidNonNegativeBand(float low, float high) noexcept;
+        static bool HasFrontLeftBaselineCalibration() noexcept;
+        static bool HasFrontRightBaselineCalibration() noexcept;
+        static bool HasFullSideCalibration(MazeMap::RelativeDirection side) noexcept;
+        static bool HasAnySideCalibrationData(MazeMap::RelativeDirection side) noexcept;
+        static bool HasAnyWallCalibrationData() noexcept;
+        static bool TryComputeDistanceToSouthStartWall(
+            const MazeMap::VehicleState& state,
+            const MazeMap::WallSensor& sensor,
+            float& distanceM) noexcept;
+        std::uint32_t TicksForDurationUs(std::uint32_t durationUs) const noexcept;
+        std::uint32_t TicksForDurationMs(std::uint32_t durationMs) const noexcept;
+        std::uint32_t ImuCalibrationSampleIntervalTicks() const noexcept;
+        unsigned long RequiredGyroBiasSamples() const noexcept;
+        void CaptureCurrentEncoderTotalsForImuCalibration() noexcept;
+        bool EncoderTotalsChangedDuringImuCalibration() const noexcept;
+        void RestartImuCalibrationAfterMotion(const char* reason) noexcept;
+        bool BeginImuCalibration() noexcept;
+        CommandVector RunImuCalibrationPhase(bool& done);
+        void BeginImuSettlePhase(Phase phase) noexcept;
+        void BeginImuSamplePhase(Phase phase, unsigned long requiredSamples) noexcept;
+        void AccumulateCurrentImuSelfTestSample() noexcept;
+        void AccumulateCurrentImuBiasSample() noexcept;
+        void StoreCurrentSelfTestAverageAsBaseline() noexcept;
+        bool ValidateAndStoreStimulatedSelfTestAverage() noexcept;
+        bool CompleteImuBiasMeasurement() noexcept;
+        bool BeginMazeWallCalibration() noexcept;
         bool BeginDriveHoldPhase(Phase phase, std::uint16_t durationMs) noexcept;
         bool BeginDriveMovePhase(Phase phase, float targetXMeters, float targetYMeters, MazeMap::Direction headingDirection) noexcept;
         bool BeginDriveTurnPhase(Phase phase, MazeMap::Direction targetDirection) noexcept;
@@ -124,30 +136,125 @@ namespace MazeMap::App::Internal
         bool SampleWestFacingSideCalibration() noexcept;
         bool SampleEastFacingSideCalibration() noexcept;
         bool SampleFrontBaseline() noexcept;
+
+        bool SampleSideWallPair(bool& sampleComplete) noexcept;
+        bool SampleFrontWallPair(bool& sampleComplete) noexcept;
+        bool BeginWallSensorPairSampling(
+            MazeMap::WallSensor& first,
+            MazeMap::WallSensor& second,
+            bool measuredValueFromRawDistance) noexcept;
+        bool ServiceWallSensorPairSampling(bool& sampleComplete) noexcept;
+        void AccumulateWallSensorPairSample() noexcept;
+        void FinishWallSensorPairSampling() noexcept;
+        void ResetWallSamplingState() noexcept;
+        static void AccumulateFiniteWallValue(float sample, double& sum, std::uint16_t& count) noexcept;
+        static float AverageWallCalibrationSum(double sum, std::uint16_t count) noexcept;
         bool StoreSideReference(
-            WallSensorId sensorId,
-            const WallSensorCalibrationCapture& capture,
+            MazeMap::RelativeDirection side,
+            float measuredValue,
+            float ambientLight,
+            float differentialLight,
+            bool differentialLightBandValid,
+            float differentialLightBandLow,
+            float differentialLightBandHigh,
             float actualDistanceM) noexcept;
         bool StoreSideBaseline(
-            WallSensorId sensorId,
-            const WallSensorCalibrationCapture& capture) noexcept;
-        bool StoreFrontBaseline(
-            WallSensorId sensorId,
-            const WallSensorCalibrationCapture& capture) noexcept;
+            MazeMap::RelativeDirection side,
+            float differentialLight,
+            bool differentialLightBandValid,
+            float differentialLightBandLow,
+            float differentialLightBandHigh) noexcept;
+        bool StoreFrontLeftBaseline(
+            float differentialLight,
+            bool differentialLightBandValid,
+            float differentialLightBandLow,
+            float differentialLightBandHigh) noexcept;
+        bool StoreFrontRightBaseline(
+            float differentialLight,
+            bool differentialLightBandValid,
+            float differentialLightBandLow,
+            float differentialLightBandHigh) noexcept;
+
+        static constexpr const char* kLogSource = "startup_calibration";
+        static constexpr std::uint32_t kImuSelfTestSettleUs = 50000U;
+        static constexpr unsigned long kImuSelfTestAverageSamples = 64UL;
+        static constexpr std::uint32_t kImuCalibrationSampleIntervalUs = 2000U;
+        static constexpr std::uint16_t kWallCalibrationSampleCount =
+            static_cast<std::uint16_t>(Config::kWallCalibrationAverageSampleCount);
+        static constexpr std::uint16_t kWallCalibrationPairSamplingTimeoutMs = 250U;
 
         SharedRobotRuntime* _runtime{};
-        RuntimeSensorSuite* _sensors{};
+        MazeMap::RuntimeSensorSuite* _sensors{};
         Drive* _driveService{};
         WallTouch* _wallTouch{};
         MazeMap::Vehicle* _vehicle{};
         MotionLimits _travelLimits{};
         bool _isInMaze{};
         bool _broughtUp{};
+        bool _imuCalibrationComplete{};
         bool _useFallbackWallCalibration{};
         Phase _phase{ Phase::None };
         SensorCalibration _sensorsCalibrated{ SensorCalibration::None };
-        std::array<float, 2U> _sideReferenceDistancesM{};
-        std::array<bool, 2U> _sideReferenceValid{};
+        float _leftSideReferenceDistanceM{};
+        float _rightSideReferenceDistanceM{};
+        bool _leftSideReferenceValid{};
+        bool _rightSideReferenceValid{};
+        MazeMap::WallSensor* _wallSampleFirstSensor{};
+        MazeMap::WallSensor* _wallSampleSecondSensor{};
+        std::array<float, Config::kWallCalibrationAverageSampleCount> _wallFirstDifferentialSamples{};
+        std::array<float, Config::kWallCalibrationAverageSampleCount> _wallSecondDifferentialSamples{};
+        std::uint16_t _wallSampleCount{};
+        std::uint16_t _wallFirstMeasuredCount{};
+        std::uint16_t _wallFirstAmbientCount{};
+        std::uint16_t _wallFirstDifferentialCount{};
+        std::uint16_t _wallSecondMeasuredCount{};
+        std::uint16_t _wallSecondAmbientCount{};
+        std::uint16_t _wallSecondDifferentialCount{};
+        std::uint32_t _wallSampleTicksRemaining{};
+        bool _wallSampleActive{};
+        bool _wallSampleAmbientCaptured{};
+        bool _wallSampleMeasuredValueFromRawDistance{};
+        bool _wallSampleTimedOut{};
+        double _wallFirstMeasuredSum{};
+        double _wallFirstAmbientSum{};
+        double _wallFirstDifferentialSum{};
+        double _wallSecondMeasuredSum{};
+        double _wallSecondAmbientSum{};
+        double _wallSecondDifferentialSum{};
+        float _wallFirstMeasuredValue{};
+        float _wallFirstAmbientLight{};
+        float _wallFirstDifferentialLight{};
+        bool _wallFirstDifferentialLightBandValid{};
+        float _wallFirstDifferentialLightBandLow{};
+        float _wallFirstDifferentialLightBandHigh{};
+        float _wallSecondMeasuredValue{};
+        float _wallSecondAmbientLight{};
+        float _wallSecondDifferentialLight{};
+        bool _wallSecondDifferentialLightBandValid{};
+        float _wallSecondDifferentialLightBandLow{};
+        float _wallSecondDifferentialLightBandHigh{};
+        unsigned long _controlPeriodUs{ Config::kControlPeriodUs };
+        std::uint32_t _imuPhaseTicksRemaining{};
+        std::uint32_t _imuSampleCountdownTicks{};
+        unsigned long _imuRequiredSamples{};
+        unsigned long _imuCollectedSamples{};
+        std::int64_t _imuStartLeftEncoderCounts{};
+        std::int64_t _imuStartRightEncoderCounts{};
+        double _imuAccelMgSumX{};
+        double _imuAccelMgSumY{};
+        double _imuAccelMgSumZ{};
+        double _imuGyroDpsSumX{};
+        double _imuGyroDpsSumY{};
+        double _imuGyroDpsSumZ{};
+        double _imuGyroBiasRadpsSum{};
+        double _imuAccelBiasRightGSum{};
+        double _imuAccelBiasForwardGSum{};
+        float _imuBaselineAccelMgX{};
+        float _imuBaselineAccelMgY{};
+        float _imuBaselineAccelMgZ{};
+        float _imuBaselineGyroDpsX{};
+        float _imuBaselineGyroDpsY{};
+        float _imuBaselineGyroDpsZ{};
     };
 
     inline constexpr StartupCalibration::SensorCalibration operator|(

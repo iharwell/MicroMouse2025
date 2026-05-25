@@ -393,6 +393,7 @@
     <ClCompile Include="SigmaPointSetSimplex.cpp" />
     <ClCompile Include="SoftOdometryAid.cpp" />
     <ClCompile Include="WallGeometryModel.cpp" />
+    <ClCompile Include="WallSensor.cpp" />
     <ClCompile Include="WallSensorPreprocessor.cpp" />
     <ClCompile Include="Vehicle.cpp" />
     <ClCompile Include="VehicleState.cpp" />

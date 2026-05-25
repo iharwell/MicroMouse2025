@@ -28,6 +28,8 @@ namespace MazeMap::App::Internal
             LoopController& loopController) override;
 
     private:
+        static constexpr const char* kStableId = "wall_sensor_led_calibration";
+
         enum class LedCalibrationPhase : std::uint8_t
         {
             Front,
