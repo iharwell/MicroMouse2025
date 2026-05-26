@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Defines.h"
+#include "BootFramework.h"
 #include "Drive.h"
 #include "DriveBase.h"
 #include "Estimator.h"
@@ -55,7 +56,7 @@ namespace MazeMap::App::Internal
     // objects that top-level modes must share instead of duplicating.
     //
     // Mode interaction model:
-    // Top-level modes borrow references from this runtime during SetupMode() and RunTick(...)
+    // Top-level modes borrow references from this runtime during SetupMode(...) and RunTick(...)
     // rather than constructing their own parallel subsystem owners. Application infrastructure
     // resolves the active mode, then the mode and any loop-routine callbacks operate against this
     // shared runtime.
@@ -109,6 +110,15 @@ namespace MazeMap::App::Internal
         // `operator=(SharedRobotRuntime&&)`:
         // SharedRobotRuntime is the unique production runtime owner; move assignment is forbidden.
         SharedRobotRuntime& operator=(SharedRobotRuntime&&) = delete;
+
+        // `BootFramework()`:
+        // Returns the runtime-owned boot lifecycle coordinator.
+        //
+        // Behavior:
+        // Application infrastructure uses this owner to resolve and run the selected peer boot
+        // mode. The framework borrows runtime resources; it does not own logs, loop state, maze
+        // state, pathfinders, or other heavy subsystems.
+        BootFramework& BootFramework() noexcept;
 
         // `Vehicle()`:
         // Returns the mutable canonical production Vehicle owner.
@@ -686,6 +696,7 @@ namespace MazeMap::App::Internal
         ManeuverExecutor maneuverExecutor;               // Shared maneuver-execution owner.
         LoopController controlLoop;                      // One production LoopController instance.
         RuntimeSensorSuite sensors;                      // Shared runtime sensing owner.
+        MazeMap::App::Internal::BootFramework bootFramework; // Boot-mode lifecycle coordinator.
         mmlog::MmLogLogger dataLogger;                   // One runtime-owned utility-data logger.
         SharedRuntimeTextLogFileHandle textLogFile{};    // One runtime-owned logging.txt handle.
         mmlog::detail::ByteRing textLogQueue;            // Runtime-owned logging.txt queue/arbitration buffer.

@@ -1,8 +1,8 @@
 #include "pch.h"
 #include "ShowcasingDonutController.h"
 
-#include "BootModeRegistry.h"
-#include "BootUtilityModeFramework.h"
+#include "BootModeDescriptor.h"
+#include "BootFramework.h"
 #include "DiagnosticConfig.h"
 #include "Drive.h"
 #include "DriveBase.h"
@@ -10,7 +10,6 @@
 #include "MazeMapApplicationPrivate.h"
 #include "SharedRobotRuntime.h"
 #include "OpenFloorMeasurementSpec.h"
-#include "PinPairStrap.h"
 #include "PlantModel.h"
 #include "RuntimeSensorSuite.h"
 #include "SensorSnapshot.h"
@@ -23,7 +22,6 @@
 
 namespace MazeMap
 {
-    constexpr const char* kShowcasingDonutStableId = "showcasing_donut";
     constexpr const char* kShowcasingDonutModeVariant = "showcasing_donut";
     constexpr const char* kShowcasingDonutBootReason = "pins9_10";
     constexpr const char* kShowcasingDonutSelectorRemovedReason =
@@ -135,30 +133,20 @@ namespace MazeMap::App::Internal
     {
     }
 
-    void ShowcasingDonutController::SetupMode()
+    void ShowcasingDonutController::SetupMode(BootFramework& framework)
     {
         ResetState();
-        if (!_runtime.RegisterModeFaultHandler(&ShowcasingDonutController::TeardownOnRuntimeFault, this, kShowcasingDonutStableId))
-        {
-            _runtime.FailActiveMode("Showcasing donut fault handler registration failed");
-        }
-        if (!SetupHardware())
-        {
-            _runtime.FailActiveMode("Showcasing donut hardware setup failed");
-        }
-
-        (void)BootUtilityModeFramework::ResetStartupTrace("mode:showcasing_donut");
+        _bootFramework = &framework;
         (void)_runtime.AppendTextLogLine("Showcasing donut mode");
         (void)_runtime.AppendTextLogLine("Fixed-radius donut sweep followed by flashy in-place turns, open-floor main-schema logging");
 
         _drive.ClearCommandEvidence();
 
-        ConfigureSelectorMonitor();
-        if (!_selectorMonitorArmed)
+        if (!framework.IsSelectedModeSelectorInstalled())
         {
             _runtime.FailActiveMode("Showcasing donut selector pins unavailable");
         }
-        if (SelectorRemoved())
+        if (!framework.IsSelectedModeSelectorInstalled())
         {
             _runtime.FailActiveMode(kShowcasingDonutSelectorRemovedReason);
         }
@@ -193,24 +181,17 @@ namespace MazeMap::App::Internal
             false);
     }
 
-    void ShowcasingDonutController::TeardownOnRuntimeFault(void* context, const char* reason) noexcept
+    void ShowcasingDonutController::OnModeFault(const char* reason) noexcept
     {
         (void)reason;
-        auto* const self = static_cast<ShowcasingDonutController*>(context);
-        if (self == nullptr)
-        {
-            return;
-        }
-
-        self->ReleaseSelectorMonitor();
-        self->_phase = Phase::Idle;
-        self->_drive.ClearCommandEvidence();
-        self->_vehicle.SetFanDuty(0.0f);
+        _phase = Phase::Idle;
+        _drive.ClearCommandEvidence();
+        _vehicle.SetFanDuty(0.0f);
     }
 
     void ShowcasingDonutController::ResetState() noexcept
     {
-        ReleaseSelectorMonitor();
+        _bootFramework = nullptr;
         _phase = Phase::Idle;
         _endReason = EndReason::None;
         _logFileName[0] = '\0';
@@ -247,8 +228,6 @@ namespace MazeMap::App::Internal
         if (!_runtime.WriteUtilityDataLogMetadata("format_spec", MazeMap::kOpenFloorLogFormatSpec)) return false;
         if (!_runtime.WriteUtilityDataLogMetadata("endianness", MazeMap::kOpenFloorEndianness)) return false;
         if (!_runtime.WriteUtilityDataLogMetadataUnsigned("control_period_us", DiagnosticConfig::kControlPeriodUs)) return false;
-        if (!_runtime.WriteUtilityDataLogMetadataUnsigned("selector_drive_pin", _selectorDrivePin)) return false;
-        if (!_runtime.WriteUtilityDataLogMetadataUnsigned("selector_sense_pin", _selectorSensePin)) return false;
         if (!_runtime.WriteUtilityDataLogMetadataFloat("turn_radius_m", kShowcasingDonutRadiusM, 3)) return false;
         if (!_runtime.WriteUtilityDataLogMetadataFloat("turn_start_speed_mps", kShowcasingDonutInitialSpeedMps, 3)) return false;
         if (!_runtime.WriteUtilityDataLogMetadataFloat("turn_ramp_mps2", kShowcasingDonutSpeedRampMps2, 3)) return false;
@@ -313,38 +292,6 @@ namespace MazeMap::App::Internal
         {
             _peakPlanarAccelMps2 = (std::max)(_peakPlanarAccelMps2, std::fabs(sensors.PlanarAccelerationMps2()));
         }
-    }
-
-    void ShowcasingDonutController::ConfigureSelectorMonitor() noexcept
-    {
-        ReleaseSelectorMonitor();
-        const BootModeRegistryEntry* const entry =
-            FindBootModeRegistryEntry(BootModeId::ShowcasingDonut);
-        if ((entry == nullptr) || (entry->selector.kind != BootModeSelectorKind::PinPair))
-        {
-            return;
-        }
-
-        _selectorDrivePin = entry->selector.pinA;
-        _selectorSensePin = entry->selector.pinB;
-        BeginPinPairStrapMonitor(_selectorDrivePin, _selectorSensePin);
-        _selectorMonitorArmed = true;
-    }
-
-    void ShowcasingDonutController::ReleaseSelectorMonitor() noexcept
-    {
-        if (_selectorMonitorArmed)
-        {
-            EndPinPairStrapMonitor(_selectorDrivePin, _selectorSensePin);
-        }
-        _selectorMonitorArmed = false;
-        _selectorDrivePin = 0U;
-        _selectorSensePin = 0U;
-    }
-
-    bool ShowcasingDonutController::SelectorRemoved() const noexcept
-    {
-        return _selectorMonitorArmed && !IsPinPairStrapMonitorClosed(_selectorSensePin);
     }
 
     bool ShowcasingDonutController::BeginDonutSweep() noexcept
@@ -715,7 +662,7 @@ namespace MazeMap::App::Internal
             return CommandVector::Brake();
         }
 
-        if (SelectorRemoved())
+        if (_bootFramework != nullptr && !_bootFramework->IsSelectedModeSelectorInstalled())
         {
             _runtime.FailActiveMode(kShowcasingDonutSelectorRemovedReason);
             return CommandVector::Brake();
@@ -792,7 +739,7 @@ namespace MazeMap::App::Internal
                     {
                         self->_runtime.FailActiveMode("Showcasing donut main log write failed");
                     }
-                    self->ReleaseSelectorMonitor();
+                    self->_bootFramework = nullptr;
                     self->_drive.ClearCommandEvidence();
                     self->_vehicle.SetFanDuty(0.0f);
                     (void)self->_runtime.AppendTextLogFormatted(
@@ -826,7 +773,6 @@ namespace MazeMap::App::Internal
     {
         static constexpr BootModeDescriptor descriptor{
             BootModeId::ShowcasingDonut,
-            BootModeCategory::Utility,
             "showcasing_donut",
             "Execute a fixed-radius clockwise donut sweep, ramp speed until traction loss or the 4 m/s cap, then finish with bounded flashy turns.",
             "logging.txt, donutNNN.mmlog",

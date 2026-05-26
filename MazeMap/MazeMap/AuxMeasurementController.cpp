@@ -1,9 +1,11 @@
 #include "pch.h"
 #include "MazeMapApplicationPrivate.h"
 
+#include "BootFramework.h"
 #include "BootModeDescriptor.h"
 #include "Drive.h"
 #include "DriveBase.h"
+#include "IApplicationMode.h"
 #include "LoopController.h"
 #include "MazeMapRuntimeInfrastructure.h"
 #include "SharedRobotRuntime.h"
@@ -18,8 +20,6 @@ using MazeMap::App::Internal::StartupCalibration;
 
 namespace MazeMap
 {
-    constexpr const char* kAuxMeasurementStableId = "auxiliary_measurement";
-
     MotionLimits BuildAuxiliaryDriveLimits(const Vehicle& vehicle) noexcept
     {
         MotionLimits limits{};
@@ -74,7 +74,7 @@ namespace MazeMap
         row.gyro_radps = sensors.YawRateRadps();
     }
 
-    class AuxMeasurementController final : public IApplicationMode
+    class AuxMeasurementController final : public MazeMap::App::Internal::IApplicationMode
     {
     private:
         enum class Phase : std::uint8_t
@@ -108,19 +108,10 @@ namespace MazeMap
             _logFileName[0] = '\0';
         }
 
-        void SetupMode() override
+        void SetupMode(MazeMap::App::Internal::BootFramework& framework) override
         {
+            (void)framework;
             ResetState();
-            if (!_runtime.RegisterModeFaultHandler(&AuxMeasurementController::TeardownOnRuntimeFault, this, kAuxMeasurementStableId))
-            {
-                _runtime.FailActiveMode("Auxiliary measurement fault handler registration failed");
-            }
-            if (!SetupHardware())
-            {
-                _runtime.FailActiveMode("Auxiliary measurement hardware setup failed");
-            }
-
-            (void)ResetStartupTrace("mode:aux_measurement");
             (void)_runtime.AppendTextLogLine("Auxiliary measurement mode");
             (void)_runtime.AppendTextLogFormatted(
                 "Routine: %s",
@@ -170,20 +161,14 @@ namespace MazeMap
         }
 
     private:
-        static void TeardownOnRuntimeFault(void* context, const char* reason) noexcept
+        void OnModeFault(const char* reason) noexcept override
         {
-            auto* const self = static_cast<AuxMeasurementController*>(context);
-            if (self == nullptr)
-            {
-                return;
-            }
-
             (void)reason;
-            self->_runtimeFaulted = true;
-            self->_phase = Phase::Idle;
-            self->_startupCalibration.Cancel();
-            self->_drive.ClearCommandEvidence();
-            self->SetFanEnabled(false);
+            _runtimeFaulted = true;
+            _phase = Phase::Idle;
+            _startupCalibration.Cancel();
+            _drive.ClearCommandEvidence();
+            SetFanEnabled(false);
         }
 
         void ResetState() noexcept
@@ -537,7 +522,6 @@ namespace MazeMap
         {
             static constexpr BootModeDescriptor descriptor{
                 BootModeId::AuxiliaryMeasurement,
-                BootModeCategory::Utility,
                 "auxiliary_measurement",
                 "Run the selected auxiliary survey or traction sweep on the shared startup and Drive path.",
                 "logging.txt; auxiliary measurement mmlog",

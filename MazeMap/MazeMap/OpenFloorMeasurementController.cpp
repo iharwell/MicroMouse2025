@@ -1,14 +1,12 @@
 #include "pch.h"
 #include "OpenFloorMeasurementController.h"
 
+#include "BootFramework.h"
 #include "MazeMapApplicationPrivate.h"
 #include "BootModeDescriptor.h"
-#include "BootModeRegistry.h"
-#include "BootUtilityModeFramework.h"
 #include "DriveBase.h"
 #include "DriveTelemetry.h"
 #include "ManeuverQueue.h"
-#include "PinPairStrap.h"
 #include "PlantModel.h"
 #include "RuntimeSensorSuite.h"
 #include "SharedRobotRuntime.h"
@@ -28,7 +26,6 @@ namespace MazeMap
     using MazeMap::App::Internal::Runtime::OpenFloorMainRow;
     using MazeMap::App::Internal::Runtime::OpenFloorTimingRow;
 
-    constexpr const char* kOpenFloorMeasurementStableId = "open_floor_measurement";
     constexpr const char* kOpenFloorMeasurementSelectorRemovedReason =
         "Open-floor measurement selector jumper removed";
     constexpr MazeMap::ManeuverCode kOpenFloorMeasurementLoopStraightCode = MazeMap::S2;
@@ -968,7 +965,8 @@ namespace MazeMap::App::Internal
             controller._runtime.FailActiveMode("Open-floor measurement timing log write failed");
             return stopControl;
         }
-        if (controller.SelectorRemoved())
+        if (controller._bootFramework != nullptr &&
+            !controller._bootFramework->IsSelectedModeSelectorInstalled())
         {
             controller._runtime.FailActiveMode(kOpenFloorMeasurementSelectorRemovedReason);
             return stopControl;
@@ -1282,7 +1280,8 @@ namespace MazeMap::App::Internal
     bool OpenFloorMeasurementController::MainStage::CheckFault(
         OpenFloorMeasurementController& controller)
     {
-        if (controller.SelectorRemoved())
+        if (controller._bootFramework != nullptr &&
+            !controller._bootFramework->IsSelectedModeSelectorInstalled())
         {
             controller._runtime.FailActiveMode(kOpenFloorMeasurementSelectorRemovedReason);
             return true;
@@ -1296,21 +1295,9 @@ namespace MazeMap::App::Internal
         return true;
     }
 
-    void OpenFloorMeasurementController::SetupMode()
+    void OpenFloorMeasurementController::SetupMode(BootFramework& framework)
     {
-        if (!_runtime.RegisterModeFaultHandler(
-                &OpenFloorMeasurementController::TeardownOnRuntimeFault,
-                this,
-                kOpenFloorMeasurementStableId))
-        {
-            _runtime.FailActiveMode("Open-floor measurement fault handler registration failed");
-        }
-        if (!SetupHardware())
-        {
-            _runtime.FailActiveMode("Open-floor measurement hardware setup failed");
-        }
-
-        (void)BootUtilityModeFramework::ResetStartupTrace("mode:open_floor_measurement");
+        _bootFramework = &framework;
         (void)_runtime.AppendTextLogLine("Open-floor measurement mode");
         (void)_runtime.AppendTextLogLine(
             "Open-floor battery: timing capture plus the registered main-regime battery");
@@ -1327,8 +1314,11 @@ namespace MazeMap::App::Internal
         _driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
         _driveService.SetLimits(BuildOpenFloorMeasurementModeLimits(_vehicle));
 
-        ConfigureSelectorMonitor();
-        if (SelectorRemoved())
+        if (!framework.IsSelectedModeSelectorInstalled())
+        {
+            _runtime.FailActiveMode("Open-floor measurement selector pins unavailable");
+        }
+        if (!framework.IsSelectedModeSelectorInstalled())
         {
             _runtime.FailActiveMode(kOpenFloorMeasurementSelectorRemovedReason);
         }
@@ -1352,16 +1342,9 @@ namespace MazeMap::App::Internal
             false);
     }
 
-    void OpenFloorMeasurementController::TeardownOnRuntimeFault(void* context, const char* reason) noexcept
+    void OpenFloorMeasurementController::OnModeFault(const char* reason) noexcept
     {
         (void)reason;
-        auto* const self = static_cast<OpenFloorMeasurementController*>(context);
-        if (self == nullptr)
-        {
-            return;
-        }
-
-        self->ReleaseSelectorMonitor();
     }
 
     CommandVector OpenFloorMeasurementController::RunTick(
@@ -1474,41 +1457,9 @@ namespace MazeMap::App::Internal
         row.right_timestamp_us = sensors.RightTiming().observationReadyUs;
     }
 
-    void OpenFloorMeasurementController::ConfigureSelectorMonitor() noexcept
-    {
-        ReleaseSelectorMonitor();
-        const BootModeRegistryEntry* const entry =
-            FindBootModeRegistryEntry(BootModeId::OpenFloorMeasurement);
-        if ((entry == nullptr) || (entry->selector.kind != BootModeSelectorKind::PinPair))
-        {
-            return;
-        }
-
-        _selectorDrivePin = entry->selector.pinA;
-        _selectorSensePin = entry->selector.pinB;
-        BeginPinPairStrapMonitor(_selectorDrivePin, _selectorSensePin);
-        _selectorMonitorArmed = true;
-    }
-
-    void OpenFloorMeasurementController::ReleaseSelectorMonitor() noexcept
-    {
-        if (_selectorMonitorArmed)
-        {
-            EndPinPairStrapMonitor(_selectorDrivePin, _selectorSensePin);
-        }
-        _selectorMonitorArmed = false;
-        _selectorDrivePin = 0U;
-        _selectorSensePin = 0U;
-    }
-
-    bool OpenFloorMeasurementController::SelectorRemoved() const noexcept
-    {
-        return _selectorMonitorArmed && !IsPinPairStrapMonitorClosed(_selectorSensePin);
-    }
-
     void OpenFloorMeasurementController::FinalizeSuccessfulRun() noexcept
     {
-        ReleaseSelectorMonitor();
+        _bootFramework = nullptr;
         (void)_runtime.AppendTextLogLine("Open-floor measurement complete");
     }
 
@@ -1541,7 +1492,6 @@ namespace MazeMap::App::Internal
     {
         static constexpr BootModeDescriptor descriptor{
             BootModeId::OpenFloorMeasurement,
-            BootModeCategory::Utility,
             "open_floor_measurement",
             "Run open-floor timing capture followed by the registered main-regime measurement battery.",
             "open_floor_timing.mmlog, open_floor_main.mmlog",

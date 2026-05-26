@@ -1,8 +1,10 @@
 #include "pch.h"
 #include "MazeMapApplicationPrivate.h"
+#include "BootFramework.h"
 #include "BootModeDescriptor.h"
 #include "Drive.h"
 #include "DriveBase.h"
+#include "IApplicationMode.h"
 #include "LoopController.h"
 #include "MazeMapRuntimeInfrastructure.h"
 #include "MazeMapRuntimeMmLog.h"
@@ -48,7 +50,7 @@ namespace MazeMap
         return limits;
     }
 
-class FrontWallCharacterizationController : public IApplicationMode
+class FrontWallCharacterizationController : public MazeMap::App::Internal::IApplicationMode
 {
 public:
     explicit FrontWallCharacterizationController(SharedRobotRuntime& runtime)
@@ -61,29 +63,20 @@ public:
     {
     }
 
-    void SetupMode() override
+    void SetupMode(MazeMap::App::Internal::BootFramework& framework) override
     {
+        _bootFramework = &framework;
         ResetState();
-        if (!_runtime.RegisterModeFaultHandler(&FrontWallCharacterizationController::TeardownOnRuntimeFault, this, "front_wall_characterization"))
-        {
-            _runtime.FailActiveMode("Front wall characterization fault handler registration failed");
-        }
-
-        if (!SetupHardware())
-        {
-            _runtime.FailActiveMode("Hardware setup failed");
-        }
-        (void)ResetStartupTrace("mode:front_wall_characterization");
         (void)_runtime.AppendTextLogLine("Front wall characterization mode");
         (void)_runtime.AppendTextLogLine("Enter by shorting pins 39-40 at boot.");
         (void)_runtime.AppendTextLogLine("Place the nose on a wall in a dark area, then power on.");
-        AppendStartupTrace("front_wall_characterization:begin");
-        AppendStartupTrace("front_wall_characterization:sd_ready_wait_begin");
+        AppendStartupTraceLine("front_wall_characterization:begin");
+        AppendStartupTraceLine("front_wall_characterization:sd_ready_wait_begin");
         (void)_runtime.AppendTextLogFormatted(
             "SD card ready; waiting %lu ms before starting.",
             static_cast<unsigned long>(FrontWallCharacterizationConfig::kPostSdReadyDelayMs));
         delay(FrontWallCharacterizationConfig::kPostSdReadyDelayMs);
-        AppendStartupTrace("front_wall_characterization:sd_ready_wait_complete");
+        AppendStartupTraceLine("front_wall_characterization:sd_ready_wait_complete");
 
         _vehicle.SetFanDuty(0.0f);
 
@@ -103,7 +96,7 @@ public:
                 static_cast<unsigned>(storedCurve.sampleCount),
                 storedCurve.terminalDistanceM,
                 storedCurve.commandedReverseSpeedMps);
-            AppendStartupTrace(line);
+            AppendStartupTraceLine(line);
             (void)_runtime.AppendTextLogLine("Existing front-wall curve will be replaced on success.");
         }
 
@@ -140,20 +133,19 @@ private:
         PersistAndExport
     };
 
-    static void TeardownOnRuntimeFault(void* context, const char* reason) noexcept
+    void OnModeFault(const char* reason) noexcept override
     {
         (void)reason;
-        auto* const self = static_cast<FrontWallCharacterizationController*>(context);
-        if (self == nullptr)
-        {
-            return;
-        }
+        _phase = Phase::Idle;
+        _pauseAction = PauseAction::None;
+        _startupCalibration.Cancel();
+        _drive.ClearCommandEvidence();
+        _vehicle.SetFanDuty(0.0f);
+    }
 
-        self->_phase = Phase::Idle;
-        self->_pauseAction = PauseAction::None;
-        self->_startupCalibration.Cancel();
-        self->_drive.ClearCommandEvidence();
-        self->_vehicle.SetFanDuty(0.0f);
+    bool AppendStartupTraceLine(const char* line)
+    {
+        return _bootFramework != nullptr && _bootFramework->AppendStartupTrace(line);
     }
 
     void FinalizeSuccessfulRun() noexcept
@@ -172,6 +164,7 @@ private:
     DriveBase& _drive;
     Drive& _driveService;
     StartupCalibration& _startupCalibration;
+    MazeMap::App::Internal::BootFramework* _bootFramework{};
     FrontWallCharacterizationLogRow _logRow{};
     Phase _phase{ Phase::Idle };
     PauseAction _pauseAction{ PauseAction::None };
@@ -223,7 +216,7 @@ private:
         {
             char line[96] = {};
             snprintf(line, sizeof(line), "front_wall_characterization:phase=%s", phaseName);
-            AppendStartupTrace(line);
+            AppendStartupTraceLine(line);
         }
 
         _driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
@@ -233,7 +226,7 @@ private:
 
     bool StartCaptureCurvePhase()
     {
-        AppendStartupTrace("front_wall_characterization:phase=reverse_capture");
+        AppendStartupTraceLine("front_wall_characterization:phase=reverse_capture");
         _captureStorage = {};
         _captureStorage.distanceStepM = FrontWallCharacterizationConfig::kStoredDistanceStepM;
         _captureStorage.commandedReverseSpeedMps = FrontWallCharacterizationConfig::kReverseSpeedMps;
@@ -287,7 +280,7 @@ private:
             storage.frontLeftDifferentialLight[storage.sampleCount - 1U],
             storage.frontRightDifferentialLight[0],
             storage.frontRightDifferentialLight[storage.sampleCount - 1U]);
-        AppendStartupTrace(summary);
+        AppendStartupTraceLine(summary);
         (void)_runtime.AppendTextLogLine(summary);
 
         if (!PersistCurve(storage) || !ExportCurveToSd(storage))
@@ -459,7 +452,7 @@ private:
                 traveledDistanceM,
                 static_cast<unsigned>(_captureStorage.sampleCount),
                 _captureTimeoutMs);
-            AppendStartupTrace(timeoutLine);
+            AppendStartupTraceLine(timeoutLine);
             _captureElapsedBudgetLogged = true;
         }
 
@@ -518,7 +511,7 @@ private:
             "front_wall_characterization:persisted,samples=%u,terminal_distance_m=%.4f",
             static_cast<unsigned>(verify.sampleCount),
             verify.terminalDistanceM);
-        AppendStartupTrace(line);
+        AppendStartupTraceLine(line);
         (void)_runtime.AppendTextLogLine(line);
         return true;
     }
@@ -622,7 +615,7 @@ private:
             "front_wall_characterization:log_exported,file=%s,samples=%u",
             fileName,
             static_cast<unsigned>(storage.sampleCount));
-        AppendStartupTrace(line);
+        AppendStartupTraceLine(line);
         (void)_runtime.AppendTextLogLine(line);
         return true;
     }
@@ -637,7 +630,6 @@ namespace App::Internal
     {
         static constexpr BootModeDescriptor descriptor{
             BootModeId::FrontWallCharacterization,
-            BootModeCategory::Utility,
             "front_wall_characterization",
             "Capture and save the front-wall sensor response curve.",
             "logging.txt; front-wall mmlog; saved front-wall curve",

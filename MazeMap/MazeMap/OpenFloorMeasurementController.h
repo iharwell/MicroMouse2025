@@ -162,7 +162,8 @@ namespace MazeMap::App::Internal
         OpenFloorMeasurementController(OpenFloorMeasurementController&&) = delete;
         OpenFloorMeasurementController& operator=(OpenFloorMeasurementController&&) = delete;
 
-        void SetupMode() override;
+        void SetupMode(BootFramework& framework) override;
+        void OnModeFault(const char* reason) noexcept override;
         CommandVector RunTick(
             std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,
@@ -532,8 +533,6 @@ namespace MazeMap::App::Internal
         };
 
         static MainStage BuildRegisteredMainStage() noexcept;
-        static void TeardownOnRuntimeFault(void* context, const char* reason) noexcept;
-
         void PopulateTimingRowFromState(
             const MazeMap::VehicleState& state,
             Runtime::OpenFloorTimingRow& row) const noexcept;
@@ -544,9 +543,6 @@ namespace MazeMap::App::Internal
             std::uint16_t repeatIndex,
             const MazeMap::VehicleState& state,
             Runtime::OpenFloorMainRow& row) const;
-        void ConfigureSelectorMonitor() noexcept;
-        void ReleaseSelectorMonitor() noexcept;
-        bool SelectorRemoved() const noexcept;
         void FinalizeSuccessfulRun() noexcept;
         bool ActiveMainStageSlotEndsRegime() const noexcept;
         CommandVector TimingStageTick(
@@ -566,9 +562,7 @@ namespace MazeMap::App::Internal
         Drive& _driveService;
         StartupCalibration& _startupCalibration;
         StageTick _activeStageTick{ &OpenFloorMeasurementController::TimingStageTick };
-        std::uint8_t _selectorDrivePin{};
-        std::uint8_t _selectorSensePin{};
-        bool _selectorMonitorArmed{};
+        BootFramework* _bootFramework{};
         TimingStage _timingStage{};
         MainStage _mainStage;
         float _sessionStartPointX{ std::numeric_limits<float>::quiet_NaN() };

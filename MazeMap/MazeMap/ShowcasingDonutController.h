@@ -129,7 +129,8 @@ namespace MazeMap::App::Internal
         ShowcasingDonutController(ShowcasingDonutController&&) = delete;
         ShowcasingDonutController& operator=(ShowcasingDonutController&&) = delete;
 
-        void SetupMode() override;
+        void SetupMode(BootFramework& framework) override;
+        void OnModeFault(const char* reason) noexcept override;
         CommandVector RunTick(
             std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,
@@ -172,7 +173,6 @@ namespace MazeMap::App::Internal
 
         static constexpr std::size_t kLogFileNameCapacity = 96U;
 
-        static void TeardownOnRuntimeFault(void* context, const char* reason) noexcept;
         void ResetState() noexcept;
         bool BeginMainLog();
         bool WriteBufferedMainRow();
@@ -186,9 +186,6 @@ namespace MazeMap::App::Internal
             bool abortMarker,
             Runtime::ShowcasingDonutMainRow& row) const;
         void UpdatePeaks(const MazeMap::VehicleState& state) noexcept;
-        void ConfigureSelectorMonitor() noexcept;
-        void ReleaseSelectorMonitor() noexcept;
-        bool SelectorRemoved() const noexcept;
         bool BeginDonutSweep() noexcept;
         bool BeginFlashTurn(float angleRad) noexcept;
         bool TractionLossDetected(const MazeMap::VehicleState& state) noexcept;
@@ -205,15 +202,13 @@ namespace MazeMap::App::Internal
         MazeMap::Vehicle& _vehicle;
         DriveBase& _drive;
         Drive& _driveService;
+        BootFramework* _bootFramework{};
         Phase _phase{ Phase::Idle };
         EndReason _endReason{ EndReason::None };
         char _logFileName[kLogFileNameCapacity]{};
         bool _mainLogOpen{};
         Runtime::ShowcasingDonutMainRow _bufferedMainRow{};
         bool _bufferedMainRowValid{};
-        std::uint8_t _selectorDrivePin{};
-        std::uint8_t _selectorSensePin{};
-        bool _selectorMonitorArmed{};
         float _commandedSpeedMps{};
         float _peakCommandedSpeedMps{};
         float _peakEncoderSpeedMps{};

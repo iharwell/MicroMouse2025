@@ -2,7 +2,7 @@
 #include "CorridorRepeatabilityMode.h"
 
 #include "AuxMeasurementConfig.h"
-#include "BootUtilityModeFramework.h"
+#include "BootFramework.h"
 #include "Drive.h"
 #include "DriveBase.h"
 #include "LoopController.h"
@@ -15,8 +15,6 @@
 
 namespace
 {
-    constexpr const char* kCorridorStableId = "corridor_repeatability";
-
     MotionLimits BuildCorridorMotionLimits(const MazeMap::Vehicle& vehicle, const float maxSpeedMps) noexcept
     {
         MotionLimits limits{};
@@ -45,20 +43,10 @@ namespace MazeMap::App::Internal
         {
         }
 
-        void SetupMode() override
+        void SetupMode(BootFramework& framework) override
         {
+            (void)framework;
             ResetState();
-            if (!_runtime.RegisterModeFaultHandler(&CorridorRepeatabilityMode::TeardownOnRuntimeFault, this, kCorridorStableId))
-            {
-                _runtime.FailActiveMode("Corridor repeatability fault handler registration failed");
-            }
-
-            if (!SetupHardware())
-            {
-                _runtime.FailActiveMode("Corridor repeatability hardware setup failed");
-            }
-
-            (void)BootUtilityModeFramework::ResetStartupTrace("mode:corridor_repeatability");
             (void)_runtime.AppendTextLogLine("Corridor repeatability mode");
             (void)_runtime.AppendTextLogLine("Single-session shared-service corridor passes");
 
@@ -101,19 +89,13 @@ namespace MazeMap::App::Internal
             Complete
         };
 
-        static void TeardownOnRuntimeFault(void* context, const char* reason) noexcept
+        void OnModeFault(const char* reason) noexcept override
         {
             (void)reason;
-            auto* const self = static_cast<CorridorRepeatabilityMode*>(context);
-            if (self == nullptr)
-            {
-                return;
-            }
-
-            self->_phase = Phase::Idle;
-            self->_wallTouch.Cancel();
-            self->_startupCalibration.Cancel();
-            self->_drive.ClearCommandEvidence();
+            _phase = Phase::Idle;
+            _wallTouch.Cancel();
+            _startupCalibration.Cancel();
+            _drive.ClearCommandEvidence();
         }
 
         void ResetState() noexcept
@@ -389,7 +371,6 @@ namespace MazeMap::App::Internal
     {
         static constexpr BootModeDescriptor descriptor{
             BootModeId::CorridorRepeatability,
-            BootModeCategory::Utility,
             "corridor_repeatability",
             "Run clean single-session corridor repeatability passes.",
             "logging.txt",

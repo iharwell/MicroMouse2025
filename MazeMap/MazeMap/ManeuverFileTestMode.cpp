@@ -1,9 +1,10 @@
 #include "pch.h"
 #include "ManeuverFileTestMode.h"
 
-#include "BootUtilityModeFramework.h"
+#include "BootFramework.h"
 #include "Drive.h"
 #include "DriveBase.h"
+#include "IApplicationMode.h"
 #include "LoopController.h"
 #include "ManeuverPath.h"
 #include "ManeuverQueue.h"
@@ -18,7 +19,6 @@
 
 namespace
 {
-    constexpr const char* kManeuverFileTestStableId = "maneuver_file_test";
     constexpr const char* kManeuverFileName = "test.txt";
     constexpr std::uint16_t kManeuverFilePostStartupHoldMs = 50U;
     constexpr std::uint16_t kManeuverFileCompletionHoldMs = 50U;
@@ -131,20 +131,10 @@ namespace MazeMap::App::Internal
         {
         }
 
-        void SetupMode() override
+        void SetupMode(BootFramework& framework) override
         {
+            (void)framework;
             ResetState();
-            if (!_runtime.RegisterModeFaultHandler(&ManeuverFileTestMode::TeardownOnRuntimeFault, this, kManeuverFileTestStableId))
-            {
-                _runtime.FailActiveMode("Maneuver file test fault handler registration failed");
-            }
-
-            if (!SetupHardware())
-            {
-                _runtime.FailActiveMode("Maneuver file test hardware setup failed");
-            }
-
-            (void)BootUtilityModeFramework::ResetStartupTrace("mode:maneuver_file_test");
             (void)_runtime.AppendTextLogLine("Maneuver file test mode");
             (void)_runtime.AppendTextLogLine(
                 "Load and execute the maneuver queue stored in test.txt through shared startup calibration and Drive.");
@@ -357,17 +347,11 @@ namespace MazeMap::App::Internal
             _startupCalibration.Cancel();
         }
 
-        static void TeardownOnRuntimeFault(void* context, const char* reason) noexcept
+        void OnModeFault(const char* reason) noexcept override
         {
             (void)reason;
-            if (context == nullptr)
-            {
-                return;
-            }
-
-            auto* const self = static_cast<ManeuverFileTestMode*>(context);
-            self->_startupCalibration.Cancel();
-            self->_drive.ClearCommandEvidence();
+            _startupCalibration.Cancel();
+            _drive.ClearCommandEvidence();
         }
 
         SharedRobotRuntime& _runtime;
@@ -385,7 +369,6 @@ namespace MazeMap::App::Internal
     {
         static constexpr BootModeDescriptor descriptor{
             BootModeId::ManeuverFileTest,
-            BootModeCategory::Utility,
             "maneuver_file_test",
             "Load and execute test.txt after shared maze startup calibration and shared Drive execution.",
             "logging.txt; maneuver queue execution trace",

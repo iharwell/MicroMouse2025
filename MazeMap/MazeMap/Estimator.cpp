@@ -1,8 +1,6 @@
 #include "pch.h"
 #include "Estimator.h"
 
-#include "BootUtilityModeFramework.h"
-
 #include "Defines.h"
 #include "SensorSnapshot.h"
 #include "Vehicle.h"
@@ -1884,9 +1882,5 @@ namespace MazeMap
             sizeof(_faultReason),
             "%s",
             (reason != nullptr && reason[0] != '\0') ? reason : "estimator_failure");
-
-        char traceLine[96] = {};
-        std::snprintf(traceLine, sizeof(traceLine), "estimator_fault:%s", _faultReason);
-        MazeMap::App::Internal::BootUtilityModeFramework::AppendStartupTrace(traceLine);
     }
 }

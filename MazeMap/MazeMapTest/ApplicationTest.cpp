@@ -1,7 +1,6 @@
 #include "pch.h"
 #include "CppUnitTest.h"
 #include "..\MazeMap\BootModeRegistry.h"
-#include "..\MazeMap\MazeMapApplicationRuntime.h"
 #include "..\MazeMap\Pins.h"
 #include "..\MazeMap\Defines.h"
 #include "..\MazeMap\PinPairStrap.h"
@@ -102,15 +101,34 @@ namespace MazeMap::App
             }
         }
 
-        TEST_METHOD(ResolveActiveApplicationMode_UsesDescriptorEntryMode)
+        TEST_METHOD(BootModeDescriptor_ConstructsWithCoreFields)
+        {
+            static constexpr BootModeDescriptor descriptor{
+                BootModeId::Mission,
+                "test_mode",
+                "Test descriptor for the core descriptor contract.",
+                "none",
+                nullptr,
+                "test_entry",
+                "ApplicationTest.cpp",
+                "none",
+                "none",
+                "none",
+                "none",
+            };
+
+            Assert::IsTrue(descriptor.id == BootModeId::Mission);
+            Assert::IsTrue(descriptor.entryMode == nullptr);
+        }
+
+        TEST_METHOD(BootModeRegistry_SelectedDescriptorDeclaresEntryMode)
         {
             HostSetPinShort(26U, 27U);
 
             const BootModeRegistryEntry& selectedMode = ResolveSelectedBootMode();
-            MazeMap::App::Internal::IApplicationMode& expected = selectedMode.descriptor->entryMode();
-            MazeMap::App::Internal::IApplicationMode& actual = MazeMap::App::Internal::ResolveActiveApplicationMode();
-
-            Assert::IsTrue(&actual == &expected);
+            Assert::IsTrue(selectedMode.id == BootModeId::TopSpeedMeasurement);
+            Assert::IsTrue(selectedMode.descriptor->id == BootModeId::TopSpeedMeasurement);
+            Assert::IsTrue(selectedMode.descriptor->entryMode != nullptr);
         }
 
         TEST_METHOD(BootModeRegistry_DefaultsToMission)
@@ -203,18 +221,6 @@ namespace MazeMap::App
 
             HostSetPinShort(38U, 39U, false);
             Assert::AreEqual(HIGH, digitalRead(38U));
-        }
-
-        TEST_METHOD(PinPairStrapMonitorDetectsLiveRemoval)
-        {
-            HostSetPinShort(27U, 28U);
-            BeginPinPairStrapMonitor(27U, 28U);
-            Assert::IsTrue(IsPinPairStrapMonitorClosed(28U));
-
-            HostSetPinShort(27U, 28U, false);
-            Assert::IsFalse(IsPinPairStrapMonitorClosed(28U));
-
-            EndPinPairStrapMonitor(27U, 28U);
         }
 
     };

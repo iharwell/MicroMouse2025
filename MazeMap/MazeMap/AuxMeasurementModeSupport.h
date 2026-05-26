@@ -46,7 +46,7 @@ namespace MazeMap::App::Internal::AuxMeasurementModeSupport
     EXPORT MotionLimits PositionAccuracyAuditCornerLimits(
         float cruiseSpeedMps,
         float nominalRadiusM) noexcept;
-    EXPORT float UtilityModeManeuverDistanceMeters(MazeMap::ManeuverCode code);
+    EXPORT float AuxMeasurementManeuverDistanceMeters(MazeMap::ManeuverCode code);
 
     EXPORT bool LogCorridorRepeatabilityMetadata(
         WriteEventCallback writeEvent,

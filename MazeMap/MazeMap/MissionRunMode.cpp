@@ -1,7 +1,7 @@
 #include "pch.h"
 #include "MissionRunMode.h"
 
-#include "BootUtilityModeFramework.h"
+#include "BootFramework.h"
 #include "Drive.h"
 #include "DriveBase.h"
 #include "LoopController.h"
@@ -30,15 +30,10 @@ namespace MazeMap::App::Internal
         {
         }
 
-        void SetupMode() override
+        void SetupMode(BootFramework& framework) override
         {
+            (void)framework;
             ResetState();
-            if (!SetupHardware())
-            {
-                _runtime.FailActiveMode("Mission hardware setup failed");
-            }
-
-            (void)BootUtilityModeFramework::ResetStartupTrace("mode:mission");
             (void)_runtime.AppendTextLogLine("Mission mode");
             (void)_runtime.AppendTextLogLine("Shared-service mission startup audit");
 
@@ -176,7 +171,6 @@ namespace MazeMap::App::Internal
     {
         static constexpr BootModeDescriptor descriptor{
             BootModeId::Mission,
-            BootModeCategory::Mission,
             "mission",
             "Run the clean single-session mission startup path.",
             "logging.txt",

@@ -1,14 +1,12 @@
 #include "pch.h"
 #include "WallSensorLedCalibrationController.h"
 
+#include "BootFramework.h"
 #include "MazeMapApplicationPrivate.h"
-#include "BootUtilityModeFramework.h"
 #include "BootModeDescriptor.h"
-#include "BootModeRegistry.h"
 #include "HardwareConfig.h"
 #include "MazeMapRuntimeCore.h"
 #include "SharedRobotRuntime.h"
-#include "PinPairStrap.h"
 
 using MazeMap::App::Internal::GetSharedRobotRuntime;
 using MazeMap::App::Internal::SharedRobotRuntime;
@@ -21,31 +19,15 @@ namespace MazeMap::App::Internal
     {
     }
 
-    void WallSensorLedCalibrationController::SetupMode()
+    void WallSensorLedCalibrationController::SetupMode(BootFramework& framework)
     {
         ResetState();
-        if (!_runtime.RegisterModeFaultHandler(
-                &WallSensorLedCalibrationController::TeardownOnRuntimeFault,
-                this,
-                kStableId))
-        {
-            _runtime.FailActiveMode("Wall sensor LED calibration fault handler registration failed");
-        }
-
-        if (!SetupHardware())
-        {
-            _runtime.FailActiveMode("Wall sensor LED calibration hardware setup failed");
-        }
-
-        const MazeMap::App::BootModeRegistryEntry* const entry =
-            MazeMap::App::FindBootModeRegistryEntry(MazeMap::App::BootModeId::WallSensorLedCalibration);
-        if ((entry == nullptr) || (entry->selector.kind != MazeMap::App::BootModeSelectorKind::PinPair))
+        if (!framework.IsSelectedModeSelectorInstalled())
         {
             _runtime.FailActiveMode("Wall sensor LED calibration selector pins unavailable");
         }
 
-        _monitorDrivePin = entry->selector.pinA;
-        _monitorSensePin = entry->selector.pinB;
+        _bootFramework = &framework;
         _phase = LedCalibrationPhase::Front;
         _ledEnabled = false;
         _lastToggleUs = static_cast<std::uint32_t>(micros());
@@ -57,11 +39,8 @@ namespace MazeMap::App::Internal
         pinMode(Pins::LED_Ctrl_Side_Left, OUTPUT);
         pinMode(Pins::LED_Ctrl_Side_Right, OUTPUT);
         SetAllLeds(false);
-        BeginPinPairStrapMonitor(_monitorDrivePin, _monitorSensePin);
-        _monitorArmed = true;
 
         (void)_runtime.AppendTextLogLine("Wall sensor LED calibration mode");
-        (void)MazeMap::App::Internal::BootUtilityModeFramework::ResetStartupTrace("mode:wall_sensor_led_calibration");
         (void)_runtime.AppendTextLogLine("Front calibration active; side LEDs held off");
         PrintFrequency("Front LED square wave (Hz): ", HardwareConfig::kFrontWallSensorSwitchSettleTime_us);
         (void)_runtime.AppendTextLogLine("Remove selector jumper to switch to side calibration");
@@ -101,12 +80,9 @@ namespace MazeMap::App::Internal
         self->OnPauseGranted(loopController);
     }
 
-    void WallSensorLedCalibrationController::TeardownOnRuntimeFault(void* context, const char* reason) noexcept
+    void WallSensorLedCalibrationController::OnModeFault(const char* reason) noexcept
     {
-        if (context != nullptr)
-        {
-            static_cast<WallSensorLedCalibrationController*>(context)->CleanupOnRuntimeFault(reason);
-        }
+        CleanupOnRuntimeFault(reason);
     }
 
     CommandVector WallSensorLedCalibrationController::OnModeWork(
@@ -229,7 +205,12 @@ namespace MazeMap::App::Internal
 
     void WallSensorLedCalibrationController::AdvancePhase()
     {
-        const bool jumperInstalled = IsPinPairStrapMonitorClosed(_monitorSensePin);
+        if (_bootFramework == nullptr)
+        {
+            _runtime.FailActiveMode("Wall sensor LED calibration selector query unavailable");
+        }
+
+        const bool jumperInstalled = _bootFramework->IsSelectedModeSelectorInstalled();
         LedCalibrationPhase nextPhase = _phase;
         switch (_phase)
         {
@@ -269,9 +250,7 @@ namespace MazeMap::App::Internal
         _phase = LedCalibrationPhase::Front;
         _ledEnabled = false;
         _lastToggleUs = 0U;
-        _monitorDrivePin = 0U;
-        _monitorSensePin = 0U;
-        _monitorArmed = false;
+        _bootFramework = nullptr;
         _runtimeFaulted = false;
         _pauseRequested = false;
         _runtimeFaultReason = nullptr;
@@ -286,11 +265,7 @@ namespace MazeMap::App::Internal
 
     void WallSensorLedCalibrationController::CleanupHardware() noexcept
     {
-        if (_monitorArmed)
-        {
-            EndPinPairStrapMonitor(_monitorDrivePin, _monitorSensePin);
-            _monitorArmed = false;
-        }
+        _bootFramework = nullptr;
 
         SetAllLeds(false);
         _ledEnabled = false;
@@ -308,7 +283,6 @@ namespace MazeMap::App::Internal
     {
         static constexpr BootModeDescriptor descriptor{
             BootModeId::WallSensorLedCalibration,
-            BootModeCategory::Utility,
             "wall_sensor_led_calibration",
             "Blink front and side wall-sensor LEDs for optical calibration.",
             "logging.txt; operator-visible LED square waves",

@@ -1,23 +1,21 @@
 #include "pch.h"
 #include "TopSpeedMeasurementMode.h"
 
-#include "BootModeRegistry.h"
-#include "BootUtilityModeFramework.h"
+#include "BootFramework.h"
 #include "DiagnosticConfig.h"
 #include "Drive.h"
 #include "DriveBase.h"
+#include "IApplicationMode.h"
 #include "LoopController.h"
 #include "MazeMapApplicationPrivate.h"
 #include "MazeMapRuntimeCore.h"
 #include "SharedRobotRuntime.h"
-#include "PinPairStrap.h"
 #include "StartupCalibration.h"
 
 #include <limits>
 
 namespace
 {
-    constexpr const char* kTopSpeedMeasurementStableId = "top_speed_measurement";
     constexpr const char* kTopSpeedMeasurementSelectorRemovedReason =
         "Top-speed measurement selector jumper removed";
     constexpr std::uint16_t kTopSpeedMeasurementPrelaunchHoldMs = 1000U;
@@ -53,20 +51,14 @@ namespace MazeMap::App::Internal
         {
         }
 
-        void SetupMode() override
+        void SetupMode(BootFramework& framework) override
         {
             ResetState();
-            if (!_runtime.RegisterModeFaultHandler(&TopSpeedMeasurementMode::TeardownOnRuntimeFault, this, kTopSpeedMeasurementStableId))
+            _bootFramework = &framework;
+            if (!framework.IsSelectedModeSelectorInstalled())
             {
-                _runtime.FailActiveMode("Top speed measurement fault handler registration failed");
+                _runtime.FailActiveMode("Top speed measurement selector pins unavailable");
             }
-
-            if (!SetupHardware())
-            {
-                _runtime.FailActiveMode("Top speed measurement hardware setup failed");
-            }
-
-            (void)BootUtilityModeFramework::ResetStartupTrace("mode:top_speed_measurement");
             (void)_runtime.AppendTextLogLine("Top speed measurement mode");
             (void)_runtime.AppendTextLogLine("Shared-service open-floor straight-line top-speed audit");
 
@@ -79,8 +71,7 @@ namespace MazeMap::App::Internal
                 _runtime.FailActiveMode("Top speed measurement startup bring-up failed");
             }
 
-            ConfigureSelectorMonitor();
-            if (SelectorRemoved())
+            if (!framework.IsSelectedModeSelectorInstalled())
             {
                 _runtime.FailActiveMode(kTopSpeedMeasurementSelectorRemovedReason);
             }
@@ -111,19 +102,12 @@ namespace MazeMap::App::Internal
             Complete
         };
 
-        static void TeardownOnRuntimeFault(void* context, const char* reason) noexcept
+        void OnModeFault(const char* reason) noexcept override
         {
             (void)reason;
-            auto* const self = static_cast<TopSpeedMeasurementMode*>(context);
-            if (self == nullptr)
-            {
-                return;
-            }
-
-            self->ReleaseSelectorMonitor();
-            self->_phase = Phase::Idle;
-            self->_startupCalibration.Cancel();
-            self->_drive.ClearCommandEvidence();
+            _phase = Phase::Idle;
+            _startupCalibration.Cancel();
+            _drive.ClearCommandEvidence();
         }
 
         void ResetState() noexcept
@@ -132,42 +116,8 @@ namespace MazeMap::App::Internal
             _peakMeasuredSpeedMps = 0.0f;
             _peakPlanarAccelMps2 = 0.0f;
             _batteryVoltageStart = 0.0f;
-            _selectorDrivePin = 0U;
-            _selectorSensePin = 0U;
-            _selectorMonitorArmed = false;
+            _bootFramework = nullptr;
             _startupCalibration.Cancel();
-        }
-
-        void ConfigureSelectorMonitor() noexcept
-        {
-            ReleaseSelectorMonitor();
-            const BootModeRegistryEntry* const entry =
-                FindBootModeRegistryEntry(BootModeId::TopSpeedMeasurement);
-            if ((entry == nullptr) || (entry->selector.kind != BootModeSelectorKind::PinPair))
-            {
-                return;
-            }
-
-            _selectorDrivePin = entry->selector.pinA;
-            _selectorSensePin = entry->selector.pinB;
-            BeginPinPairStrapMonitor(_selectorDrivePin, _selectorSensePin);
-            _selectorMonitorArmed = true;
-        }
-
-        void ReleaseSelectorMonitor() noexcept
-        {
-            if (_selectorMonitorArmed)
-            {
-                EndPinPairStrapMonitor(_selectorDrivePin, _selectorSensePin);
-            }
-            _selectorMonitorArmed = false;
-            _selectorDrivePin = 0U;
-            _selectorSensePin = 0U;
-        }
-
-        bool SelectorRemoved() const noexcept
-        {
-            return _selectorMonitorArmed && !IsPinPairStrapMonitorClosed(_selectorSensePin);
         }
 
         bool StartHold(const std::uint16_t durationMs) noexcept
@@ -230,7 +180,7 @@ namespace MazeMap::App::Internal
         {
             (void)loopEndTimeUs;
 
-            if (SelectorRemoved())
+            if (_bootFramework != nullptr && !_bootFramework->IsSelectedModeSelectorInstalled())
             {
                 _runtime.FailActiveMode(kTopSpeedMeasurementSelectorRemovedReason);
                 return CommandVector::Brake();
@@ -290,7 +240,7 @@ namespace MazeMap::App::Internal
                     _peakMeasuredSpeedMps,
                     _peakPlanarAccelMps2,
                     _batteryVoltageStart);
-                ReleaseSelectorMonitor();
+                _bootFramework = nullptr;
                 _startupCalibration.Cancel();
                 const CommandVector stopCommand = _drive.ProposeBodyTick(
                     0.0f,
@@ -320,16 +270,13 @@ namespace MazeMap::App::Internal
         float _peakMeasuredSpeedMps{};
         float _peakPlanarAccelMps2{};
         float _batteryVoltageStart{};
-        std::uint8_t _selectorDrivePin{};
-        std::uint8_t _selectorSensePin{};
-        bool _selectorMonitorArmed{};
+        BootFramework* _bootFramework{};
     };
 
     const BootModeDescriptor& GetTopSpeedMeasurementBootModeDescriptor()
     {
         static constexpr BootModeDescriptor descriptor{
             BootModeId::TopSpeedMeasurement,
-            BootModeCategory::Utility,
             "top_speed_measurement",
             "Run a clean open-floor straight-line top-speed measurement with shared services.",
             "logging.txt",
@@ -337,7 +284,7 @@ namespace MazeMap::App::Internal
             "GetTopSpeedMeasurementMode",
             "TopSpeedMeasurementMode.cpp",
             "shared bring-up; prelaunch hold; straight run; completion hold",
-            "Shared startup calibration bring-up; shared drive service; selector monitor",
+            "Shared startup calibration bring-up; shared drive service; selector presence check",
             "Behavior is intentionally reduced to the clean shared-service top-speed path",
             "none",
         };

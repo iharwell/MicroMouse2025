@@ -458,6 +458,7 @@ namespace MazeMap::App::Internal
         , maneuverExecutor()
         , controlLoop()
         , sensors(vehicle, gWallDistanceCalibration)
+        , bootFramework(*this)
         , dataLogger()
         , textLogFile()
         , textLogQueue()
@@ -502,6 +503,11 @@ namespace MazeMap::App::Internal
     const MazeMap::Vehicle& SharedRobotRuntime::Vehicle() const noexcept
     {
         return vehicle;
+    }
+
+    BootFramework& SharedRobotRuntime::BootFramework() noexcept
+    {
+        return bootFramework;
     }
 
     MazeMap::Maze& SharedRobotRuntime::Maze() noexcept

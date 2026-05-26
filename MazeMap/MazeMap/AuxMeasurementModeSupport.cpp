@@ -241,7 +241,7 @@ namespace MazeMap::App::Internal::AuxMeasurementModeSupport
         return limits;
     }
 
-    float UtilityModeManeuverDistanceMeters(const MazeMap::ManeuverCode code)
+    float AuxMeasurementManeuverDistanceMeters(const MazeMap::ManeuverCode code)
     {
         return MazeMap::ManeuverSet::GetSet().GetTravelDistanceMeters(code, Config::kCellSizeM);
     }
@@ -494,7 +494,7 @@ namespace MazeMap::App::Internal::AuxMeasurementModeSupport
                 "code=%s;nominal_radius_m=%.6f;distance_m=%.6f",
                 codeName,
                 MazeMap::ManeuverSet::GetSet()[code].GetNominalTurnRadiusInCells() * Config::kCellSizeM,
-                UtilityModeManeuverDistanceMeters(code));
+                AuxMeasurementManeuverDistanceMeters(code));
             if (!WriteEvent(writeEvent, context, "position_audit_turn_code", line))
             {
                 return ReportFailure(fail, context, "Unable to write position accuracy audit turn metadata");

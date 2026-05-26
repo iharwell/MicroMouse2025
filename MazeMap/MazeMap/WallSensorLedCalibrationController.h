@@ -14,6 +14,7 @@ namespace MazeMap::App
 
 namespace MazeMap::App::Internal
 {
+    class BootFramework;
     class SharedRobotRuntime;
 
     class EXPORT WallSensorLedCalibrationController final : public IApplicationMode
@@ -21,7 +22,8 @@ namespace MazeMap::App::Internal
     public:
         explicit WallSensorLedCalibrationController(SharedRobotRuntime& runtime);
 
-        void SetupMode() override;
+        void SetupMode(BootFramework& framework) override;
+        void OnModeFault(const char* reason) noexcept override;
         CommandVector RunTick(
             std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,
@@ -38,7 +40,6 @@ namespace MazeMap::App::Internal
         };
 
         static void PauseThunk(void* context, LoopController& loopController);
-        static void TeardownOnRuntimeFault(void* context, const char* reason) noexcept;
         static void SetFrontLeds(bool enabled);
         static void SetSideLeds(bool enabled);
         static void SetAllLeds(bool enabled);
@@ -57,12 +58,10 @@ namespace MazeMap::App::Internal
 
         SharedRobotRuntime& _runtime;
         LoopController& _loopController;
-        std::uint8_t _monitorDrivePin{};
-        std::uint8_t _monitorSensePin{};
+        BootFramework* _bootFramework{};
         LedCalibrationPhase _phase{ LedCalibrationPhase::Front };
         bool _ledEnabled{};
         std::uint32_t _lastToggleUs{};
-        bool _monitorArmed{};
         bool _runtimeFaulted{};
         bool _pauseRequested{};
         const char* _runtimeFaultReason{};

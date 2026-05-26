@@ -3,7 +3,7 @@
 
 #include "AuxMeasurementConfig.h"
 #include "AuxMeasurementModeSupport.h"
-#include "BootUtilityModeFramework.h"
+#include "BootFramework.h"
 #include "Drive.h"
 #include "DriveBase.h"
 #include "LoopController.h"
@@ -16,7 +16,6 @@
 
 namespace
 {
-    constexpr const char* kPositionAuditStableId = "position_accuracy_audit";
     constexpr float kPositionAuditWallTouchSpeedMps = 0.35f;
 
     MotionLimits BuildPositionWallTouchLimits(const MazeMap::Vehicle& vehicle) noexcept
@@ -46,20 +45,10 @@ namespace MazeMap::App::Internal
         {
         }
 
-        void SetupMode() override
+        void SetupMode(BootFramework& framework) override
         {
+            (void)framework;
             ResetState();
-            if (!_runtime.RegisterModeFaultHandler(&PositionAccuracyAuditMode::TeardownOnRuntimeFault, this, kPositionAuditStableId))
-            {
-                _runtime.FailActiveMode("Position accuracy audit fault handler registration failed");
-            }
-
-            if (!SetupHardware())
-            {
-                _runtime.FailActiveMode("Position accuracy audit hardware setup failed");
-            }
-
-            (void)BootUtilityModeFramework::ResetStartupTrace("mode:position_accuracy_audit");
             (void)_runtime.AppendTextLogLine("Position accuracy audit mode");
             (void)_runtime.AppendTextLogLine("Single-session shared-service straight audit");
             _fixture = AuxMeasurementModeSupport::BuildPositionAuditFixtureGeometry();
@@ -103,19 +92,13 @@ namespace MazeMap::App::Internal
             Complete
         };
 
-        static void TeardownOnRuntimeFault(void* context, const char* reason) noexcept
+        void OnModeFault(const char* reason) noexcept override
         {
             (void)reason;
-            auto* const self = static_cast<PositionAccuracyAuditMode*>(context);
-            if (self == nullptr)
-            {
-                return;
-            }
-
-            self->_phase = Phase::Idle;
-            self->_wallTouch.Cancel();
-            self->_startupCalibration.Cancel();
-            self->_drive.ClearCommandEvidence();
+            _phase = Phase::Idle;
+            _wallTouch.Cancel();
+            _startupCalibration.Cancel();
+            _drive.ClearCommandEvidence();
         }
 
         void ResetState() noexcept
@@ -388,7 +371,6 @@ namespace MazeMap::App::Internal
     {
         static constexpr BootModeDescriptor descriptor{
             BootModeId::PositionAccuracyAudit,
-            BootModeCategory::Utility,
             "position_accuracy_audit",
             "Run clean single-session shared-service position audit passes.",
             "logging.txt",

@@ -7,6 +7,8 @@
 
 namespace MazeMap::App::Internal
 {
+    class BootFramework;
+
     // Small, authoritative top-level mode contract for boot-selected application execution.
     //
     // Layering contract:
@@ -15,9 +17,13 @@ namespace MazeMap::App::Internal
     //
     // Startup contract:
     // - Infrastructure resolves the active IApplicationMode object.
-    // - SetupMode() performs one-time pre-loop preparation only for the selected boot mode.
-    // - SetupMode() is not a reusable reset hook for another pass through the same mode object.
-    // - SetupMode() must stage the initial LoopController session state through
+    // - SetupMode(BootFramework& framework) performs one-time pre-loop preparation only for the
+    //   selected boot mode.
+    // - SetupMode(BootFramework& framework) is an infrastructure callback; a mode must never call
+    //   it directly.
+    // - SetupMode(BootFramework& framework) is not a reusable reset hook for another pass through
+    //   the same mode object.
+    // - SetupMode(BootFramework& framework) must stage the initial LoopController session state through
     //   StageNextSessionState(...).
     // - Infrastructure then binds the mode object itself as the initial callback context and
     //   enters LoopController::Run().
@@ -25,6 +31,7 @@ namespace MazeMap::App::Internal
     // Tick-ownership contract:
     // - RunTick(...) is the authoritative initial control-loop callback for every application
     //   mode and for every successor session restart.
+    // - RunTick(...) is an infrastructure callback; a mode must never call it directly.
     // - During RunTick(...), the mode may keep callback ownership, transfer it explicitly,
     //   request pause, request an end-session boundary, or request terminal whole-program halt.
     // - Ordinary top-level mode completion is terminal whole-program end, not end-session.
@@ -39,8 +46,9 @@ namespace MazeMap::App::Internal
         // interface after startup selection has resolved the authoritative mode object.
         virtual ~IApplicationMode() = default;
 
-        // `SetupMode()`:
+        // `SetupMode(BootFramework& framework)`:
         // Performs one-time top-level mode preparation before LoopController::Run() is entered.
+        // This is an infrastructure callback and must not be called directly by the mode.
         //
         // Behavior:
         // - May configure runtime services, logs, or mode-local retained state.
@@ -49,10 +57,23 @@ namespace MazeMap::App::Internal
         // - Is called at most once for the selected boot mode during a program run.
         // - Failures are terminal and should go through SharedRobotRuntime::FailActiveMode(...),
         //   not boolean return values.
-        virtual void SetupMode() = 0;
+        virtual void SetupMode(BootFramework& framework) = 0;
+
+        // `OnModeFault(reason)`:
+        // Runs selected-mode cleanup that must happen on the terminal runtime fault path.
+        //
+        // Behavior:
+        // Infrastructure calls this through BootFramework's single registered fault bridge.
+        // Modes must not call it directly; ordinary recovery and phase transitions belong in
+        // private mode methods.
+        virtual void OnModeFault(const char* reason) noexcept
+        {
+            (void)reason;
+        }
 
         // `RunTick(loopEndTimeUs, state, loopController)`:
         // Produces the mode's command proposal for the current strict-cadence tick.
+        // This is an infrastructure callback and must not be called directly by the mode.
         //
         // Parameters:
         // `loopEndTimeUs`:

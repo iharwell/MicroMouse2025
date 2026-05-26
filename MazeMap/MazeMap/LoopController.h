@@ -27,9 +27,9 @@ namespace MazeMap::App::Internal
     //
     // Startup and session-start contract:
     // - Infrastructure resolves the active IApplicationMode object.
-    // - SetupMode() is one-time pre-Run() preparation for the selected boot mode, not a reusable
+    // - SetupMode(...) is one-time pre-Run() preparation for the selected boot mode, not a reusable
     //   reset hook for another pass through the same mode object.
-    // - SetupMode() must stage the initial session state through StageNextSessionState(...).
+    // - SetupMode(...) must stage the initial session state through StageNextSessionState(...).
     // - Infrastructure privately binds the mode object and enters Run().
     // - Every session start, including successor-session restarts, installs
     //   IApplicationMode::RunTick(...) with the bound mode object as the callback context.
@@ -97,7 +97,7 @@ namespace MazeMap::App::Internal
         // Session-local sensor participation used for capture, estimator input, and wall updates.
         //
         // Behavior:
-        // - SetupMode() must call this before infrastructure-owned Run() is entered.
+        // - SetupMode(...) must call this before infrastructure-owned Run() is entered.
         // - A later call replaces any previously staged successor-session state.
         // - After RequestEndSession(...), the end-session callback must call this before it
         //   returns unless it instead requests HaltExecutionEndProgram().
@@ -230,6 +230,7 @@ namespace MazeMap::App::Internal
 
     private:
         friend class ::MazeMap::App::Application;
+        friend class BootFramework;
         friend class SharedRobotRuntime;
 
         class TimingBuffer final

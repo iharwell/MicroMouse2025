@@ -23,18 +23,11 @@ namespace MazeMap::App
         Mission,
     };
 
-    enum class BootModeCategory : uint8_t
-    {
-        Mission,
-        Utility,
-    };
-
     using BootModeEntryMode = Internal::IApplicationMode& (*)();
 
     struct BootModeDescriptor
     {
         BootModeId id;
-        BootModeCategory category;
         const char* stableId;
         const char* purposeSummary;
         const char* primaryOutputs;

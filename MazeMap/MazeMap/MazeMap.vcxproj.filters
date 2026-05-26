@@ -22,7 +22,7 @@
     <Filter Include="Source Files\App\Internal\AuxMeasurementModeSupport">
       <UniqueIdentifier>{BFA14C77-4FF5-486E-8FD4-CBA00F582DF7}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\App\Internal\BootUtilityModeFramework">
+    <Filter Include="Source Files\App\Internal\BootFramework">
       <UniqueIdentifier>{7D5E5EE6-2B86-5DEC-AC00-FBC9696FBE5D}</UniqueIdentifier>
     </Filter>
     <Filter Include="Source Files\App\Internal\Runtime">
@@ -37,7 +37,7 @@
     <Filter Include="Header Files\App\Internal\AuxMeasurementModeSupport">
       <UniqueIdentifier>{224D3698-D6D2-4FCF-9311-C82B1D0B11AB}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Header Files\App\Internal\BootUtilityModeFramework">
+    <Filter Include="Header Files\App\Internal\BootFramework">
       <UniqueIdentifier>{BFA84A39-A36F-FA1D-30E0-25ABAC2A21D0}</UniqueIdentifier>
     </Filter>
     <Filter Include="Header Files\App\Internal\Runtime">
@@ -87,8 +87,8 @@
     <ClInclude Include="BootModeRegistry.h">
       <Filter>Header Files\App</Filter>
     </ClInclude>
-    <ClInclude Include="BootUtilityModeFramework.h">
-      <Filter>Header Files\App\Internal\BootUtilityModeFramework</Filter>
+    <ClInclude Include="BootFramework.h">
+      <Filter>Header Files\App\Internal\BootFramework</Filter>
     </ClInclude>
     <ClInclude Include="Cell.h">
       <Filter>Header Files</Filter>
@@ -242,9 +242,6 @@
     </ClInclude>
     <ClInclude Include="MazeMapApplicationPrivate.h">
       <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="MazeMapApplicationRuntime.h">
-      <Filter>Header Files\App\Internal</Filter>
     </ClInclude>
     <ClInclude Include="MazeMapControllerRegistry.h">
       <Filter>Header Files\App\Internal</Filter>
@@ -533,11 +530,8 @@
     <ClCompile Include="BootModeRegistry.cpp">
       <Filter>Source Files\App</Filter>
     </ClCompile>
-    <ClCompile Include="BootUtilityModeFramework.cpp">
-      <Filter>Source Files\App\Internal\BootUtilityModeFramework</Filter>
-    </ClCompile>
-    <ClCompile Include="MazeMapApplication.cpp">
-      <Filter>Source Files\App</Filter>
+    <ClCompile Include="BootFramework.cpp">
+      <Filter>Source Files\App\Internal\BootFramework</Filter>
     </ClCompile>
     <ClCompile Include="MmLog.cpp">
       <Filter>Source Files\mmlog</Filter>
@@ -555,9 +549,6 @@
       <Filter>Source Files\App\Internal</Filter>
     </ClCompile>
     <ClCompile Include="WallSensorLedCalibrationController.cpp">
-      <Filter>Source Files\App\Internal</Filter>
-    </ClCompile>
-    <ClCompile Include="DiagnosticController.cpp">
       <Filter>Source Files\App\Internal</Filter>
     </ClCompile>
     <ClCompile Include="OpenFloorMeasurementController.cpp">

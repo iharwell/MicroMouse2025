@@ -179,7 +179,7 @@
     <ClInclude Include="AuxMeasurementModeSupport.h" />
     <ClInclude Include="BootModeDescriptor.h" />
     <ClInclude Include="BootModeRegistry.h" />
-    <ClInclude Include="BootUtilityModeFramework.h" />
+    <ClInclude Include="BootFramework.h" />
     <ClInclude Include="Cell.h" />
     <ClInclude Include="CellCoordinates.h" />
     <ClInclude Include="CircularBuffer.h" />
@@ -231,7 +231,6 @@
     <ClInclude Include="Application.h" />
     <ClInclude Include="IApplicationMode.h" />
     <ClInclude Include="MazeMapApplicationPrivate.h" />
-    <ClInclude Include="MazeMapApplicationRuntime.h" />
     <ClInclude Include="MazeMapControllerRegistry.h" />
     <ClInclude Include="WallSensorLedCalibrationController.h" />
     <ClInclude Include="MazeMapRuntimeCore.h" />
@@ -328,10 +327,7 @@
     <ClCompile Include="MapEvidenceUpdater.cpp" />
     <ClCompile Include="Application.cpp" />
     <ClCompile Include="BootModeRegistry.cpp" />
-    <ClCompile Include="BootUtilityModeFramework.cpp" />
-    <ClCompile Include="MazeMapApplication.cpp">
-      <PrecompiledHeader>NotUsing</PrecompiledHeader>
-    </ClCompile>
+    <ClCompile Include="BootFramework.cpp" />
     <ClCompile Include="MotionLimits.cpp" />
     <ClCompile Include="MmLog.cpp" />
     <ClCompile Include="Estimator.cpp" />
@@ -346,10 +342,6 @@
     </ClCompile>
     <ClCompile Include="WallSensorLedCalibrationController.cpp">
       <ObjectFileName>$(IntDir)WallSensorLedCalibrationController.obj</ObjectFileName>
-      <PrecompiledHeader>Use</PrecompiledHeader>
-    </ClCompile>
-    <ClCompile Include="DiagnosticController.cpp">
-      <ObjectFileName>$(IntDir)DiagnosticController.obj</ObjectFileName>
       <PrecompiledHeader>Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="OpenFloorMeasurementController.cpp">

@@ -1,9 +1,6 @@
 #pragma once
 
 #include "Application.h"
-#include "IApplicationMode.h"
-#include "MazeMapApplicationRuntime.h"
-#include "BootUtilityModeFramework.h"
 #include "Defines.h"
 #include "TeensyLayout.h"
 #include "Maze.h"
@@ -54,10 +51,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-using MazeMap::App::Internal::IApplicationMode;
-using MazeMap::App::Internal::BootUtilityModeFramework::AppendStartupTrace;
-using MazeMap::App::Internal::BootUtilityModeFramework::ResetStartupTrace;
 
 namespace MazeMap
 {
