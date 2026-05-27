@@ -143,10 +143,6 @@ namespace MazeMap::App::Internal
 
             _startupCalibration.Cancel();
             _startupCalibration.SetIsInMaze(true);
-            if (!_startupCalibration.BringUp())
-            {
-                _runtime.FailActiveMode("Maneuver file test startup bring-up failed");
-            }
 
             if (!LoadManeuverQueueFromSd(_runtime, _vehicle, _queue))
             {
@@ -379,6 +375,7 @@ namespace MazeMap::App::Internal
             "Shared startup calibration (including WallTouch) and Drive services; ManeuverQueue speed synthesis",
             "Behavior is intentionally reduced to the canonical shared-service queue path",
             "test.txt; logging.txt",
+            true,
         };
         return descriptor;
     }

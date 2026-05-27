@@ -17,6 +17,7 @@ namespace MazeMap::App::Internal
     //
     // Startup contract:
     // - Infrastructure resolves the active IApplicationMode object.
+    // - Infrastructure brings up descriptor-required startup services before SetupMode(...).
     // - SetupMode(BootFramework& framework) performs one-time pre-loop preparation only for the
     //   selected boot mode.
     // - SetupMode(BootFramework& framework) is an infrastructure callback; a mode must never call

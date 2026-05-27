@@ -929,6 +929,7 @@ namespace MazeMap::App::Internal
         OpenFloorMeasurementController& controller)
     {
         _tickIndex = 0U;
+        _logOpen = false;
         _bufferedRow.reset();
         if (!controller._runtime.OpenUtilityDataLogFile(MazeMap::kOpenFloorTimingFileName))
         {
@@ -951,6 +952,7 @@ namespace MazeMap::App::Internal
             return false;
         }
 
+        _logOpen = true;
         return true;
     }
 
@@ -960,6 +962,22 @@ namespace MazeMap::App::Internal
         LoopController& loopController)
     {
         const CommandVector stopControl = CommandVector(0.0f, 0.0f);
+        if (controller._startupCalibration.Active())
+        {
+            bool calibrationDone = false;
+            const CommandVector calibrationControl = controller._startupCalibration.GetNextControls(calibrationDone);
+            if (!calibrationDone)
+            {
+                return calibrationControl;
+            }
+        }
+
+        if (!_logOpen && !OpenTimingLog(controller))
+        {
+            controller._runtime.FailActiveMode("Open-floor measurement timing log setup failed");
+            return stopControl;
+        }
+
         if (!WriteBufferedRow(controller, "Open-floor measurement timing log write failed"))
         {
             controller._runtime.FailActiveMode("Open-floor measurement timing log write failed");
@@ -1303,13 +1321,11 @@ namespace MazeMap::App::Internal
             "Open-floor battery: timing capture plus the registered main-regime battery");
 
         _drive.ClearCommandEvidence();
+        _activeStageTick = &OpenFloorMeasurementController::TimingStageTick;
 
         _startupCalibration.Cancel();
         _startupCalibration.SetIsInMaze(false);
-        if (!_startupCalibration.BringUp())
-        {
-            _runtime.FailActiveMode("Open-floor measurement startup bring-up failed");
-        }
+        _startupCalibration.Start();
         _vehicle.SetFanDuty(Config::kRacingFanDutyCycle);
         _driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
         _driveService.SetLimits(BuildOpenFloorMeasurementModeLimits(_vehicle));
@@ -1321,11 +1337,6 @@ namespace MazeMap::App::Internal
         if (!framework.IsSelectedModeSelectorInstalled())
         {
             _runtime.FailActiveMode(kOpenFloorMeasurementSelectorRemovedReason);
-        }
-
-        if (!_timingStage.OpenTimingLog(*this))
-        {
-            _runtime.FailActiveMode("Open-floor measurement timing log setup failed");
         }
 
         const auto& runtimeState = _runtime.RuntimeState();
@@ -1502,6 +1513,7 @@ namespace MazeMap::App::Internal
             "DiagnosticConfig linear limits; OpenFloorMeasurementSpec speed bins; shared startup calibration; shared drive service",
             "Inter-phase 500 ms brake holds; launch and straight samples insert 250 ms brake holds between motions; loop-style regimes remain maneuver-driven",
             "open_floor_timing.mmlog, open_floor_main.mmlog",
+            true,
         };
         return descriptor;
     }

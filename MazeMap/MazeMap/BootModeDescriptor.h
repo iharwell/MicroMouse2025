@@ -38,5 +38,6 @@ namespace MazeMap::App
         const char* sharedTuning;
         const char* explicitTuningOverrides;
         const char* expectedArtifacts;
+        bool requiresStartupCalibrationBringUp;
     };
 }

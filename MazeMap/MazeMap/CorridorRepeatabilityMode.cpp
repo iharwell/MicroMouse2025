@@ -54,10 +54,6 @@ namespace MazeMap::App::Internal
 
             _startupCalibration.Cancel();
             _startupCalibration.SetIsInMaze(true);
-            if (!_startupCalibration.BringUp())
-            {
-                _runtime.FailActiveMode("Corridor repeatability startup bring-up failed");
-            }
 
             _phase = Phase::LaunchStartupCalibration;
             const auto& runtimeState = _runtime.RuntimeState();
@@ -381,6 +377,7 @@ namespace MazeMap::App::Internal
             "AuxMeasurementConfig corridor speeds; shared runtime drive and wall-touch services",
             "Structured telemetry export is temporarily removed during the execution-model cleanup",
             "none",
+            true,
         };
         return descriptor;
     }

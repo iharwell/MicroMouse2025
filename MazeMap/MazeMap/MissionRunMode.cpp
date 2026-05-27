@@ -41,10 +41,6 @@ namespace MazeMap::App::Internal
 
             _startupCalibration.Cancel();
             _startupCalibration.SetIsInMaze(true);
-            if (!_startupCalibration.BringUp())
-            {
-                _runtime.FailActiveMode("Mission startup calibration bring-up failed");
-            }
 
             _phase = Phase::LaunchStartupCalibration;
             const auto& runtimeState = _runtime.RuntimeState();
@@ -181,6 +177,7 @@ namespace MazeMap::App::Internal
             "SharedRobotRuntime drive and startup-calibration services",
             "Mission run flow is intentionally reduced to the clean shared-service startup path",
             "none",
+            true,
         };
         return descriptor;
     }

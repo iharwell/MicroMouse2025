@@ -136,10 +136,6 @@ namespace MazeMap
                 _startupCalibration.SetIsInMaze(true);
             }
 
-            if (!_startupCalibration.BringUp())
-            {
-                _runtime.FailActiveMode("Auxiliary measurement startup bring-up failed");
-            }
             if (!BeginLog())
             {
                 _runtime.FailActiveMode("Auxiliary measurement log open failed");
@@ -532,6 +528,7 @@ namespace MazeMap
                 "AuxMeasurementConfig plus shared StartupCalibration and Drive services",
                 "TurningTractionSweep uses DriveBase point commands only; traction-loss inference is offline",
                 "aux%03u.mmlog or aux_measurement_log.mmlog",
+                true,
             };
             return descriptor;
         }

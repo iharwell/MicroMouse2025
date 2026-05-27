@@ -24,8 +24,8 @@ namespace MazeMap::App::Internal
 
     // Owns the shared startup-calibration service used by boot-selected modes. Like Drive, this
     // is a shared multi-tick helper that stays subordinate to the active LoopController callback:
-    // modes perform required pre-loop `BringUp()`, then arm this service with `Start()` and call
-    // `GetNextControls(bool& done)` on each tick.
+    // boot infrastructure performs required pre-loop `BringUp()`, then modes arm this service
+    // with `Start()` and call `GetNextControls(bool& done)` on each tick.
     class EXPORT StartupCalibration final
     {
     public:

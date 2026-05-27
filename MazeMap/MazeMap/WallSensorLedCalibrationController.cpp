@@ -293,6 +293,7 @@ namespace MazeMap::App::Internal
             "none",
             "none",
             "calibration frequency trace in logging.txt",
+            false,
         };
         return descriptor;
     }

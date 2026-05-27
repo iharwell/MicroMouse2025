@@ -57,10 +57,6 @@ namespace MazeMap::App::Internal
 
             _startupCalibration.Cancel();
             _startupCalibration.SetIsInMaze(true);
-            if (!_startupCalibration.BringUp())
-            {
-                _runtime.FailActiveMode("Position accuracy audit startup bring-up failed");
-            }
 
             _phase = Phase::LaunchStartupCalibration;
             const auto& runtimeState = _runtime.RuntimeState();
@@ -381,6 +377,7 @@ namespace MazeMap::App::Internal
             "AuxMeasurementConfig straight-speed points; shared runtime drive and wall-touch services; shared audit fixture geometry",
             "Smooth-turn audit sections remain intentionally absent from this mode's shared-service path",
             "none",
+            true,
         };
         return descriptor;
     }

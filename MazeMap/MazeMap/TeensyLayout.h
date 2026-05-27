@@ -119,7 +119,9 @@ namespace MazeMap::Platform
         gBuiltinLedBlinkTimer.end();
         gBuiltinLedBlinkEnabled = false;
         gBuiltinLedBlinkState = false;
-        digitalWriteFast(LED_BUILTIN, LOW);
+        // LED_BUILTIN is Teensy 4.1 pin 13, the default SPI SCK line. Any GPIO use for
+        // startup indication must be followed by restoring the SPI pin mux before IMU traffic.
+        SPI.begin();
     }
 }
 

@@ -5,6 +5,7 @@
 #include "IApplicationMode.h"
 #include "MazeMapRuntimeCore.h"
 #include "SharedRobotRuntime.h"
+#include "StartupCalibration.h"
 
 #include <cassert>
 
@@ -51,12 +52,26 @@ namespace MazeMap::App::Internal
             _runtime.FailActiveMode("Boot startup trace begin failed");
         }
 
+        BringUpSelectedStartupServices(descriptor);
         activeMode.SetupMode(*this);
         _runtime.ControlLoop().BindApplicationMode(activeMode);
         _runtime.ControlLoop().Run();
         RestoreSelectedSelectorPins();
         _runtime.FinalizeSuccessfulModeExit();
         HaltAfterProgramExit();
+    }
+
+    void BootFramework::BringUpSelectedStartupServices(const BootModeDescriptor& descriptor)
+    {
+        if (!descriptor.requiresStartupCalibrationBringUp)
+        {
+            return;
+        }
+
+        if (!_runtime.StartupCalibrationService().BringUp())
+        {
+            _runtime.FailActiveMode("Startup calibration bring-up failed");
+        }
     }
 
     bool BootFramework::AppendStartupTrace(const char* line)

@@ -783,6 +783,7 @@ namespace MazeMap::App::Internal
             "DiagnosticConfig control period; OpenFloorMeasurementSpec log vocabulary; shared drive and drive-base services",
             "Fixed 0.090 m clockwise turn radius; 0.30 m/s initial speed; 0.05 m/s^2 speed ramp; 4.0 m/s end cap; selector removal faults the run; finish stays within 0.27 m of donut center",
             "donutNNN.mmlog",
+            false,
         };
         return descriptor;
     }

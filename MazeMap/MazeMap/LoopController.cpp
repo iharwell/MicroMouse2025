@@ -891,6 +891,7 @@ namespace MazeMap::App::Internal
         constexpr float kPauseLinearThresholdMps = 0.01f;
         constexpr float kPauseAngularThresholdRadps = 0.05f;
         constexpr std::uint8_t kPauseSettledTicks = 2U;
+        constexpr std::uint16_t kPauseMaximumBrakeTicks = 1000U;
 
         if (_runtime == nullptr)
         {
@@ -900,8 +901,11 @@ namespace MazeMap::App::Internal
         }
 
         std::uint8_t settledCount = 0U;
-        while (settledCount < kPauseSettledTicks)
+        std::uint16_t brakeTickCount = 0U;
+        while ((settledCount < kPauseSettledTicks) &&
+            (brakeTickCount < kPauseMaximumBrakeTicks))
         {
+            ++brakeTickCount;
             const std::uint32_t tickStartUs = static_cast<std::uint32_t>(micros());
             const std::uint32_t dtUs = tickStartUs - _lastTickStartUs;
             const float dtSeconds = static_cast<float>(dtUs) * 1.0e-6f;
@@ -954,6 +958,13 @@ namespace MazeMap::App::Internal
             FinalizeTiming();
             PublishWorkingTiming();
             WaitUntilUs(deadlineUs);
+        }
+
+        if (settledCount < kPauseSettledTicks)
+        {
+            (void)_runtime->AppendTextLogFormatted(
+                "LoopController brake settlement capped after %u ticks",
+                static_cast<unsigned>(brakeTickCount));
         }
     }
 

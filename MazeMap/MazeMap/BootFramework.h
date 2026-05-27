@@ -4,6 +4,7 @@
 
 namespace MazeMap::App
 {
+    struct BootModeDescriptor;
     struct BootModeRegistryEntry;
 }
 
@@ -31,6 +32,7 @@ namespace MazeMap::App::Internal
 
         [[noreturn]] void FailInvalidBootModeSelection(
             const MazeMap::App::BootModeRegistryEntry& selectedMode);
+        void BringUpSelectedStartupServices(const MazeMap::App::BootModeDescriptor& descriptor);
         [[noreturn]] void HaltAfterProgramExit() noexcept;
         void PrepareSelectedSelectorQuery() noexcept;
         void RestoreSelectedSelectorPins() noexcept;

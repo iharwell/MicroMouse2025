@@ -66,10 +66,6 @@ namespace MazeMap::App::Internal
 
             _startupCalibration.Cancel();
             _startupCalibration.SetIsInMaze(false);
-            if (!_startupCalibration.BringUp())
-            {
-                _runtime.FailActiveMode("Top speed measurement startup bring-up failed");
-            }
 
             if (!framework.IsSelectedModeSelectorInstalled())
             {
@@ -287,6 +283,7 @@ namespace MazeMap::App::Internal
             "Shared startup calibration bring-up; shared drive service; selector presence check",
             "Behavior is intentionally reduced to the clean shared-service top-speed path",
             "none",
+            true,
         };
         return descriptor;
     }

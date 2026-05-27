@@ -83,7 +83,6 @@ public:
         _drive.ClearCommandEvidence();
         _startupCalibration.Cancel();
         _startupCalibration.SetIsInMaze(false);
-        const bool sensorsOk = _startupCalibration.BringUp();
 
         MazeMap::FrontWallCharacterizationStorage storedCurve{};
         if (TryReadPersistedFrontWallCharacterization(storedCurve))
@@ -98,11 +97,6 @@ public:
                 storedCurve.commandedReverseSpeedMps);
             AppendStartupTraceLine(line);
             (void)_runtime.AppendTextLogLine("Existing front-wall curve will be replaced on success.");
-        }
-
-        if (!sensorsOk)
-        {
-            _runtime.FailActiveMode("Sensor initialization failed");
         }
 
         _phase = Phase::LaunchStartupSettle;
@@ -640,6 +634,7 @@ namespace App::Internal
             "FrontWallCharacterizationConfig; mission drive/sensor tuning",
             "Reverse speed, max travel, sample spacing, and collapse threshold are local.",
             "fwc%03u.mmlog or front_wall_characterization.mmlog; EEPROM front-wall curve",
+            true,
         };
         return descriptor;
     }
