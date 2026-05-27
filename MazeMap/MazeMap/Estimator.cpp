@@ -116,6 +116,20 @@ namespace MazeMap
         return frame;
     }
 
+    float Estimator::DriveCommandActivityIndex(const App::Internal::CommandVector& control) noexcept
+    {
+        if (!control.IsFinite())
+        {
+            return 1.0f;
+        }
+
+        return
+            (std::clamp)(
+                (std::max)(std::fabs(control.LeftCommand()), std::fabs(control.RightCommand())),
+                0.0f,
+                1.0f);
+    }
+
     Eigen::Matrix<float, VehicleState::kDimension, VehicleState::kDimension> Estimator::BuildProcessNoiseSquareRoot() noexcept
     {
         Eigen::Matrix<float, VehicleState::kDimension, VehicleState::kDimension> sqrtNoise = Eigen::Matrix<float, VehicleState::kDimension, VehicleState::kDimension>::Zero();
@@ -693,11 +707,7 @@ namespace MazeMap
                 1.0f);
         const float utilization =
             (std::clamp)(maxContactUtilization, 0.0f, 1.0f);
-        const float driveSaturationIndex =
-            (std::clamp)(
-                (std::max)(std::fabs(control.LeftCommand()), std::fabs(control.RightCommand())),
-                0.0f,
-                1.0f);
+        const float driveSaturationIndex = DriveCommandActivityIndex(control);
         const float encoderFaultIndicator =
             ((encoderInput != nullptr) && !useEncoderInput) ? 1.0f : 0.0f;
         const float sigmaDeltaAfSs =
@@ -918,11 +928,7 @@ namespace MazeMap
                     (planarSpeedMps + kContactSpeedScheduleReferenceMps),
                 0.0f,
                 1.0f);
-        const float driveSaturationIndex =
-            (std::clamp)(
-                (std::max)(std::fabs(_lastControl.LeftCommand()), std::fabs(_lastControl.RightCommand())),
-                0.0f,
-                1.0f);
+        const float driveSaturationIndex = DriveCommandActivityIndex(_lastControl);
         const float launchTorqueIndex = lowSpeedBlend * driveSaturationIndex;
         const float covarianceInflation =
             1.0f +
@@ -1201,8 +1207,7 @@ namespace MazeMap
             0.0f;
         const float driveSaturation =
             (std::clamp)(
-                (std::max)((std::max)(std::fabs(_lastControl.LeftCommand()), std::fabs(_lastControl.RightCommand())),
-                    maxContactSaturation),
+                (std::max)(DriveCommandActivityIndex(_lastControl), maxContactSaturation),
                 0.0f,
                 1.0f);
         const float yawRateRadps =
@@ -1353,6 +1358,11 @@ namespace MazeMap
 
     bool Estimator::controlCommandsAreEffectivelyZero() const noexcept
     {
+        if (!_lastControl.IsFinite())
+        {
+            return true;
+        }
+
         return
             (std::fabs(_lastControl.LeftCommand()) <= kStationaryCandidateMaxDriveCommand) &&
             (std::fabs(_lastControl.RightCommand()) <= kStationaryCandidateMaxDriveCommand);

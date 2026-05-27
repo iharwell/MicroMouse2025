@@ -471,34 +471,43 @@ namespace MazeMap
             ((std::isfinite(wheelRadiusM) && (wheelRadiusM > 0.0f)) ?
             (wheelLinearVelocityMps.y() / wheelRadiusM) :
             0.0f);
-        const float leftMotorCommand = std::isfinite(control.LeftCommand()) ? control.LeftCommand() : 0.0f;
-        const float rightMotorCommand = std::isfinite(control.RightCommand()) ? control.RightCommand() : 0.0f;
+        const bool activeBrakeCommand = !control.IsFinite();
+        const float leftMotorCommand =
+            (!activeBrakeCommand && std::isfinite(control.LeftCommand())) ? control.LeftCommand() : 0.0f;
+        const float rightMotorCommand =
+            (!activeBrakeCommand && std::isfinite(control.RightCommand())) ? control.RightCommand() : 0.0f;
         const float batteryVoltageV = _vehicle.GetBatteryVoltage();
         const float staticLaunchTorqueNm = staticFrictionTorqueNm();
 
         const float leftDirectTorqueNm =
+            activeBrakeCommand ?
+            _leftDrive.getTorqueFromBrake(leftWheelSpeedRadps) :
             _leftDrive.getTorqueFromCommand(
                 leftMotorCommand,
                 leftWheelSpeedRadps,
                 batteryVoltageV);
-        const float leftPositiveLimitNm =
-            (std::max)(
-                0.0f,
-                _leftDrive.getTorqueFromCommand(
-                    1.0f,
-                    leftWheelSpeedRadps,
-                    batteryVoltageV));
-        const float leftNegativeLimitNm =
-            (std::min)(
-                0.0f,
-                _leftDrive.getTorqueFromCommand(
-                    -1.0f,
-                    leftWheelSpeedRadps,
-                    batteryVoltageV));
-        float leftCurrentLimitedTorqueNm =
-            (leftPositiveLimitNm > leftNegativeLimitNm) ?
-            (std::clamp)(leftDirectTorqueNm, leftNegativeLimitNm, leftPositiveLimitNm) :
-            leftDirectTorqueNm;
+        float leftCurrentLimitedTorqueNm = leftDirectTorqueNm;
+        if (!activeBrakeCommand)
+        {
+            const float leftPositiveLimitNm =
+                (std::max)(
+                    0.0f,
+                    _leftDrive.getTorqueFromCommand(
+                        1.0f,
+                        leftWheelSpeedRadps,
+                        batteryVoltageV));
+            const float leftNegativeLimitNm =
+                (std::min)(
+                    0.0f,
+                    _leftDrive.getTorqueFromCommand(
+                        -1.0f,
+                        leftWheelSpeedRadps,
+                        batteryVoltageV));
+            leftCurrentLimitedTorqueNm =
+                (leftPositiveLimitNm > leftNegativeLimitNm) ?
+                (std::clamp)(leftDirectTorqueNm, leftNegativeLimitNm, leftPositiveLimitNm) :
+                leftDirectTorqueNm;
+        }
         const float leftTorqueCorrectionDeltaNm = 0.0f;
         leftCurrentLimitedTorqueNm += leftTorqueCorrectionDeltaNm;
         const float leftWheelSurfaceSpeedMps = wheelRadiusM * leftWheelSpeedRadps;
@@ -529,28 +538,34 @@ namespace MazeMap
         }
 
         const float rightDirectTorqueNm =
+            activeBrakeCommand ?
+            _rightDrive.getTorqueFromBrake(rightWheelSpeedRadps) :
             _rightDrive.getTorqueFromCommand(
                 rightMotorCommand,
                 rightWheelSpeedRadps,
                 batteryVoltageV);
-        const float rightPositiveLimitNm =
-            (std::max)(
-                0.0f,
-                _rightDrive.getTorqueFromCommand(
-                    1.0f,
-                    rightWheelSpeedRadps,
-                    batteryVoltageV));
-        const float rightNegativeLimitNm =
-            (std::min)(
-                0.0f,
-                _rightDrive.getTorqueFromCommand(
-                    -1.0f,
-                    rightWheelSpeedRadps,
-                    batteryVoltageV));
-        float rightCurrentLimitedTorqueNm =
-            (rightPositiveLimitNm > rightNegativeLimitNm) ?
-            (std::clamp)(rightDirectTorqueNm, rightNegativeLimitNm, rightPositiveLimitNm) :
-            rightDirectTorqueNm;
+        float rightCurrentLimitedTorqueNm = rightDirectTorqueNm;
+        if (!activeBrakeCommand)
+        {
+            const float rightPositiveLimitNm =
+                (std::max)(
+                    0.0f,
+                    _rightDrive.getTorqueFromCommand(
+                        1.0f,
+                        rightWheelSpeedRadps,
+                        batteryVoltageV));
+            const float rightNegativeLimitNm =
+                (std::min)(
+                    0.0f,
+                    _rightDrive.getTorqueFromCommand(
+                        -1.0f,
+                        rightWheelSpeedRadps,
+                        batteryVoltageV));
+            rightCurrentLimitedTorqueNm =
+                (rightPositiveLimitNm > rightNegativeLimitNm) ?
+                (std::clamp)(rightDirectTorqueNm, rightNegativeLimitNm, rightPositiveLimitNm) :
+                rightDirectTorqueNm;
+        }
         const float rightTorqueCorrectionDeltaNm = 0.0f;
         rightCurrentLimitedTorqueNm += rightTorqueCorrectionDeltaNm;
         const float rightWheelSurfaceSpeedMps = wheelRadiusM * rightWheelSpeedRadps;

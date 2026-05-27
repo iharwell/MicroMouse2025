@@ -33,6 +33,9 @@ namespace MazeMap
         static constexpr float kDefaultLongitudinalTireStiffnessN = 4.12f;
         static constexpr float kDefaultFrontRightContactForceGainNPerMps = 18.0f;
         static constexpr float kDefaultRearRightContactForceGainNPerMps = 16.0f;
+        // DRV8871 active brake shorts the motor through the bridge. Project motor-model notes use the
+        // typical high-side plus low-side RDS(on) as the first-pass brake path resistance.
+        static constexpr float kDefaultBrakeBridgeResistanceOhms = 0.565f;
         float _resistance = 1.0f;
         float _voltage = 0.0f;
         float _torqueConstant = 0.0f;
@@ -335,6 +338,12 @@ namespace MazeMap
                 return 0.0f;
             }
 
+            constexpr float kSignEpsilon = 1.0e-6f;
+            if (MazeMap::Math::Absf(driveCommand) <= kSignEpsilon)
+            {
+                return 0.0f;
+            }
+
             const float appliedVoltageV = driveCommand * resolvedBatteryVoltageV;
             const float wheelSpeedToBackEmfVoltPerRadps = _gearRatio / _speedConstant;
             const float armatureCurrentFromVoltageA = appliedVoltageV / _resistance;
@@ -342,7 +351,6 @@ namespace MazeMap
                 (wheelBankSpeedRadps * wheelSpeedToBackEmfVoltPerRadps) / _resistance;
             float armatureCurrentA = armatureCurrentFromVoltageA - armatureCurrentFromBackEmfA;
 
-            constexpr float kSignEpsilon = 1.0e-6f;
             const int armatureDirection =
                 (armatureCurrentA > kSignEpsilon) - (armatureCurrentA < -kSignEpsilon);
             const int wheelDirection =
@@ -360,6 +368,30 @@ namespace MazeMap
             }
 
             return _torqueConstant * _gearRatio * _drivetrainEfficiency * loadCurrentA;
+        }
+
+        float getTorqueFromBrake(float wheelBankSpeedRadps) const noexcept
+        {
+            if (!(std::isfinite(wheelBankSpeedRadps) &&
+                (_resistance > 0.0f) &&
+                (_speedConstant > 0.0f) &&
+                (_torqueConstant > 0.0f) &&
+                (_gearRatio > 0.0f)))
+            {
+                return 0.0f;
+            }
+
+            const float totalBrakeResistanceOhms =
+                _resistance + kDefaultBrakeBridgeResistanceOhms;
+            if (!(std::isfinite(totalBrakeResistanceOhms) && (totalBrakeResistanceOhms > 0.0f)))
+            {
+                return 0.0f;
+            }
+
+            const float wheelSpeedToBackEmfVoltPerRadps = _gearRatio / _speedConstant;
+            const float backEmfVoltageV = wheelBankSpeedRadps * wheelSpeedToBackEmfVoltPerRadps;
+            const float armatureCurrentA = -backEmfVoltageV / totalBrakeResistanceOhms;
+            return _torqueConstant * _gearRatio * _drivetrainEfficiency * armatureCurrentA;
         }
 
         float getForwardForceFromCommand(

@@ -1231,6 +1231,74 @@ namespace MazeMap
                 message.str().c_str());
         }
 
+        TEST_METHOD(BrakeCommandAddsElectricalRetardingForceAtLowForwardSpeed)
+        {
+            Vehicle vehicle;
+            vehicle.SetFanDuty(0.80f);
+
+            constexpr float forwardVelocityMps = 0.09f;
+            VehicleState state;
+            state.SetPosition(Eigen::Vector2f(0.0f, 0.0f));
+            state.SetHeading(0.0f);
+            state.SetForwardVelocity(forwardVelocityMps);
+            state.SetRightwardVelocity(0.0f);
+            state.SetYawRate(0.0f);
+            state.SetWheelSpeedLeft(Vehicle::WheelSpeedFromLinearVelocity(forwardVelocityMps));
+            state.SetWheelSpeedRight(Vehicle::WheelSpeedFromLinearVelocity(forwardVelocityMps));
+            PlantModel plant(vehicle, state);
+
+            const App::Internal::CommandVector coastCommand{};
+            const App::Internal::CommandVector brakeCommand = App::Internal::CommandVector::Brake();
+            const float coastForceN = plant.totalForwardContactForceN(coastCommand);
+            const float brakeForceN = plant.totalForwardContactForceN(brakeCommand);
+            const float addedRetardingForceN = coastForceN - brakeForceN;
+
+            std::wstringstream message;
+            message << L"BrakeCommandAddsElectricalRetardingForceAtLowForwardSpeed"
+                << L"\ncoast_force_n=" << coastForceN
+                << L"\nbrake_force_n=" << brakeForceN
+                << L"\nadded_retarding_force_n=" << addedRetardingForceN
+                << L"\ncriterion=added_retarding_force_n>0.02";
+
+            Assert::IsTrue(
+                std::isfinite(brakeForceN) && (addedRetardingForceN > 0.02f),
+                message.str().c_str());
+        }
+
+        TEST_METHOD(BrakeCommandAddsElectricalRetardingForceAtLowReverseSpeed)
+        {
+            Vehicle vehicle;
+            vehicle.SetFanDuty(0.80f);
+
+            constexpr float forwardVelocityMps = -0.09f;
+            VehicleState state;
+            state.SetPosition(Eigen::Vector2f(0.0f, 0.0f));
+            state.SetHeading(0.0f);
+            state.SetForwardVelocity(forwardVelocityMps);
+            state.SetRightwardVelocity(0.0f);
+            state.SetYawRate(0.0f);
+            state.SetWheelSpeedLeft(Vehicle::WheelSpeedFromLinearVelocity(forwardVelocityMps));
+            state.SetWheelSpeedRight(Vehicle::WheelSpeedFromLinearVelocity(forwardVelocityMps));
+            PlantModel plant(vehicle, state);
+
+            const App::Internal::CommandVector coastCommand{};
+            const App::Internal::CommandVector brakeCommand = App::Internal::CommandVector::Brake();
+            const float coastForceN = plant.totalForwardContactForceN(coastCommand);
+            const float brakeForceN = plant.totalForwardContactForceN(brakeCommand);
+            const float addedRetardingForceN = brakeForceN - coastForceN;
+
+            std::wstringstream message;
+            message << L"BrakeCommandAddsElectricalRetardingForceAtLowReverseSpeed"
+                << L"\ncoast_force_n=" << coastForceN
+                << L"\nbrake_force_n=" << brakeForceN
+                << L"\nadded_retarding_force_n=" << addedRetardingForceN
+                << L"\ncriterion=added_retarding_force_n>0.02";
+
+            Assert::IsTrue(
+                std::isfinite(brakeForceN) && (addedRetardingForceN > 0.02f),
+                message.str().c_str());
+        }
+
     };
 
     TEST_CLASS(PlantModelTireSaturationTest)

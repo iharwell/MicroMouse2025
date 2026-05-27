@@ -929,7 +929,6 @@ namespace MazeMap::App::Internal
         OpenFloorMeasurementController& controller)
     {
         _tickIndex = 0U;
-        _logOpen = false;
         _bufferedRow.reset();
         if (!controller._runtime.OpenUtilityDataLogFile(MazeMap::kOpenFloorTimingFileName))
         {
@@ -952,7 +951,6 @@ namespace MazeMap::App::Internal
             return false;
         }
 
-        _logOpen = true;
         return true;
     }
 
@@ -970,12 +968,6 @@ namespace MazeMap::App::Internal
             {
                 return calibrationControl;
             }
-        }
-
-        if (!_logOpen && !OpenTimingLog(controller))
-        {
-            controller._runtime.FailActiveMode("Open-floor measurement timing log setup failed");
-            return stopControl;
         }
 
         if (!WriteBufferedRow(controller, "Open-floor measurement timing log write failed"))
@@ -1337,6 +1329,12 @@ namespace MazeMap::App::Internal
         if (!framework.IsSelectedModeSelectorInstalled())
         {
             _runtime.FailActiveMode(kOpenFloorMeasurementSelectorRemovedReason);
+        }
+
+        if (!_timingStage.OpenTimingLog(*this))
+        {
+            _runtime.FailActiveMode("Open-floor measurement timing log setup failed");
+            return;
         }
 
         const auto& runtimeState = _runtime.RuntimeState();

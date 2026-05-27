@@ -124,6 +124,7 @@ namespace MazeMap
             float pX,
             float pY,
             const Eigen::Vector2f& headingUnit) noexcept;
+        static float DriveCommandActivityIndex(const App::Internal::CommandVector& control) noexcept;
 
         bool LastUpdateAttempted() const noexcept { return _lastUpdateAttempted; }
         bool LastUpdateAccepted() const noexcept { return _lastUpdateAccepted; }
