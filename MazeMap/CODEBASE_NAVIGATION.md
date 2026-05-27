@@ -35,7 +35,6 @@ This document is a navigation index for the first-party source tree under `MazeM
 - `Fresnel.h` / `Fresnel.cpp`: Fresnel and curve-geometry helpers used in motion profile calculations.
 - `FrontWallCharacterizationConfig.h`: configuration for front-wall sensing/characterization runs.
 - `FrontWallCharacterizationStorage.h`: storage records and match helpers for captured front-wall characterization data.
-- `GyroBiasUpdatePolicy.h`: rules for when gyro bias should be updated from stationary data.
 - `HardwareConfig.h`: hardware timing, PWM, ADC, and SD bring-up constants used by board support and runtime code.
 - `HalfStepPath.h`: path container with half-cell resolution for fine-grained maneuver generation.
 - `ImuCalibrationPolicy.h`: IMU calibration helpers and encoder-count support types.

@@ -637,10 +637,7 @@ namespace MazeMap
             return telemetry;
         }
 
-        void CaptureInertialSnapshot(
-            bool stationary,
-            float maxAbsStationaryBiasUpdateRateRadps,
-            SensorSnapshot& snapshot)
+        void CaptureInertialSnapshot(SensorSnapshot& snapshot)
         {
             ImuObservationTiming timing{};
             const ImuTelemetry telemetry = CaptureTelemetry(&timing);
@@ -651,12 +648,6 @@ namespace MazeMap
             const float rawYawRateRadps = GyroRawToBodyYawRadps(telemetry.gyroZ);
             const Eigen::Vector2f accelBodyG = AccelRawToBodyPlanarG(telemetry.accelX, telemetry.accelY);
             snapshot.SetAccelerationBiasValid(accel_bias_initialized_);
-            if (accel_bias_initialized_ && stationary)
-            {
-                accel_bias_right_g_ = (0.998f * accel_bias_right_g_) + (0.002f * accelBodyG.x());
-                accel_bias_forward_g_ = (0.998f * accel_bias_forward_g_) + (0.002f * accelBodyG.y());
-            }
-
             if (accel_bias_initialized_)
             {
                 const float accelDeltaRightG = accelBodyG.x() - accel_bias_right_g_;
@@ -674,12 +665,6 @@ namespace MazeMap
                 snapshot.SetPlanarAccelerationMps2(0.0f);
             }
 
-            if (stationary && ShouldAdaptRuntimeGyroBias(
-                    rawYawRateRadps,
-                    maxAbsStationaryBiasUpdateRateRadps))
-            {
-                gyro_bias_radps_ = (0.995f * gyro_bias_radps_) + (0.005f * rawYawRateRadps);
-            }
             snapshot.SetRawYawRateRadps(rawYawRateRadps);
             snapshot.SetYawRateBiasRadps(gyro_bias_radps_);
             snapshot.SetYawRateRadps(rawYawRateRadps - gyro_bias_radps_);
@@ -840,16 +825,6 @@ namespace MazeMap
         static constexpr uint8_t ToU8(GYRO_MODE value) { return static_cast<uint8_t>(value); }
         static constexpr uint8_t ToU8(GYRO_FULLSCALE_RANGE value) { return static_cast<uint8_t>(value); }
         static constexpr uint8_t ToU8(SELF_TEST_MODE value) { return static_cast<uint8_t>(value); }
-
-        static bool ShouldAdaptRuntimeGyroBias(
-            float rawGyroRadps,
-            float maxAbsUpdateRateRadps) noexcept
-        {
-            return std::isfinite(rawGyroRadps) &&
-                std::isfinite(maxAbsUpdateRateRadps) &&
-                (maxAbsUpdateRateRadps > 0.0f) &&
-                (std::fabs(rawGyroRadps) <= maxAbsUpdateRateRadps);
-        }
 
         static bool IsAccelSelfTestDeltaValidMg(float deltaMg) noexcept
         {
@@ -1173,13 +1148,8 @@ namespace MazeMap
             return {};
         }
 
-        void CaptureInertialSnapshot(
-            bool stationary,
-            float maxAbsStationaryBiasUpdateRateRadps,
-            SensorSnapshot& snapshot)
+        void CaptureInertialSnapshot(SensorSnapshot& snapshot)
         {
-            (void)stationary;
-            (void)maxAbsStationaryBiasUpdateRateRadps;
             snapshot.SetFrontRightImuTelemetry(ImuTelemetry{});
             snapshot.SetBackLeftImuTelemetry(ImuTelemetry{});
             snapshot.SetImuTiming(ImuObservationTiming{});

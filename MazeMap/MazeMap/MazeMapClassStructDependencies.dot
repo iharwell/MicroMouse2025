@@ -597,7 +597,6 @@ digraph MazeMapClassStructDependencies {
   fn_MazeMap__SelectDiagnosticReturnDistanceM [label="MazeMap::SelectDiagnosticReturnDistanceM", tooltip="DiagnosticMotionPlan.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__SelectUiImuSamplingProfile [label="MazeMap::SelectUiImuSamplingProfile", tooltip="ImuSamplingProfile.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__Set [label="MazeMap::Set", tooltip="VehicleState.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
-  fn_MazeMap__ShouldUpdateGyroBiasFromStationarySample [label="MazeMap::ShouldUpdateGyroBiasFromStationarySample", tooltip="GyroBiasUpdatePolicy.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__StableLogExpm1 [label="MazeMap::StableLogExpm1", tooltip="WallDetectionThresholds.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__StableSoftplus [label="MazeMap::StableSoftplus", tooltip="WallDetectionThresholds.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__StopControlVector [label="MazeMap::StopControlVector", tooltip="OpenFloorMeasurementController.cpp", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];

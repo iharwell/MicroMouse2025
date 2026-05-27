@@ -5,12 +5,10 @@
 #include "Direction.h"
 #include "Estimator.h"
 #include "IApplicationMode.h"
-#include "MazeMapRuntimeCore.h"
-#include "MazeMapRuntimeSignalHelpers.h"
-#include "EncoderObs.h"
 #include "ImuAccelObs.h"
-#include "PlantModel.h"
+#include "Maze.h"
 #include "RuntimeSensorSuite.h"
+#include "SensorSnapshot.h"
 #include "SharedRobotRuntime.h"
 #include "Vehicle.h"
 #include "WallObservationPipeline.h"
@@ -78,22 +76,31 @@ namespace MazeMap::App::Internal
             sensorWorkBits = static_cast<std::uint8_t>(sensorWorkBits | RuntimeSensorSuite::kWallUpdateSensorBit);
         }
 
-        if (!ValidateSessionState(controlPeriodUs, sessionStartPointX, sessionStartPointY, sensorWorkBits))
+        if ((controlPeriodUs == 0U) ||
+            !RuntimeSensorSuite::SensorWorkBitsSupportWallUpdates(sensorWorkBits))
         {
             if (_runtime != nullptr)
             {
-                _runtime->FailActiveMode("LoopController staged session state is invalid");
+                _runtime->FailActiveMode("LoopController session state is invalid");
             }
             while (true)
             {
             }
         }
 
-        _stagedControlPeriodUs = controlPeriodUs;
-        _stagedSessionStartPointX = sessionStartPointX;
-        _stagedSessionStartPointY = sessionStartPointY;
-        _stagedSensorWorkBits = sensorWorkBits;
-        _stagedNextSessionValid = true;
+        _controlPeriodUs = controlPeriodUs;
+        _sessionStartPointX = sessionStartPointX;
+        _sessionStartPointY = sessionStartPointY;
+        _sensorWorkBits = sensorWorkBits;
+
+        if (_runtime != nullptr)
+        {
+            if (!std::isfinite(_modeStartHeadingRad))
+            {
+                _modeStartHeadingRad = _runtime->RuntimeState().GetHeading();
+            }
+            RestoreSessionStartPhysicalState();
+        }
     }
 
     void LoopController::RequestPause(
@@ -204,11 +211,6 @@ namespace MazeMap::App::Internal
     std::uint32_t LoopController::LastTimingCycleCounterEnd() const noexcept { return PublishedTiming().CycleCounterEnd(); }
     std::uint16_t LoopController::LastTimingOverrunUs() const noexcept { return PublishedTiming().OverrunUs(); }
 
-    const CommandVector& LoopController::LastAppliedCommand() const noexcept
-    {
-        return _currentControl;
-    }
-
     CommandVector LoopController::RunApplicationModeTick(
         void* const context,
         const std::uint32_t loopEndTimeUs,
@@ -216,22 +218,6 @@ namespace MazeMap::App::Internal
         LoopController& loopController)
     {
         return static_cast<IApplicationMode*>(context)->RunTick(loopEndTimeUs, state, loopController);
-    }
-
-    bool LoopController::IsBrakeCommand(const CommandVector& command) noexcept
-    {
-        return !std::isfinite(command.LeftCommand()) || !std::isfinite(command.RightCommand());
-    }
-
-    bool LoopController::IsZeroCommand(const CommandVector& command) noexcept
-    {
-        constexpr float kZeroMotorCommandThreshold = 1.0e-4f;
-
-        return
-            std::isfinite(command.LeftCommand()) &&
-            std::isfinite(command.RightCommand()) &&
-            (std::fabs(command.LeftCommand()) <= kZeroMotorCommandThreshold) &&
-            (std::fabs(command.RightCommand()) <= kZeroMotorCommandThreshold);
     }
 
     std::uint32_t LoopController::ReadCycleCounter() noexcept
@@ -243,55 +229,6 @@ namespace MazeMap::App::Internal
 #endif
     }
 
-    void LoopController::RunSessionStartWallSensorAdcProbe() noexcept
-    {
-        if ((_runtime == nullptr) || !_sessionStartWallSensorAdcProbePending)
-        {
-            return;
-        }
-
-        if (!_runtime->TextLogIsOpen())
-        {
-            _sessionStartWallSensorAdcProbePending = true;
-            return;
-        }
-
-        const uint32_t targetCfg = MazeMap::Platform::GetWallSensorAdcRuntimeMode();
-        MazeMap::App::Internal::LogWallSensorAdcRegisterWrite(
-            "session_pre_write",
-            targetCfg,
-            MazeMap::Platform::GetWallSensorAdcCurrentCfg(),
-            MazeMap::Platform::GetWallSensorAdcCurrentGc());
-        MazeMap::Platform::PrepareWallSensorAdcForRead();
-        MazeMap::App::Internal::LogWallSensorAdcRegisterWrite(
-            "session_post_write",
-            targetCfg,
-            MazeMap::Platform::GetWallSensorAdcCurrentCfg(),
-            MazeMap::Platform::GetWallSensorAdcCurrentGc());
-
-        uint8_t probeChannel = 0U;
-        const uint8_t probePin = _runtime->Vehicle().FrontLeftWallSensor().GetWallSensorInPin();
-        if (MazeMap::Platform::ResolveWallSensorAdc1Channel(probePin, probeChannel))
-        {
-            (void)MazeMap::Platform::ReadSingleWallSensorAdcCodeFromConfiguredChannel(probeChannel);
-            MazeMap::App::Internal::LogWallSensorAdcRegisterWrite(
-                "session_post_sample",
-                targetCfg,
-                MazeMap::Platform::GetWallSensorAdcCurrentCfg(),
-                MazeMap::Platform::GetWallSensorAdcCurrentGc());
-        }
-        else
-        {
-            MazeMap::App::Internal::LogWallSensorAdcRegisterWrite(
-                "session_probe_unresolved",
-                targetCfg,
-                MazeMap::Platform::GetWallSensorAdcCurrentCfg(),
-                MazeMap::Platform::GetWallSensorAdcCurrentGc());
-        }
-
-        _sessionStartWallSensorAdcProbePending = false;
-    }
-
     void LoopController::AttachRuntime(SharedRobotRuntime& runtime) noexcept
     {
         _runtime = &runtime;
@@ -300,55 +237,6 @@ namespace MazeMap::App::Internal
     void LoopController::BindApplicationMode(IApplicationMode& mode) noexcept
     {
         _boundMode = &mode;
-    }
-
-    void LoopController::StartSessionFromStagedState() noexcept
-    {
-        if (!_stagedNextSessionValid)
-        {
-            _runtime->FailActiveMode("LoopController session state was not staged before session start");
-        }
-
-        if (!ValidateSessionState(
-                _stagedControlPeriodUs,
-                _stagedSessionStartPointX,
-                _stagedSessionStartPointY,
-                _stagedSensorWorkBits))
-        {
-            _runtime->FailActiveMode("LoopController staged session state is invalid");
-        }
-
-        _controlPeriodUs = _stagedControlPeriodUs;
-        _sessionStartPointX = _stagedSessionStartPointX;
-        _sessionStartPointY = _stagedSessionStartPointY;
-        _sensorWorkBits = _stagedSensorWorkBits;
-        _stagedControlPeriodUs = 0U;
-        _stagedSessionStartPointX = std::numeric_limits<float>::quiet_NaN();
-        _stagedSessionStartPointY = std::numeric_limits<float>::quiet_NaN();
-        _stagedSensorWorkBits = kDefaultSensorWorkBits;
-        _stagedNextSessionValid = false;
-        if (!std::isfinite(_modeStartHeadingRad))
-        {
-            _modeStartHeadingRad = _runtime->RuntimeState().GetHeading();
-        }
-        RestoreSessionStartPhysicalState();
-        _sessionStartWallSensorAdcProbePending = RuntimeSensorSuite::SensorWorkBitsRequestWallSensors(_sensorWorkBits);
-        RunSessionStartWallSensorAdcProbe();
-        _activeModeWorkCallback = &RunApplicationModeTick;
-        _activeModeWorkContext = _boundMode;
-        _sessionActive = true;
-        _publishedTimingValid = false;
-        _tickCount = 0U;
-        const std::uint32_t nowUs = static_cast<std::uint32_t>(micros());
-        _lastTickStartUs = nowUs - _controlPeriodUs;
-        _nextSyncTargetUs = nowUs + _controlPeriodUs;
-        _nextControl = CommandVector::Brake();
-        _currentControl = CommandVector::Brake();
-        _publishedTimingIndex = 0U;
-        _workingTimingIndex = 1U;
-        _timingBuffers[0] = TimingBuffer{};
-        _timingBuffers[1] = TimingBuffer{};
-        ClearPendingRequests();
     }
 
     void LoopController::RestoreSessionStartPhysicalState() noexcept
@@ -371,7 +259,7 @@ namespace MazeMap::App::Internal
                 _sessionStartPointY,
                 _modeStartHeadingRad))
         {
-            _runtime->FailActiveMode("LoopController failed to restore the staged session-start physical state");
+            _runtime->FailActiveMode("LoopController failed to restore the session-start physical state");
         }
 
         _runtime->DriveService().StartHold(0U, false);
@@ -391,7 +279,16 @@ namespace MazeMap::App::Internal
             }
         }
 
-        StartSessionFromStagedState();
+        _activeModeWorkCallback = &RunApplicationModeTick;
+        _activeModeWorkContext = _boundMode;
+        _sessionActive = true;
+        _tickCount = 0U;
+        const std::uint32_t initialStartUs = static_cast<std::uint32_t>(micros());
+        _lastTickStartUs = initialStartUs - _controlPeriodUs;
+        _nextSyncTargetUs = initialStartUs + _controlPeriodUs;
+        ClearPendingRequests();
+
+        CommandVector nextControl = CommandVector::Brake();
 
         while (true)
         {
@@ -409,11 +306,6 @@ namespace MazeMap::App::Internal
             const CommandVector brakeControl = CommandVector::Brake();
             const char* terminalFaultReason = nullptr;
 
-            if (_sessionStartWallSensorAdcProbePending)
-            {
-                RunSessionStartWallSensorAdcProbe();
-            }
-
             ClearPendingRequests();
 
             if (!CaptureTickState(dtSeconds, tickStartUs))
@@ -423,7 +315,7 @@ namespace MazeMap::App::Internal
 
             if (terminalFaultReason != nullptr)
             {
-                _nextControl = brakeControl;
+                nextControl = brakeControl;
                 if (!ApplyControlAtApplicationPoint(brakeControl))
                 {
                     terminalFaultReason =
@@ -431,9 +323,9 @@ namespace MazeMap::App::Internal
                 }
                 timing._commandAppliedUs = static_cast<std::uint32_t>(micros());
             }
-            else if (!ApplyControlAtApplicationPoint(_nextControl))
+            else if (!ApplyControlAtApplicationPoint(nextControl))
             {
-                _nextControl = brakeControl;
+                nextControl = brakeControl;
                 terminalFaultReason = "LoopController motor command application failed";
                 timing._commandAppliedUs = static_cast<std::uint32_t>(micros());
             }
@@ -470,36 +362,36 @@ namespace MazeMap::App::Internal
 
             if (terminalFaultReason != nullptr)
             {
-                _nextControl = CommandVector::Brake();
+                nextControl = CommandVector::Brake();
             }
             else if (_programHaltRequested)
             {
-                _nextControl = CommandVector::Brake();
+                nextControl = CommandVector::Brake();
             }
             else if (_pendingEndSessionCallback != nullptr)
             {
-                _nextControl = CommandVector::Brake();
+                nextControl = CommandVector::Brake();
             }
             else if (_pendingPauseCallback != nullptr)
             {
-                _nextControl = CommandVector::Brake();
+                nextControl = CommandVector::Brake();
             }
             else
             {
-                _nextControl = candidateControl;
+                nextControl = candidateControl;
             }
 
             if (terminalFaultReason != nullptr)
             {
                 ServiceRuntimeLogsForFaultPath();
             }
-            else if (ComputeRemainingSlackUs(loopEndTimeUs) > 0U)
+            else
             {
                 if (!ServiceRuntimeLogsNormal())
                 {
                     const char* const runtimeReason =
                         (_runtime != nullptr) ? _runtime->LastRuntimeLogError() : nullptr;
-                    _nextControl = CommandVector::Brake();
+                    nextControl = CommandVector::Brake();
                     terminalFaultReason =
                         ((runtimeReason != nullptr) && (runtimeReason[0] != '\0')) ?
                         runtimeReason :
@@ -517,7 +409,7 @@ namespace MazeMap::App::Internal
 
             if (terminalFaultReason != nullptr)
             {
-                _nextControl = brakeControl;
+                nextControl = brakeControl;
                 if (!ApplyControlAtApplicationPoint(brakeControl))
                 {
                     _runtime->FailActiveMode(
@@ -528,7 +420,7 @@ namespace MazeMap::App::Internal
 
             if (_programHaltRequested)
             {
-                _nextControl = brakeControl;
+                nextControl = brakeControl;
                 if (!ApplyControlAtApplicationPoint(brakeControl))
                 {
                     _runtime->FailActiveMode(
@@ -541,10 +433,11 @@ namespace MazeMap::App::Internal
             if (_pendingEndSessionCallback != nullptr)
             {
                 ResolveEndSessionRequest();
+                nextControl = brakeControl;
 
                 if (_programHaltRequested)
                 {
-                    _nextControl = brakeControl;
+                    nextControl = brakeControl;
                     if (!ApplyControlAtApplicationPoint(brakeControl))
                     {
                         _runtime->FailActiveMode(
@@ -554,17 +447,17 @@ namespace MazeMap::App::Internal
                     return;
                 }
 
-                StartSessionFromStagedState();
                 continue;
             }
 
             if (_pendingPauseCallback != nullptr)
             {
                 ResolvePauseRequest();
+                nextControl = brakeControl;
 
                 if (_programHaltRequested)
                 {
-                    _nextControl = brakeControl;
+                    nextControl = brakeControl;
                     if (!ApplyControlAtApplicationPoint(brakeControl))
                     {
                         _runtime->FailActiveMode(
@@ -577,10 +470,11 @@ namespace MazeMap::App::Internal
                 if (_pendingEndSessionCallback != nullptr)
                 {
                     ResolveEndSessionRequest();
+                    nextControl = brakeControl;
 
                     if (_programHaltRequested)
                     {
-                        _nextControl = brakeControl;
+                        nextControl = brakeControl;
                         if (!ApplyControlAtApplicationPoint(brakeControl))
                         {
                             _runtime->FailActiveMode(
@@ -590,34 +484,10 @@ namespace MazeMap::App::Internal
                         return;
                     }
 
-                    StartSessionFromStagedState();
                     continue;
                 }
             }
         }
-    }
-
-    bool LoopController::ValidateSessionState(
-        const std::uint32_t controlPeriodUs,
-        const float sessionStartPointX,
-        const float sessionStartPointY,
-        const std::uint8_t sensorWorkBits) const noexcept
-    {
-        return
-            (controlPeriodUs > 0U) &&
-            std::isfinite(sessionStartPointX) &&
-            std::isfinite(sessionStartPointY) &&
-            SupportsSensorWorkBits(sensorWorkBits);
-    }
-
-    bool LoopController::SupportsSensorWorkBits(const std::uint8_t sensorWorkBits) const noexcept
-    {
-        if (!RuntimeSensorSuite::SensorWorkBitsSupportWallUpdates(sensorWorkBits))
-        {
-            return false;
-        }
-
-        return true;
     }
 
     void LoopController::ClearPendingRequests() noexcept
@@ -639,8 +509,7 @@ namespace MazeMap::App::Internal
         }
 
         _runtime->Vehicle().ApplyMotorCommand(control);
-        _currentControl = control;
-        _runtime->RuntimeState().SetCurrentCommand(_currentControl);
+        _runtime->RuntimeState().SetCurrentCommand(control);
         return true;
     }
 
@@ -652,22 +521,20 @@ namespace MazeMap::App::Internal
         }
 
         TimingBuffer& timing = WorkingTiming();
-        const bool stationaryHint = ShouldTreatCurrentControlAsStationary();
         timing._encoderLatchUs = static_cast<std::uint32_t>(micros());
         SensorSnapshot snapshot{};
         const bool captureSensors = RuntimeSensorSuite::SensorWorkBitsRequestCapture(_sensorWorkBits);
+        MazeMap::VehicleState& runtimeState = _runtime->RuntimeState();
         _runtime->Sensors().BeginInterlacedCapture(
-            stationaryHint,
-            _runtime->RuntimeState(),
+            runtimeState,
             snapshot,
             _sensorWorkBits,
             dtSeconds);
 
-        const CommandVector control = _currentControl;
+        const CommandVector control = runtimeState.GetCurrentCommand();
         timing._encoderReadDoneUs = static_cast<std::uint32_t>(micros());
 
         MazeMap::Estimator& estimator = _runtime->Estimator();
-        MazeMap::VehicleState& runtimeState = _runtime->RuntimeState();
         if (std::isfinite(dtSeconds) && (dtSeconds > 0.0f))
         {
             runtimeState.SetTime(runtimeState.GetTime() + dtSeconds);
@@ -884,7 +751,6 @@ namespace MazeMap::App::Internal
     {
         _publishedTimingIndex = _workingTimingIndex;
         _workingTimingIndex = static_cast<std::uint8_t>(1U - _workingTimingIndex);
-        _publishedTimingValid = true;
     }
 
     void LoopController::RecordModeReturnTiming() noexcept
@@ -930,18 +796,6 @@ namespace MazeMap::App::Internal
         }
     }
 
-    std::uint32_t LoopController::ComputeRemainingSlackUs(const std::uint32_t absoluteDeadlineUs) const noexcept
-    {
-        const std::int32_t remainingUs =
-            static_cast<std::int32_t>(absoluteDeadlineUs - static_cast<std::uint32_t>(micros()));
-        return (remainingUs > 0) ? static_cast<std::uint32_t>(remainingUs) : 0U;
-    }
-
-    bool LoopController::ShouldTreatCurrentControlAsStationary() const noexcept
-    {
-        return IsBrakeCommand(_currentControl) || IsZeroCommand(_currentControl);
-    }
-
     void LoopController::ResolvePauseRequest()
     {
         WaitForBrakeSettlement();
@@ -978,8 +832,6 @@ namespace MazeMap::App::Internal
             _activeModeWorkContext = _stagedModeWorkContext;
         }
 
-        _nextControl = CommandVector::Brake();
-        _currentControl = CommandVector::Brake();
         const std::uint32_t nowUs = static_cast<std::uint32_t>(micros());
         _lastTickStartUs = nowUs - _controlPeriodUs;
         _nextSyncTargetUs = nowUs + _controlPeriodUs;
@@ -993,11 +845,6 @@ namespace MazeMap::App::Internal
         void (* const endSessionCallback)(void*, LoopController&) = _pendingEndSessionCallback;
         void* const endSessionContext = _pendingEndSessionContext;
         ClearPendingRequests();
-        _stagedControlPeriodUs = 0U;
-        _stagedSessionStartPointX = std::numeric_limits<float>::quiet_NaN();
-        _stagedSessionStartPointY = std::numeric_limits<float>::quiet_NaN();
-        _stagedSensorWorkBits = kDefaultSensorWorkBits;
-        _stagedNextSessionValid = false;
 
         if (endSessionCallback == nullptr)
         {
@@ -1029,14 +876,14 @@ namespace MazeMap::App::Internal
             return;
         }
 
-        if (!_stagedNextSessionValid)
-        {
-            _runtime->FailActiveMode(
-                "LoopController end-session callback did not stage the next session state");
-        }
-
-        _nextControl = CommandVector::Brake();
-        _currentControl = CommandVector::Brake();
+        _activeModeWorkCallback = &RunApplicationModeTick;
+        _activeModeWorkContext = _boundMode;
+        _sessionActive = true;
+        _tickCount = 0U;
+        const std::uint32_t nowUs = static_cast<std::uint32_t>(micros());
+        _lastTickStartUs = nowUs - _controlPeriodUs;
+        _nextSyncTargetUs = nowUs + _controlPeriodUs;
+        ClearPendingRequests();
     }
 
     void LoopController::WaitForBrakeSettlement()
@@ -1073,8 +920,8 @@ namespace MazeMap::App::Internal
                 _runtime->FailActiveMode("LoopController brake settlement capture failed");
             }
 
-            _nextControl = CommandVector::Brake();
-            if (!ApplyControlAtApplicationPoint(_nextControl))
+            const CommandVector brakeControl = CommandVector::Brake();
+            if (!ApplyControlAtApplicationPoint(brakeControl))
             {
                 ServiceRuntimeLogsForFaultPath();
                 _runtime->FailActiveMode(
@@ -1112,32 +959,19 @@ namespace MazeMap::App::Internal
 
     void LoopController::ResetExecutionState() noexcept
     {
-        _controlPeriodUs = 0U;
-        _sessionStartPointX = std::numeric_limits<float>::quiet_NaN();
-        _sessionStartPointY = std::numeric_limits<float>::quiet_NaN();
+        _controlPeriodUs = Config::kControlPeriodUs;
+        _sessionStartPointX = 0.0f;
+        _sessionStartPointY = 0.0f;
         _sensorWorkBits = kDefaultSensorWorkBits;
         _modeStartHeadingRad = std::numeric_limits<float>::quiet_NaN();
         _activeModeWorkCallback = nullptr;
         _activeModeWorkContext = nullptr;
         _sessionActive = false;
-        _publishedTimingValid = false;
         _tickCount = 0U;
         _lastTickStartUs = 0U;
         _nextSyncTargetUs = 0U;
-        _nextControl = CommandVector::Brake();
-        _currentControl = CommandVector::Brake();
-        _sessionStartWallSensorAdcProbePending = false;
-        _timingBuffers[0] = TimingBuffer{};
-        _timingBuffers[1] = TimingBuffer{};
-        _publishedTimingIndex = 0U;
-        _workingTimingIndex = 1U;
         ClearPendingRequests();
         _boundMode = nullptr;
-        _stagedControlPeriodUs = 0U;
-        _stagedSessionStartPointX = std::numeric_limits<float>::quiet_NaN();
-        _stagedSessionStartPointY = std::numeric_limits<float>::quiet_NaN();
-        _stagedSensorWorkBits = kDefaultSensorWorkBits;
-        _stagedNextSessionValid = false;
     }
 }
 

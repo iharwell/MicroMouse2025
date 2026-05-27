@@ -198,7 +198,6 @@ namespace MazeMap
     }
 
     void RuntimeSensorSuite::BeginInterlacedCapture(
-        const bool stationary,
         const MazeMap::VehicleState& state,
         SensorSnapshot& snapshot,
         const std::uint8_t sensorWorkBits,
@@ -217,7 +216,6 @@ namespace MazeMap
         _interlacedCaptureSensorWorkBits = sensorWorkBits;
         _interlacedCaptureWalls = captureWalls;
         _interlacedCaptureInertial = (sensorWorkBits & (kGyroSensorBit | kAccelSensorBit)) != 0U;
-        _interlacedCaptureStationary = stationary;
         _interlacedCaptureSnapshot = &snapshot;
         _interlacedCaptureState = &state;
         PublishEncoderTotals(snapshot);
@@ -256,7 +254,7 @@ namespace MazeMap
             return;
         }
 
-        CaptureInertialSnapshot(_interlacedCaptureStationary, *_interlacedCaptureSnapshot);
+        CaptureInertialSnapshot(*_interlacedCaptureSnapshot);
         _interlacedCaptureImuCaptured = true;
     }
 
@@ -666,7 +664,6 @@ namespace MazeMap
         _frontWallCollectionPending = false;
         _leftWallCollectionPending = false;
         _rightWallCollectionPending = false;
-        _interlacedCaptureStationary = false;
         _interlacedCaptureImuCaptured = false;
         _frontWallCollectionReadyUs = 0UL;
         _leftWallCollectionReadyUs = 0UL;
@@ -867,12 +864,9 @@ namespace MazeMap
         _vehicle.SideRightWallSensor().CommandLedOff(nowUs);
     }
 
-    void RuntimeSensorSuite::CaptureInertialSnapshot(const bool stationary, SensorSnapshot& snapshot)
+    void RuntimeSensorSuite::CaptureInertialSnapshot(SensorSnapshot& snapshot)
     {
-        _vehicle.BackLeftImu().CaptureInertialSnapshot(
-            stationary,
-            Config::kGyroBiasUpdateMaxAbsRateRadps,
-            snapshot);
+        _vehicle.BackLeftImu().CaptureInertialSnapshot(snapshot);
     }
 
     bool RuntimeSensorSuite::UpdateFrontWallState(

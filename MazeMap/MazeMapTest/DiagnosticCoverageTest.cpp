@@ -6,7 +6,6 @@
 #include "..\MazeMap\EncoderStallPolicy.h"
 #include "..\MazeMap\FanRampProfile.h"
 #include "..\MazeMap\FrontWallCharacterizationStorage.h"
-#include "..\MazeMap\GyroBiasUpdatePolicy.h"
 #include "..\MazeMap\ImuCalibrationPolicy.h"
 #include "..\MazeMap\ImuSamplingProfile.h"
 #include "..\MazeMap\Maze.h"
@@ -147,7 +146,6 @@ namespace MazeMap
 		{
 			static const char* requiredTokens[] = {
 				"kGyroBiasSamples",
-				"kGyroBiasUpdateMaxAbsRateRadps",
 				"kWheelStaticFeedforward",
 				"kEncoderVelocityKp",
 				"kEncoderVelocityKd",
@@ -1483,21 +1481,6 @@ namespace MazeMap
 			Assert::IsTrue(std::fabs(ComputeFanRampDutyCycle(1.20f, 1000UL, 2000UL) - 0.50f) < 1.0e-6f);
 			Assert::IsTrue(std::fabs(ComputeFanRampDutyCycle(std::numeric_limits<float>::quiet_NaN(), 1000UL, 2000UL)) < 1.0e-6f);
 			Assert::IsTrue(std::fabs(ComputeFanRampDutyCycle(0.80f, 0UL, 0UL) - 0.80f) < 1.0e-6f);
-		}
-
-		TEST_METHOD(ShouldUpdateGyroBiasFromStationarySampleUsesAbsoluteRateThreshold)
-		{
-			Assert::IsTrue(ShouldUpdateGyroBiasFromStationarySample(0.018f, 0.020f));
-			Assert::IsTrue(ShouldUpdateGyroBiasFromStationarySample(-0.018f, 0.020f));
-			Assert::IsFalse(ShouldUpdateGyroBiasFromStationarySample(0.021f, 0.020f));
-			Assert::IsFalse(ShouldUpdateGyroBiasFromStationarySample(-0.021f, 0.020f));
-		}
-
-		TEST_METHOD(ShouldUpdateGyroBiasFromStationarySampleRejectsInvalidInputs)
-		{
-			Assert::IsFalse(ShouldUpdateGyroBiasFromStationarySample(std::numeric_limits<float>::quiet_NaN(), 0.020f));
-			Assert::IsFalse(ShouldUpdateGyroBiasFromStationarySample(0.005f, 0.0f));
-			Assert::IsFalse(ShouldUpdateGyroBiasFromStationarySample(0.005f, std::numeric_limits<float>::quiet_NaN()));
 		}
 
 		TEST_METHOD(ComputeGyroBiasSampleCountRespectsMinimumAveragingWindow)

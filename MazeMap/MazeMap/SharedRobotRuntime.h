@@ -522,7 +522,8 @@ namespace MazeMap::App::Internal
         bool WriteUtilityDataLogAccelBiasMetadata(const RuntimeSensorSuite& sensors);
 
         // `BeginUtilityDataLogSchema(row)`:
-        // Begins the active utility data log with the supplied schema row type.
+        // Begins the active utility data log with the supplied schema row type and commits the
+        // just-created file headers before control-loop execution depends on later servicing.
         //
         // Parameters:
         // `row`:
@@ -541,8 +542,15 @@ namespace MazeMap::App::Internal
             {
                 SetLastRuntimeLogErrorFromUtilityDataLogger("Failed to begin utility data log schema.");
                 LogUtilityDataLoggerFailure("data_log_begin_failed");
+                return false;
             }
-            return ok;
+
+            if (!FlushUtilityDataLog())
+            {
+                LogUtilityDataLoggerFailure("data_log_begin_flush_failed");
+                return false;
+            }
+            return true;
         }
 
         // `LogUtilityDataRow(row)`:

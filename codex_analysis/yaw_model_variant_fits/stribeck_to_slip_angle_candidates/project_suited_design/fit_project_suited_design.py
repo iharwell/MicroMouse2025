@@ -172,6 +172,7 @@ class ModelParams:
     longitudinal_k_mps: float
     mu_peak: float
     mu_slide: float
+    static_extra_mu: float
     stribeck_speed_mps: float
     low_speed_gate_mps: float
     lateral_sign_eps_mps: float
@@ -179,9 +180,6 @@ class ModelParams:
     alpha_knee: float
     corner_mu_front: float
     corner_mu_rear: float
-    derived_static_extra_mu: float
-    launch_total_opposing_nm: float
-    launch_static_solve_error_nm: float
     objective_score: float
 
 
@@ -191,6 +189,7 @@ BOUNDS = [
     ("longitudinal_k_mps", 0.020, 0.700),
     ("mu_peak", 1.650, 5.000),
     ("mu_slide", 0.000, 0.500),
+    ("static_extra_mu", 0.000, 8.000),
     ("stribeck_speed_mps", 0.020, 0.450),
     ("low_speed_gate_mps", 0.080, 0.600),
     ("lateral_sign_eps_mps", 0.001, 0.050),
@@ -297,17 +296,6 @@ def command_from_torque(command_torque: float, wheel_speed_radps: float, constan
     current = (motor_torque / torque_constant) + no_load_sign * no_load
     back_emf = wheel_speed_radps * (gear_ratio / speed_constant)
     return ((current * resistance) + back_emf) / battery
-
-
-def required_total_launch_opposing_nm(constants: dict[str, float], target_command: float = 0.646) -> float:
-    track = constants["track_width_m"]
-    radius = constants["wheel_radius_m"]
-    half_track = 0.5 * track
-    yaw_rate = 1.0
-    left_speed = half_track * yaw_rate / radius
-    left_wheel_torque = torque_from_command(target_command, left_speed, constants)
-    applied_bank_torque = max(0.0, left_wheel_torque - constants["rolling_friction_torque_nm"])
-    return applied_bank_torque * track / radius
 
 
 def motor_commands_for_opposing_torque(
@@ -489,16 +477,14 @@ def pack(values: dict[str, float]) -> np.ndarray:
     return np.clip(np.array(out, dtype=float), 0.0, 1.0)
 
 
-def raw_forces(
-    data: DataView, p: dict[str, float], static_extra_mu: float
-) -> tuple[np.ndarray, np.ndarray]:
+def raw_forces(data: DataView, p: dict[str, float]) -> tuple[np.ndarray, np.ndarray]:
     vf_rel = data.vf_rel
     vr_rel = data.vr_rel
     normal = data.normal
     vmag2 = vf_rel * vf_rel + vr_rel * vr_rel
     stribeck = (
         p["mu_slide"]
-        + static_extra_mu
+        + p["static_extra_mu"]
         * (p["stribeck_speed_mps"] * p["stribeck_speed_mps"])
         / np.maximum(p["stribeck_speed_mps"] * p["stribeck_speed_mps"] + vmag2, 1.0e-12)
     )
@@ -531,9 +517,7 @@ def yaw_moment_from_forces(data: DataView, force_f: np.ndarray, force_r: np.ndar
     return np.sum(data.f * force_r - data.r * force_f, axis=1)
 
 
-def launch_static_solve(
-    p: dict[str, float], constants: dict[str, float], target_opposing_nm: float
-) -> tuple[float, float]:
+def synthetic_launch_opposing_nm(p: dict[str, float], constants: dict[str, float]) -> float:
     track = constants["track_width_m"]
     half_track = 0.5 * track
     longitudinal = constants["drive_wheel_longitudinal_offset_m"]
@@ -547,47 +531,30 @@ def launch_static_solve(
     vr_rel = -f
     vmag2 = vf_rel * vf_rel + vr_rel * vr_rel
     sign_r = smooth_sat(vr_rel, p["lateral_sign_eps_mps"])
-    slide = p["mu_slide"] * normal * sign_r
-    extra_basis = (
-        normal
-        * ((p["stribeck_speed_mps"] * p["stribeck_speed_mps"]) / np.maximum(
-            p["stribeck_speed_mps"] * p["stribeck_speed_mps"] + vmag2, 1.0e-12
-        ))
-        * sign_r
+    stribeck = (
+        p["mu_slide"]
+        + p["static_extra_mu"]
+        * (p["stribeck_speed_mps"] * p["stribeck_speed_mps"])
+        / np.maximum(p["stribeck_speed_mps"] * p["stribeck_speed_mps"] + vmag2, 1.0e-12)
     )
-
-    def opposing_for(extra_mu: float) -> float:
-        force_r = slide + extra_mu * extra_basis
-        force_f = np.zeros_like(force_r)
-        pf, pr, _ = project_forces(force_f, force_r, normal, p["mu_peak"])
-        moment = float(np.sum(f * pr - r * pf))
-        return -moment
-
-    lo = 0.0
-    hi = max(p["mu_peak"] * 4.0, p["mu_slide"] + 1.0)
-    for _ in range(80):
-        mid = 0.5 * (lo + hi)
-        if opposing_for(mid) < target_opposing_nm:
-            lo = mid
-        else:
-            hi = mid
-    solved = 0.5 * (lo + hi)
-    error = opposing_for(solved) - target_opposing_nm
-    return solved, error
+    force_r = normal * stribeck * sign_r
+    force_f = np.zeros_like(force_r)
+    pf, pr, _ = project_forces(force_f, force_r, normal, p["mu_peak"])
+    moment = float(np.sum(f * pr - r * pf))
+    return max(-moment, 0.0)
 
 
-def predict(data: DataView, theta: np.ndarray) -> tuple[np.ndarray, dict[str, float], float, float]:
+def predict(data: DataView, theta: np.ndarray) -> tuple[np.ndarray, dict[str, float], float]:
     p = unpack(theta)
-    target_launch = required_total_launch_opposing_nm(data.constants)
-    static_extra, launch_error = launch_static_solve(p, data.constants, target_launch)
-    ff_raw, fr_raw = raw_forces(data, p, static_extra)
+    static_extra = p["static_extra_mu"]
+    ff_raw, fr_raw = raw_forces(data, p)
     ff, fr, util = project_forces(ff_raw, fr_raw, data.normal, p["mu_peak"])
     pred = yaw_moment_from_forces(data, ff, fr)
-    return pred, p, static_extra, launch_error
+    return pred, p, static_extra
 
 
 def objective(data: DataView, theta: np.ndarray) -> float:
-    pred, p, static_extra, launch_error = predict(data, theta)
+    pred, p, static_extra = predict(data, theta)
     error = pred - data.target
 
     def weighted_rmse(weights: np.ndarray) -> float:
@@ -601,7 +568,6 @@ def objective(data: DataView, theta: np.ndarray) -> float:
     latest = weighted_rmse(data.latest_weights)
     score = (0.72 * primary) + (0.18 * downweighted) + (0.10 * latest)
     score += 0.005 * max(0.0, static_extra - p["mu_peak"] * 1.5)
-    score += 0.010 * abs(launch_error)
     score += 0.00015 * (p["corner_mu_front"] + p["corner_mu_rear"] + p["longitudinal_mu"])
     return float(score)
 
@@ -620,6 +586,7 @@ def differential_evolution(
             "longitudinal_k_mps": 0.28,
             "mu_peak": 2.0,
             "mu_slide": 0.08,
+            "static_extra_mu": 0.5,
             "stribeck_speed_mps": 0.20,
             "low_speed_gate_mps": 0.12,
             "lateral_sign_eps_mps": 0.008,
@@ -634,6 +601,7 @@ def differential_evolution(
             "longitudinal_k_mps": 0.42,
             "mu_peak": 4.5,
             "mu_slide": 0.04,
+            "static_extra_mu": 2.0,
             "stribeck_speed_mps": 0.23,
             "low_speed_gate_mps": 0.08,
             "lateral_sign_eps_mps": 0.003,
@@ -648,6 +616,7 @@ def differential_evolution(
             "longitudinal_k_mps": 0.16,
             "mu_peak": 1.6,
             "mu_slide": 0.12,
+            "static_extra_mu": 0.2,
             "stribeck_speed_mps": 0.08,
             "low_speed_gate_mps": 0.16,
             "lateral_sign_eps_mps": 0.010,
@@ -794,14 +763,14 @@ def reference_comparison_rows(split_rows: list[dict[str, object]]) -> list[dict[
 
 
 def make_model_params(data: DataView, theta: np.ndarray, score: float) -> ModelParams:
-    pred, p, static_extra, launch_error = predict(data, theta)
-    target_launch = required_total_launch_opposing_nm(data.constants)
+    pred, p, static_extra = predict(data, theta)
     return ModelParams(
         drive_scale=p["drive_scale"],
         longitudinal_mu=p["longitudinal_mu"],
         longitudinal_k_mps=p["longitudinal_k_mps"],
         mu_peak=p["mu_peak"],
         mu_slide=p["mu_slide"],
+        static_extra_mu=static_extra,
         stribeck_speed_mps=p["stribeck_speed_mps"],
         low_speed_gate_mps=p["low_speed_gate_mps"],
         lateral_sign_eps_mps=p["lateral_sign_eps_mps"],
@@ -809,27 +778,22 @@ def make_model_params(data: DataView, theta: np.ndarray, score: float) -> ModelP
         alpha_knee=p["alpha_knee"],
         corner_mu_front=p["corner_mu_front"],
         corner_mu_rear=p["corner_mu_rear"],
-        derived_static_extra_mu=static_extra,
-        launch_total_opposing_nm=target_launch,
-        launch_static_solve_error_nm=launch_error,
         objective_score=score,
     )
 
 
 def launch_row(model: ModelParams, constants: dict[str, float]) -> dict[str, object]:
-    achieved_opposing = model.launch_total_opposing_nm + model.launch_static_solve_error_nm
+    p = {name: float(getattr(model, name)) for name, _, _ in BOUNDS}
+    achieved_opposing = synthetic_launch_opposing_nm(p, constants)
     commands = motor_commands_for_opposing_torque(achieved_opposing, constants, 1.0)
     return {
         "variant": "project_suited_stribeck_slip_angle",
         "yaw_rate_radps": 1.0,
-        "target_total_opposing_yaw_torque_nm": model.launch_total_opposing_nm,
-        "achieved_total_opposing_yaw_torque_nm": achieved_opposing,
-        "derived_static_extra_mu": model.derived_static_extra_mu,
-        "launch_solve_error_nm": model.launch_static_solve_error_nm,
+        "diagnostic_total_opposing_yaw_torque_nm": achieved_opposing,
+        "static_extra_mu": model.static_extra_mu,
         **commands,
         "passes_abs_0p6_gate": commands["max_abs_command"] >= 0.6,
-        "target_command_abs": 0.646,
-        "target_abs_error": commands["max_abs_command"] - 0.646,
+        "launch_lock_policy": "diagnostic_only",
     }
 
 
@@ -876,7 +840,7 @@ def write_report(
         "The chosen form is a PlantModel-shaped contact law, not a scalar residual table. "
         "It keeps Vehicle-owned facts as inputs, computes per-contact forces from contact relative velocity and geometry, "
         "then accumulates yaw with `sum_i(f_i * F_r_i - r_i * F_f_i)`. "
-        "The May 4 launch logs are deliberately visible as a launch constraint and latest-log objective, but they are not promoted to full authority because the provenance report marks them incomplete."
+        "The launch estimate is diagnostic only; it is not a hard constraint, target solve, or candidate-selection gate."
     )
     lines.append("")
     lines.append("The form was chosen before fitting:")
@@ -911,7 +875,7 @@ def write_report(
     lines.append("")
     lines.append("`M_yaw = sum_i(f_i*scale_i*F_r_raw_i - r_i*scale_i*F_f_raw_i)`")
     lines.append("")
-    lines.append("`mu_static_extra` is solved analytically/numerically from the measured `+/-0.646` in-place launch command at `Vf=0`, `yawRate=1 rad/s` for each optimizer point.")
+    lines.append("`mu_static_extra` is a fitted free parameter. The `Vf=0`, `yawRate=1 rad/s` launch command is computed after optimization as a diagnostic.")
     lines.append("")
     lines.append("## Optimization")
     lines.append("")
@@ -931,7 +895,7 @@ def write_report(
     lines.append(
         "Several fitted parameters can hit bounds, and those hits are written to `parameter_bound_hits.csv`. "
         "When that happens, read this result as a design-comparison fit rather than a clean coefficient identification: "
-        "the launch/static Stribeck requirement is hard, the per-contact/normal-load/envelope shape is production-aligned, "
+        "the static Stribeck parameter is free, the per-contact/normal-load/envelope shape is production-aligned, "
         "and the broad data may still prefer the brush or standalone candidates for raw fit quality."
     )
     lines.append("")
@@ -1139,7 +1103,7 @@ def main() -> None:
     trace = de_trace + polish_trace
     write_csv(OUT / "optimizer_trace.csv", trace)
 
-    pred, _, _, _ = predict(full_data, polished)
+    pred, _, _ = predict(full_data, polished)
     model = make_model_params(full_data, polished, polished_score)
     common_range_rows = write_common_range_metrics(
         OUT / "common_range_metrics.csv",

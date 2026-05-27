@@ -1,2 +1,2 @@
-family,yaw_rate_radps,forward_velocity_mps,right_velocity_mps,opposing_scrub_nm,left_command,right_command,max_abs_command,gate_pass
-yaw_static_yield_patch,1.0,0.0,0.0,0.007805410151293805,0.5938143722172917,-0.5938143722172917,0.5938143722172917,False
+family,yaw_rate_radps,forward_velocity_mps,right_velocity_mps,opposing_scrub_nm,left_command,right_command,max_abs_command,gate_pass,launch_lock_policy
+yaw_static_yield_patch,1.0,0.0,0.0,0.005774635747514002,0.4840374752028171,-0.4840374752028171,0.4840374752028171,False,diagnostic_only

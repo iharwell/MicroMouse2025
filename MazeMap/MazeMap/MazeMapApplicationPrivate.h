@@ -19,7 +19,6 @@
 #include "DiagnosticMotionPlan.h"
 #include "EncoderStallPolicy.h"
 #include "FanRampProfile.h"
-#include "GyroBiasUpdatePolicy.h"
 #include "ImuCalibrationPolicy.h"
 #include "ImuSamplingProfile.h"
 #include "CruiseSpeedFloor.h"

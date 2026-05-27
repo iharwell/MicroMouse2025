@@ -807,7 +807,7 @@ def make_report(
             "",
             "## Viability",
             "",
-            "This pass is viable as a clean memoryless bristle/slip-angle candidate, but not as the best broad-envelope model. It clears the launch gate without command/request conditioning and keeps the contact-patch force structure. Its broad RMSE should be judged against the standalone contact traction testbed and force-level testbed: if those remain lower on validation, this law is better treated as a simpler interpretable baseline or as a shape for a later stateful LuGre/brush pass.",
+            "This pass is viable as a clean memoryless bristle/slip-angle candidate, but not as the best broad-envelope model. The launch estimate is diagnostic only; broad RMSE should be judged against the standalone contact traction testbed and force-level testbed. If those remain lower on validation, this law is better treated as a simpler interpretable baseline or as a shape for a later stateful LuGre/brush pass.",
             "",
             "Unresolved hysteresis remains out of scope by design. Rows with limiter or hardware saturation evidence are reported as risk slices, not fit authority.",
             "",

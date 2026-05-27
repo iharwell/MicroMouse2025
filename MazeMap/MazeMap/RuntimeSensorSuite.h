@@ -89,7 +89,6 @@ namespace MazeMap
         bool AppendTextLogFormatted(const char* format, ...) noexcept;
         void InitializeWallSensorLedOffState() noexcept;
         void BeginInterlacedCapture(
-            bool stationary,
             const MazeMap::VehicleState& state,
             SensorSnapshot& snapshot,
             std::uint8_t sensorWorkBits,
@@ -116,7 +115,7 @@ namespace MazeMap
             float dtSeconds) noexcept;
         void PublishEncoderTotals(SensorSnapshot& snapshot) const noexcept;
         void CaptureEncoderSnapshot(SensorSnapshot& snapshot, float dtSeconds) noexcept;
-        void CaptureInertialSnapshot(bool stationary, SensorSnapshot& snapshot);
+        void CaptureInertialSnapshot(SensorSnapshot& snapshot);
         bool UpdateFrontWallState(
             float leftAmbientLight,
             float leftMeasuredDifferentialLight,
@@ -161,7 +160,6 @@ namespace MazeMap
         bool _frontWallCollectionPending = false;
         bool _leftWallCollectionPending = false;
         bool _rightWallCollectionPending = false;
-        bool _interlacedCaptureStationary = false;
         bool _interlacedCaptureImuCaptured = false;
         bool _interlacedCaptureIncompleteLogged = false;
         std::uint32_t _frontWallCollectionReadyUs = 0UL;

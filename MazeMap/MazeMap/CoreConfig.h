@@ -37,10 +37,6 @@ namespace MazeMap::Config
     // [High] Minimum wall-clock window used for each startup gyro bias measurement. Keep this at or above 500 ms so
     // encoder-safe retries still produce a stable stationary average even if the configured sample count is reduced later.
     constexpr uint16_t kGyroBiasMinimumAveragingWindowMs = 500U;
-    // [Medium] Maximum absolute raw yaw rate still treated as stationary while adapting the gyro bias estimate. Raise
-    // it only if startup bias convergence is clearly too slow; lower it if short settle windows keep pulling motion
-    // transients into the bias estimate.
-    constexpr float kGyroBiasUpdateMaxAbsRateRadps = 0.03f;
     // [Medium] Time to sit still before wall observations. Increase if wall sensors or chassis motion need longer to
     // settle after stopping; decrease if mapping feels sluggish and readings are already stable.
     constexpr uint16_t kObservationSettleMs = 25U;

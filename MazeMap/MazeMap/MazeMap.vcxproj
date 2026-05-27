@@ -208,7 +208,6 @@
     <ClInclude Include="FrontWallCharacterizationConfig.h" />
     <ClInclude Include="FrontWallCharacterizationStorage.h" />
     <ClInclude Include="FloodFillPathFinder.h" />
-    <ClInclude Include="GyroBiasUpdatePolicy.h" />
     <ClInclude Include="HardwareConfig.h" />
     <ClInclude Include="HalfStepPath.h" />
     <ClInclude Include="ImuCalibrationPolicy.h" />

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CommandVector.h"
+#include "CoreConfig.h"
 #include "RuntimeSensorSuite.h"
 #include "VehicleState.h"
 
@@ -29,10 +30,8 @@ namespace MazeMap::App::Internal
     // - Infrastructure resolves the active IApplicationMode object.
     // - SetupMode(...) is one-time pre-Run() preparation for the selected boot mode, not a reusable
     //   reset hook for another pass through the same mode object.
-    // - SetupMode(...) must stage the initial session state through StageNextSessionState(...).
+    // - SetupMode(...) may configure the initial session state through StageNextSessionState(...).
     // - Infrastructure privately binds the mode object and enters Run().
-    // - Every session start, including successor-session restarts, installs
-    //   IApplicationMode::RunTick(...) with the bound mode object as the callback context.
     // - Modes do not choose their own initial callback/context pair.
     //
     // Callback ownership model:
@@ -43,14 +42,14 @@ namespace MazeMap::App::Internal
     // - HaltExecutionEndProgram() is the only non-fault path that causes Run() to return.
     //
     // Public state model:
-    // - StageNextSessionState(...) stages only the fixed session state that the next session start
-    //   will consume. A later call replaces the previously staged state.
+    // - StageNextSessionState(...) writes the active fixed session state immediately. A later call
+    //   replaces that state directly.
     // - RequestPause(...) preserves continuity. Its callback runs after brake settlement and may
     //   then resume the current session, request end-session, request terminal halt, or transfer
     //   in-session callback ownership for the next resumed tick.
     // - RequestEndSession(...) intentionally breaks continuity. Its callback runs after brake
-    //   settlement, must stage the successor session or request HaltExecutionEndProgram(), and may
-    //   not request nested boundary work that belongs only to an active session tick.
+    //   settlement, may configure successor-session state, and may not request nested boundary
+    //   work that belongs only to an active session tick.
     //
     // No public single-tick stepping API is allowed here. Exposing a caller-owned tick boundary
     // would split cadence ownership and invalidate LoopController's reason for existing.
@@ -60,8 +59,7 @@ namespace MazeMap::App::Internal
         // Selects which wall-sensor groups participate in one session's sensor work.
         //
         // StageNextSessionState(...) uses this as the authoritative wall-sensor opt-out surface.
-        // Modes stage
-        // the exact wall groups they want for the session, and LoopController filters wall-sensor
+        // Modes configure the exact wall groups they want for the session, and LoopController filters wall-sensor
         // capture/output behavior from this mask instead of from separate special-case flags.
         enum class WallMask : std::uint8_t
         {
@@ -84,7 +82,7 @@ namespace MazeMap::App::Internal
         LoopController() = default;
 
         // `StageNextSessionState(...)`:
-        // Installs the fixed state that the next session start will consume.
+        // Installs the fixed state used by the active session.
         //
         // Parameters:
         // `controlPeriodUs`:
@@ -97,10 +95,10 @@ namespace MazeMap::App::Internal
         // Session-local sensor participation used for capture, estimator input, and wall updates.
         //
         // Behavior:
-        // - SetupMode(...) must call this before infrastructure-owned Run() is entered.
-        // - A later call replaces any previously staged successor-session state.
-        // - After RequestEndSession(...), the end-session callback must call this before it
-        //   returns unless it instead requests HaltExecutionEndProgram().
+        // - SetupMode(...) may call this before infrastructure-owned Run() is entered.
+        // - A later call replaces the active successor-session state immediately.
+        // - After RequestEndSession(...), the end-session callback may call this before it
+        //   returns. If it does not, the previous active configuration is reused.
         // - Invalid session state is a terminal contract violation and faults the active mode.
         void StageNextSessionState(
             std::uint32_t controlPeriodUs,
@@ -144,9 +142,8 @@ namespace MazeMap::App::Internal
         //
         // Behavior:
         // - The current tick still completes first.
-        // - LoopController then brakes, waits for brake settlement, clears any previously staged
-        //   successor-session state, and invokes `callback`.
-        // - `callback` must stage the next session state or request HaltExecutionEndProgram().
+        // - LoopController then brakes, waits for brake settlement, and invokes `callback`.
+        // - `callback` may configure the next session state or request HaltExecutionEndProgram().
         // - Once `callback` returns, LoopController either starts the next session immediately or
         //   returns from Run() if terminal halt was requested.
         // - Every successor session restarts with IApplicationMode::RunTick(...) and the bound
@@ -221,13 +218,6 @@ namespace MazeMap::App::Internal
         std::uint32_t LastTimingCycleCounterEnd() const noexcept;
         std::uint16_t LastTimingOverrunUs() const noexcept;
 
-        // `LastAppliedCommand()`:
-        // Returns the command most recently applied at a command application point.
-        //
-        // Return value:
-        // The command LoopController most recently handed to the runtime actuation hook.
-        const CommandVector& LastAppliedCommand() const noexcept;
-
     private:
         friend class ::MazeMap::App::Application;
         friend class BootFramework;
@@ -287,24 +277,14 @@ namespace MazeMap::App::Internal
             std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,
             LoopController& loopController);
-        static bool IsBrakeCommand(const CommandVector& command) noexcept;
-        static bool IsZeroCommand(const CommandVector& command) noexcept;
         static std::uint32_t ReadCycleCounter() noexcept;
         static void WaitUntilUs(std::uint32_t absoluteDeadlineUs) noexcept;
         static void ServiceInterlacedSensorCapture(void* context) noexcept;
 
-        void RunSessionStartWallSensorAdcProbe() noexcept;
         void AttachRuntime(SharedRobotRuntime& runtime) noexcept;
         void BindApplicationMode(IApplicationMode& mode) noexcept;
         void Run();
-        void StartSessionFromStagedState() noexcept;
         void RestoreSessionStartPhysicalState() noexcept;
-        bool ValidateSessionState(
-            std::uint32_t controlPeriodUs,
-            float sessionStartPointX,
-            float sessionStartPointY,
-            std::uint8_t sensorWorkBits) const noexcept;
-        bool SupportsSensorWorkBits(std::uint8_t sensorWorkBits) const noexcept;
         void ClearPendingRequests() noexcept;
         bool ApplyControlAtApplicationPoint(const CommandVector& control) noexcept;
         bool CaptureTickState(float dtSeconds, std::uint32_t tickStartUs);
@@ -320,8 +300,6 @@ namespace MazeMap::App::Internal
         void FinalizeTiming() noexcept;
         bool ServiceRuntimeLogsNormal() noexcept;
         void ServiceRuntimeLogsForFaultPath() noexcept;
-        std::uint32_t ComputeRemainingSlackUs(std::uint32_t absoluteDeadlineUs) const noexcept;
-        bool ShouldTreatCurrentControlAsStationary() const noexcept;
         void ResolvePauseRequest();
         void ResolveEndSessionRequest();
         void WaitForBrakeSettlement();
@@ -330,15 +308,10 @@ namespace MazeMap::App::Internal
         SharedRobotRuntime* _runtime{};    // Runtime owner for actuation, sensing, logs, and state.
         IApplicationMode* _boundMode{};    // Bound top-level mode whose RunTick(...) starts each session.
         float _modeStartHeadingRad{ std::numeric_limits<float>::quiet_NaN() }; // Captured start-of-mode heading reused for successor session resets.
-        std::uint32_t _controlPeriodUs{};
-        std::uint32_t _stagedControlPeriodUs{};
-        float _sessionStartPointX{ std::numeric_limits<float>::quiet_NaN() };
-        float _sessionStartPointY{ std::numeric_limits<float>::quiet_NaN() };
-        float _stagedSessionStartPointX{ std::numeric_limits<float>::quiet_NaN() };
-        float _stagedSessionStartPointY{ std::numeric_limits<float>::quiet_NaN() };
+        std::uint32_t _controlPeriodUs{ Config::kControlPeriodUs };
+        float _sessionStartPointX{ 0.0f };
+        float _sessionStartPointY{ 0.0f };
         std::uint8_t _sensorWorkBits{ kDefaultSensorWorkBits };
-        std::uint8_t _stagedSensorWorkBits{ kDefaultSensorWorkBits };
-        bool _stagedNextSessionValid{};    // Whether successor-session state is presently valid.
         CommandVector (*_activeModeWorkCallback)( // Current strict-cadence tick owner.
             void* context,
             std::uint32_t loopEndTimeUs,
@@ -346,13 +319,9 @@ namespace MazeMap::App::Internal
             LoopController& loopController){};
         void* _activeModeWorkContext{};    // Explicit context paired with _activeModeWorkCallback.
         bool _sessionActive{};             // Whether Run() currently owns an active session lifecycle.
-        bool _publishedTimingValid{};      // Whether a completed-tick timing snapshot is published.
         std::uint32_t _tickCount{};        // One-based active-session tick sequence.
         std::uint32_t _lastTickStartUs{};  // Previous tick-start timestamp.
         std::uint32_t _nextSyncTargetUs{}; // Absolute deadline for the current/next synchronized tick.
-        CommandVector _nextControl{};      // Command staged for the next command application point.
-        CommandVector _currentControl{};   // Command currently published as active and used by the next prediction.
-        bool _sessionStartWallSensorAdcProbePending{}; // Deferred session-start ADC probe request.
         TimingBuffer _timingBuffers[2]{}; // Double-buffered published/working timing storage.
         std::uint8_t _publishedTimingIndex{ 0U }; // Index of the published completed-tick timing buffer.
         std::uint8_t _workingTimingIndex{ 1U };   // Index of the mutable working timing buffer.

@@ -23,8 +23,8 @@ namespace MazeMap::App::Internal
     //   it directly.
     // - SetupMode(BootFramework& framework) is not a reusable reset hook for another pass through
     //   the same mode object.
-    // - SetupMode(BootFramework& framework) must stage the initial LoopController session state through
-    //   StageNextSessionState(...).
+    // - SetupMode(BootFramework& framework) may configure the initial LoopController session
+    //   state through StageNextSessionState(...).
     // - Infrastructure then binds the mode object itself as the initial callback context and
     //   enters LoopController::Run().
     //
@@ -52,7 +52,7 @@ namespace MazeMap::App::Internal
         //
         // Behavior:
         // - May configure runtime services, logs, or mode-local retained state.
-        // - Must stage the initial session state through StageNextSessionState(...).
+        // - May configure the initial session state through StageNextSessionState(...).
         // - Does not choose the initial callback/context pair and does not enter Run().
         // - Is called at most once for the selected boot mode during a program run.
         // - Failures are terminal and should go through SharedRobotRuntime::FailActiveMode(...),

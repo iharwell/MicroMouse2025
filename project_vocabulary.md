@@ -25,7 +25,7 @@ The repository is still in architectural cleanup, so some legacy names remain. W
 
 | Term | Meaning here | Canonical anchors |
 | --- | --- | --- |
-| `policy` | A small stateless rule or criteria helper. Use `policy` for logic that decides whether something is valid, allowed, ready, armed, complete, or eligible. A policy is not a controller, not a routine, and not an owner of substantive state. | `MazeMap/MazeMap/EncoderStallPolicy.h`, `MazeMap/MazeMap/GyroBiasUpdatePolicy.h`, `MazeMap/MazeMap/ImuCalibrationPolicy.h` |
+| `policy` | A small stateless rule or criteria helper. Use `policy` for logic that decides whether something is valid, allowed, ready, armed, complete, or eligible. A policy is not a controller, not a routine, and not an owner of substantive state. | `MazeMap/MazeMap/EncoderStallPolicy.h`, `MazeMap/MazeMap/ImuCalibrationPolicy.h` |
 | `physical coordinates` / `physical location` | The continuous-space position vocabulary on the robot side, typically in meters, used when ambiguity with maze-grid coordinates is possible. If the context is already clearly on the physical side, `coordinates` or `location` is sufficient. | `MazeMap/MazeMap/DriveBase.h`, `MazeMap/MazeMap/MotionTargetProjection.h`, `MazeMap/MazeMap/CellCoordinates.h`, `MazeMap/MazeMap/MazeLocation.h` |
 
 ## Top-Level Control Terms
