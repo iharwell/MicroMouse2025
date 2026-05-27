@@ -1,0 +1,4 @@
+model,min_cell_count,sigma_vf,sigma_yaw,sigma_vbar_rel,loro_primary_rows,coverage_fraction,loro_corrected_rmse_nm,loro_corrected_mae_nm,loro_corrected_median_abs_nm
+vf_yaw_vbar_kernel_cell_surface,5,0.12,0.6,0.035,47317,0.9875731766595516,0.03544682634113123,0.02333604668193064,0.013933046203839247
+vf_yaw_vbar_kernel_cell_surface,8,0.16,0.8,0.05,47317,0.9883551366316546,0.035454561381223174,0.02346679222523728,0.014073041826131038
+vf_yaw_vbar_kernel_cell_surface,12,0.2,1.1,0.07,47317,0.9903628716951625,0.03545967342471126,0.02377936587204729,0.014400535633889959

@@ -1,0 +1,27 @@
+{
+  "baseline_note": "uses current right-contact scrub basis; high-utilization cells are flagged because full force projection is not replayed after variant correction",
+  "command_mapping": "inverse MotorEncoderDrive torque model plus PlantModel launch and rolling loss approximation",
+  "positive_yaw": "clockwise",
+  "right_velocity_mps": 0.0,
+  "vf_samples_mps": [
+    0.0,
+    0.03,
+    0.06,
+    0.09,
+    0.12,
+    0.15
+  ],
+  "wheel_surface_model": "left=Vf+halfTrack*yawRate, right=Vf-halfTrack*yawRate",
+  "yaw_rate_samples_radps": [
+    0.2,
+    0.844444444,
+    1.488888889,
+    2.133333333,
+    2.777777778,
+    3.422222222,
+    4.066666667,
+    4.711111111,
+    5.355555556,
+    6.0
+  ]
+}

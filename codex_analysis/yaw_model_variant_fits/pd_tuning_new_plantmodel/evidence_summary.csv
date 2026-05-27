@@ -1,0 +1,13 @@
+metric,value
+launch_accel_median_radps2,115.2649565
+launch_delay_median_s,0.005
+launch_tau_median_s,0.02725
+primary_baseline_rmse_nm,0.036866176895009706
+primary_corrected_rmse_nm,0.021083018384621146
+selected_in_place_cmd,0.6497644638998822
+selected_in_place_extra_nm,0.06621034809105328
+validation_baseline_rmse_nm,0.05023383204822011
+validation_corrected_rmse_nm,0.029680153603611304
+current_score,10575.380704602572
+grid_best_score,137.5099003737535
+recommended_balanced_score,150.80187265826993

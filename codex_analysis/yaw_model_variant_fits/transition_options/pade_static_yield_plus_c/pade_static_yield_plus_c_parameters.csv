@@ -1,0 +1,23 @@
+parameter,value,unit
+yaw_activation_mps,0.008,m/s
+force_activation_util,0.2,actual force utilization
+static_speed_mps,0.025,m/s
+speed_fade_mps,0.64,m/s
+rel_weight,0.75,dimensionless
+util_k,0.1,dimensionless utilization
+slide_ratio,0.0,sliding/static ratio
+static_quartic,0.2,Pade x^4 denominator coefficient
+load_exp,1.0,dimensionless
+static_peak_nm,0.10301406440218525,Nm
+sliding_yield_nm,0.0,Nm
+surface_rel_knee_mps,0.06,m/s
+surface_fwd_knee_mps,0.7,m/s
+surface_ridge,0.001,ridge
+surface_cap_nm,0.04,Nm
+nominal_load_n,1.932931008,N
+hard_gate_abs_command_min,0.6,command
+hard_gate_left_command_1radps,0.6323131498035484,command
+hard_gate_right_command_1radps,-0.6323131498035484,command
+hard_gate_lr_delta_1radps,1.2646262996070967,command delta
+hard_gate_extra_opposing_nm,0.06323252183652274,Nm
+hard_gate_pass,1,boolean

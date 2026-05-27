@@ -1,0 +1,17 @@
+parameter,value
+drive_scale,0.18
+longitudinal_mu,0.3435271386348845
+longitudinal_k_mps,0.41117778806189953
+mu_peak,5.0
+mu_slide,0.26196438238896513
+stribeck_speed_mps,0.020779848356735957
+low_speed_gate_mps,0.08
+lateral_sign_eps_mps,0.017227281918155857
+alpha_floor_mps,0.8
+alpha_knee,0.07244916490000017
+corner_mu_front,0.10248528274859375
+corner_mu_rear,0.05
+derived_static_extra_mu,7.496899889894687
+launch_total_opposing_nm,0.08036224420449659
+launch_static_solve_error_nm,-1.3877787807814457e-17
+objective_score,0.027549429394840515

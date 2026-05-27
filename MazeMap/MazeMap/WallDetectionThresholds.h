@@ -390,27 +390,6 @@ namespace MazeMap
             (measuredValue > onMeasuredThreshold);
     }
 
-    inline bool TryComputeLinearWallSignalDistanceThresholdM(float calibrationDistanceM, float signalFraction, float& distanceThresholdM)
-    {
-        distanceThresholdM = 0.0f;
-        if (!std::isfinite(calibrationDistanceM) ||
-            !std::isfinite(signalFraction) ||
-            calibrationDistanceM <= 0.0f ||
-            signalFraction <= 0.0f)
-        {
-            return false;
-        }
-
-        const float distanceScale = std::sqrt(1.0f / signalFraction);
-        if (!std::isfinite(distanceScale) || distanceScale <= 0.0f)
-        {
-            return false;
-        }
-
-        distanceThresholdM = calibrationDistanceM * distanceScale;
-        return std::isfinite(distanceThresholdM) && distanceThresholdM > 0.0f;
-    }
-
     inline bool TryComputeInverseSquareSignalAtDistanceFromReference(
         float referenceSignal,
         float referenceDistanceM,

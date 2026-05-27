@@ -1,0 +1,13 @@
+parameter,value,unit
+form,partition_low_ref_same_window,enum
+smoothstep,cubic,enum
+transition_variable,speed_hypot,enum
+v0_mps,0.0,m/s
+v1_mps,0.08,m/s
+rel_weight,1.0,dimensionless
+util_k,0.55,yield fraction
+launch_activation,cubic,enum
+k_launch_nm,0.05771872812904492,Nm
+k_unconstrained_nm,0.05736224124965836,Nm
+k_gate_min_nm,0.05771872812904492,Nm
+nominal_longitudinal_yield_nm,0.11096910450167499,Nm

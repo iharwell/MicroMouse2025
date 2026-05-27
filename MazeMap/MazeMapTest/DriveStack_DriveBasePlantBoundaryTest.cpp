@@ -151,7 +151,8 @@ namespace MazeMap
             static constexpr int kAccelerationTicks = 80;
             static constexpr int kMinimumDiagnosticTicks = 20;
 
-            bool commandsFinite = true;
+            bool leftCommandsFinite = true;
+            bool rightCommandsFinite = true;
             bool leftCommandsClamped = true;
             bool rightCommandsClamped = true;
             bool commandEvidenceValid = true;
@@ -162,6 +163,8 @@ namespace MazeMap
             float minimumVelocityMps = 0.0f;
             float maxAbsLeftCommand = 0.0f;
             float maxAbsRightCommand = 0.0f;
+            float finalLeftCommand = 0.0f;
+            float finalRightCommand = 0.0f;
             float finalComposedForwardAccelMps2 = 0.0f;
             std::uint16_t finalTelemetryValidFlags = 0U;
 
@@ -178,11 +181,14 @@ namespace MazeMap
                         harness.ProposeAndIntegrate(kNaN, 0.0f, 2.0f, 0.0f, kNaN);
                     const DriveTelemetry telemetry = harness.drive.LastTelemetry();
 
-                    commandsFinite = commandsFinite && command.IsFinite();
+                    leftCommandsFinite = leftCommandsFinite && std::isfinite(command.LeftCommand());
+                    rightCommandsFinite = rightCommandsFinite && std::isfinite(command.RightCommand());
                     leftCommandsClamped = leftCommandsClamped && std::fabs(command.LeftCommand()) <= 1.0f;
                     rightCommandsClamped = rightCommandsClamped && std::fabs(command.RightCommand()) <= 1.0f;
                     maxAbsLeftCommand = (std::max)(maxAbsLeftCommand, std::fabs(command.LeftCommand()));
                     maxAbsRightCommand = (std::max)(maxAbsRightCommand, std::fabs(command.RightCommand()));
+                    finalLeftCommand = command.LeftCommand();
+                    finalRightCommand = command.RightCommand();
                     commandEvidenceValid =
                         commandEvidenceValid &&
                         IsFlagSet(telemetry.telemetryValidFlags, DriveTelemetry::kTelemetryCommandEvidenceValid);
@@ -208,13 +214,16 @@ namespace MazeMap
             static constexpr int kVelocityTicks = 1500;
             static constexpr float kTargetForwardMps = 0.5f;
 
-            bool commandsFinite = true;
+            bool leftCommandsFinite = true;
+            bool rightCommandsFinite = true;
             bool commandEvidenceValid = true;
             bool requestedForwardPreserved = true;
             bool requestedYawRatePreserved = true;
             float minimumVelocityMps = 0.0f;
             float maximumVelocityMps = 0.0f;
             float finalVelocityMps = 0.0f;
+            float finalLeftCommand = 0.0f;
+            float finalRightCommand = 0.0f;
             float finalRequestedVelMps = 0.0f;
             float finalRequestedAccelMps2 = 0.0f;
             float finalRequestedYawRateRadps = 0.0f;
@@ -234,7 +243,8 @@ namespace MazeMap
                         harness.ProposeAndIntegrate(kTargetForwardMps, 0.0f, kNaN, 0.0f, kNaN);
                     const DriveTelemetry telemetry = harness.drive.LastTelemetry();
 
-                    commandsFinite = commandsFinite && command.IsFinite();
+                    leftCommandsFinite = leftCommandsFinite && std::isfinite(command.LeftCommand());
+                    rightCommandsFinite = rightCommandsFinite && std::isfinite(command.RightCommand());
                     commandEvidenceValid =
                         commandEvidenceValid &&
                         IsFlagSet(telemetry.telemetryValidFlags, DriveTelemetry::kTelemetryCommandEvidenceValid);
@@ -246,6 +256,8 @@ namespace MazeMap
                         std::fabs(telemetry.requestedYawRateRadps) <= 1.0e-6f;
 
                     const float velocityMps = harness.runtimeState.GetForwardVelocity();
+                    finalLeftCommand = command.LeftCommand();
+                    finalRightCommand = command.RightCommand();
                     minimumVelocityMps = (std::min)(minimumVelocityMps, velocityMps);
                     maximumVelocityMps = (std::max)(maximumVelocityMps, velocityMps);
                 }
@@ -267,7 +279,8 @@ namespace MazeMap
             static constexpr int kYawRateTicks = 500;
             static constexpr float kTargetYawRateRadps = 2.20f;
 
-            bool commandsFinite = true;
+            bool leftCommandsFinite = true;
+            bool rightCommandsFinite = true;
             bool commandEvidenceValid = true;
             bool requestedYawRatePreserved = true;
             bool forwardVelocityStayedBounded = true;
@@ -276,6 +289,8 @@ namespace MazeMap
             float maximumYawRateRadps = 0.0f;
             float finalYawRateRadps = 0.0f;
             float finalYawRad = 0.0f;
+            float finalLeftCommand = 0.0f;
+            float finalRightCommand = 0.0f;
             float finalRequestedYawRateRadps = 0.0f;
             std::uint16_t finalTelemetryValidFlags = 0U;
 
@@ -290,7 +305,8 @@ namespace MazeMap
                         harness.ProposeAndIntegrate(kNaN, kTargetYawRateRadps, kNaN, 0.0f, kNaN);
                     const DriveTelemetry telemetry = harness.drive.LastTelemetry();
 
-                    commandsFinite = commandsFinite && command.IsFinite();
+                    leftCommandsFinite = leftCommandsFinite && std::isfinite(command.LeftCommand());
+                    rightCommandsFinite = rightCommandsFinite && std::isfinite(command.RightCommand());
                     commandEvidenceValid =
                         commandEvidenceValid &&
                         IsFlagSet(telemetry.telemetryValidFlags, DriveTelemetry::kTelemetryCommandEvidenceValid);
@@ -304,6 +320,8 @@ namespace MazeMap
                         (std::max)(maxAbsForwardVelocityMps, std::fabs(harness.runtimeState.GetForwardVelocity()));
                     maximumYawRateRadps =
                         (std::max)(maximumYawRateRadps, harness.runtimeState.GetYawRate());
+                    finalLeftCommand = command.LeftCommand();
+                    finalRightCommand = command.RightCommand();
                     finalRequestedYawRateRadps = telemetry.requestedYawRateRadps;
                     finalTelemetryValidFlags = telemetry.telemetryValidFlags;
                 }
@@ -319,7 +337,8 @@ namespace MazeMap
             static constexpr float kTargetYawRad = 0.0f;
             static constexpr float kInitialYawRad = 0.35f;
 
-            bool commandsFinite = true;
+            bool leftCommandsFinite = true;
+            bool rightCommandsFinite = true;
             bool commandEvidenceValid = true;
             bool requestedHeadingPreserved = true;
             bool headingErrorStayedBounded = true;
@@ -329,6 +348,8 @@ namespace MazeMap
             float maxAbsHeadingErrorRad = 0.0f;
             float finalRequestedYawRad = 0.0f;
             float totalHeadingDelta = 0.0f;
+            float finalLeftCommand = 0.0f;
+            float finalRightCommand = 0.0f;
             std::uint16_t finalTelemetryValidFlags = 0U;
 
             HeadingHoldLongRunScenario()
@@ -346,7 +367,8 @@ namespace MazeMap
                     const float headingErrorRad =
                         AbsYawErrorRad(kTargetYawRad, harness.runtimeState.GetHeading());
 
-                    commandsFinite = commandsFinite && command.IsFinite();
+                    leftCommandsFinite = leftCommandsFinite && std::isfinite(command.LeftCommand());
+                    rightCommandsFinite = rightCommandsFinite && std::isfinite(command.RightCommand());
                     commandEvidenceValid =
                         commandEvidenceValid &&
                         IsFlagSet(telemetry.telemetryValidFlags, DriveTelemetry::kTelemetryCommandEvidenceValid);
@@ -357,6 +379,8 @@ namespace MazeMap
                     headingErrorStayedBounded =
                         headingErrorStayedBounded &&
                         (headingErrorRad <= initialHeadingErrorRad + 0.08f);
+                    finalLeftCommand = command.LeftCommand();
+                    finalRightCommand = command.RightCommand();
                     finalRequestedYawRad = telemetry.requestedYawRad;
                     finalTelemetryValidFlags = telemetry.telemetryValidFlags;
 					totalHeadingDelta += (NormalizeAngle(harness.runtimeState.GetYawRate() * 0.001f));
@@ -368,25 +392,38 @@ namespace MazeMap
         };
     }
 
-    TEST_CLASS(DriveStack_DriveBasePlantBoundaryTest)
+    TEST_CLASS(DriveStack_DriveBaseBoundarySnapshotTest)
     {
     public:
-        TEST_METHOD(ProposeBodyTick_BoundarySnapshot_CommandIsFinite)
+        TEST_METHOD(LeftCommandIsFinite)
         {
             const BoundarySnapshotScenario scenario;
             std::wstringstream message;
             message << L"DRV30_BOUNDARY_SNAPSHOT"
-                << L"\nfield=command_finite"
-                << L"\nactual_left=" << scenario.command.LeftCommand()
-                << L"\nactual_right=" << scenario.command.RightCommand()
-                << L"\ncriterion=isfinite(left)&&isfinite(right)";
+                << L"\nfield=left_command"
+                << L"\nactual=" << scenario.command.LeftCommand()
+                << L"\ncriterion=isfinite(actual)";
 
             Assert::IsTrue(
-                scenario.command.IsFinite(),
+                std::isfinite(scenario.command.LeftCommand()),
                 message.str().c_str());
         }
 
-        TEST_METHOD(ProposeBodyTick_BoundarySnapshot_LeftCommandIsClamped)
+        TEST_METHOD(RightCommandIsFinite)
+        {
+            const BoundarySnapshotScenario scenario;
+            std::wstringstream message;
+            message << L"DRV30_BOUNDARY_SNAPSHOT"
+                << L"\nfield=right_command"
+                << L"\nactual=" << scenario.command.RightCommand()
+                << L"\ncriterion=isfinite(actual)";
+
+            Assert::IsTrue(
+                std::isfinite(scenario.command.RightCommand()),
+                message.str().c_str());
+        }
+
+        TEST_METHOD(LeftCommandIsClamped)
         {
             const BoundarySnapshotScenario scenario;
             std::wstringstream message;
@@ -400,7 +437,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(ProposeBodyTick_BoundarySnapshot_RightCommandIsClamped)
+        TEST_METHOD(RightCommandIsClamped)
         {
             const BoundarySnapshotScenario scenario;
             std::wstringstream message;
@@ -414,7 +451,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(ProposeBodyTick_BoundarySnapshot_BodyProposalEvidenceIsSet)
+        TEST_METHOD(BodyProposalEvidenceIsSet)
         {
             const BoundarySnapshotScenario scenario;
             std::wstringstream message;
@@ -428,7 +465,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(ProposeBodyTick_BoundarySnapshot_ProposalSequenceEvidenceIsSet)
+        TEST_METHOD(ProposalSequenceEvidenceIsSet)
         {
             const BoundarySnapshotScenario scenario;
             std::wstringstream message;
@@ -442,7 +479,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(ProposeBodyTick_BoundarySnapshot_CommandEvidenceIsSet)
+        TEST_METHOD(CommandEvidenceIsSet)
         {
             const BoundarySnapshotScenario scenario;
             std::wstringstream message;
@@ -456,7 +493,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(ProposeBodyTick_BoundarySnapshot_LeftPlantCommandMatchesAccelerationFeedforward)
+        TEST_METHOD(LeftPlantCommandMatchesAccelerationFeedforward)
         {
             const BoundarySnapshotScenario scenario;
             std::wstringstream message;
@@ -473,7 +510,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(ProposeBodyTick_BoundarySnapshot_RightPlantCommandMatchesAccelerationFeedforward)
+        TEST_METHOD(RightPlantCommandMatchesAccelerationFeedforward)
         {
             const BoundarySnapshotScenario scenario;
             std::wstringstream message;
@@ -490,7 +527,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(ProposeBodyTick_BoundarySnapshot_LeftDriveCommandMatchesReturnedCommand)
+        TEST_METHOD(LeftDriveCommandMatchesReturnedCommand)
         {
             const BoundarySnapshotScenario scenario;
             std::wstringstream message;
@@ -507,7 +544,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(ProposeBodyTick_BoundarySnapshot_RightDriveCommandMatchesReturnedCommand)
+        TEST_METHOD(RightDriveCommandMatchesReturnedCommand)
         {
             const BoundarySnapshotScenario scenario;
             std::wstringstream message;
@@ -524,7 +561,12 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(VelocityFeedback_RequestedForwardMpsIsPreserved)
+    };
+
+    TEST_CLASS(DriveStack_DriveBaseVelocityFeedbackTest)
+    {
+    public:
+        TEST_METHOD(RequestedForwardMpsIsPreserved)
         {
             const FeedbackScenario scenario;
             std::wstringstream message;
@@ -542,7 +584,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(VelocityFeedback_RequestedYawRateRadpsIsPreserved)
+        TEST_METHOD(RequestedYawRateRadpsIsPreserved)
         {
             const FeedbackScenario scenario;
             std::wstringstream message;
@@ -560,7 +602,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(VelocityFeedback_RequestedForwardAccelMps2IsPreserved)
+        TEST_METHOD(RequestedForwardAccelMps2IsPreserved)
         {
             const FeedbackScenario scenario;
             std::wstringstream message;
@@ -578,7 +620,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(VelocityFeedback_RequestedYawAccelRadps2IsPreserved)
+        TEST_METHOD(RequestedYawAccelRadps2IsPreserved)
         {
             const FeedbackScenario scenario;
             std::wstringstream message;
@@ -596,7 +638,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(VelocityFeedback_RequestedYawRadIsPreserved)
+        TEST_METHOD(RequestedYawRadIsPreserved)
         {
             const FeedbackScenario scenario;
             std::wstringstream message;
@@ -614,7 +656,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(VelocityFeedback_ComposedForwardAccelerationUsesProductionPDOnce)
+        TEST_METHOD(ComposedForwardAccelerationUsesProductionPDOnce)
         {
             const FeedbackScenario scenario;
             const float expected =
@@ -634,7 +676,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(VelocityFeedback_ComposedYawAccelerationUsesProductionPDOnce)
+        TEST_METHOD(ComposedYawAccelerationUsesProductionPDOnce)
         {
             const FeedbackScenario scenario;
             const float expected =
@@ -655,22 +697,40 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(ClampEvidence_CommandIsFinite)
+    };
+
+    TEST_CLASS(DriveStack_DriveBaseClampEvidenceTest)
+    {
+    public:
+        TEST_METHOD(LeftCommandIsFinite)
         {
             const ClampScenario scenario;
             std::wstringstream message;
             message << L"DRV30_TELEMETRY_EVIDENCE"
-                << L"\nfield=clamp_command_finite"
-                << L"\nactual_left=" << scenario.command.LeftCommand()
-                << L"\nactual_right=" << scenario.command.RightCommand()
-                << L"\ncriterion=isfinite(left)&&isfinite(right)";
+                << L"\nfield=left_clamp_command"
+                << L"\nactual=" << scenario.command.LeftCommand()
+                << L"\ncriterion=isfinite(actual)";
 
             Assert::IsTrue(
-                scenario.command.IsFinite(),
+                std::isfinite(scenario.command.LeftCommand()),
                 message.str().c_str());
         }
 
-        TEST_METHOD(ClampEvidence_LeftCommandIsClamped)
+        TEST_METHOD(RightCommandIsFinite)
+        {
+            const ClampScenario scenario;
+            std::wstringstream message;
+            message << L"DRV30_TELEMETRY_EVIDENCE"
+                << L"\nfield=right_clamp_command"
+                << L"\nactual=" << scenario.command.RightCommand()
+                << L"\ncriterion=isfinite(actual)";
+
+            Assert::IsTrue(
+                std::isfinite(scenario.command.RightCommand()),
+                message.str().c_str());
+        }
+
+        TEST_METHOD(LeftCommandIsClamped)
         {
             const ClampScenario scenario;
             std::wstringstream message;
@@ -684,7 +744,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(ClampEvidence_RightCommandIsClamped)
+        TEST_METHOD(RightCommandIsClamped)
         {
             const ClampScenario scenario;
             std::wstringstream message;
@@ -698,7 +758,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(ClampEvidence_PlantVsDriveClampEvidenceIsVisible)
+        TEST_METHOD(PlantVsDriveClampEvidenceIsVisible)
         {
             const ClampScenario scenario;
             const float leftDelta =
@@ -722,7 +782,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(ClampEvidence_PlantCommandTelemetryFlagIsSet)
+        TEST_METHOD(PlantCommandTelemetryFlagIsSet)
         {
             const ClampScenario scenario;
             std::wstringstream message;
@@ -736,7 +796,12 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(SolverFailureEvidence_LeftCommandFallsBackToZero)
+    };
+
+    TEST_CLASS(DriveStack_DriveBaseSolverFailureEvidenceTest)
+    {
+    public:
+        TEST_METHOD(LeftCommandFallsBackToZero)
         {
             const SolverFailureScenario scenario;
             std::wstringstream message;
@@ -753,7 +818,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(SolverFailureEvidence_RightCommandFallsBackToZero)
+        TEST_METHOD(RightCommandFallsBackToZero)
         {
             const SolverFailureScenario scenario;
             std::wstringstream message;
@@ -770,7 +835,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(SolverFailureEvidence_CommandKindFlagIsSet)
+        TEST_METHOD(CommandKindFlagIsSet)
         {
             const SolverFailureScenario scenario;
             std::wstringstream message;
@@ -784,23 +849,42 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(AccelerationTargetLongRun_CommandsRemainFinite)
+    };
+
+    TEST_CLASS(DriveStack_DriveBaseAccelerationTargetLongRunTest)
+    {
+    public:
+        TEST_METHOD(LeftCommandsRemainFinite)
         {
             const AccelerationLongRunScenario scenario;
             std::wstringstream message;
             message << L"DRV30_ACCEL_TARGET_LONG_RUN"
-                << L"\nfield=command_finite"
-                << L"\nactual=" << scenario.commandsFinite
+                << L"\nfield=left_command"
+                << L"\nactual_final=" << scenario.finalLeftCommand
                 << L"\nmax_abs_left=" << scenario.maxAbsLeftCommand
-                << L"\nmax_abs_right=" << scenario.maxAbsRightCommand
-                << L"\ncriterion=all commands finite";
+                << L"\ncriterion=all samples finite";
 
             Assert::IsTrue(
-                scenario.commandsFinite,
+                scenario.leftCommandsFinite,
                 message.str().c_str());
         }
 
-        TEST_METHOD(AccelerationTargetLongRun_LeftCommandsRemainClamped)
+        TEST_METHOD(RightCommandsRemainFinite)
+        {
+            const AccelerationLongRunScenario scenario;
+            std::wstringstream message;
+            message << L"DRV30_ACCEL_TARGET_LONG_RUN"
+                << L"\nfield=right_command"
+                << L"\nactual_final=" << scenario.finalRightCommand
+                << L"\nmax_abs_right=" << scenario.maxAbsRightCommand
+                << L"\ncriterion=all samples finite";
+
+            Assert::IsTrue(
+                scenario.rightCommandsFinite,
+                message.str().c_str());
+        }
+
+        TEST_METHOD(LeftCommandsRemainClamped)
         {
             const AccelerationLongRunScenario scenario;
             std::wstringstream message;
@@ -814,7 +898,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(AccelerationTargetLongRun_RightCommandsRemainClamped)
+        TEST_METHOD(RightCommandsRemainClamped)
         {
             const AccelerationLongRunScenario scenario;
             std::wstringstream message;
@@ -828,7 +912,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(AccelerationTargetLongRun_CommandEvidenceRemainsVisible)
+        TEST_METHOD(CommandEvidenceRemainsVisible)
         {
             const AccelerationLongRunScenario scenario;
             std::wstringstream message;
@@ -842,7 +926,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(AccelerationTargetLongRun_AccelerationObjectiveIsPreserved)
+        TEST_METHOD(AccelerationObjectiveIsPreserved)
         {
             const AccelerationLongRunScenario scenario;
             std::wstringstream message;
@@ -857,7 +941,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(AccelerationTargetLongRun_TwentyTickResponseTrendsForward)
+        TEST_METHOD(TwentyTickResponseTrendsForward)
         {
             const AccelerationLongRunScenario scenario;
             std::wstringstream message;
@@ -872,7 +956,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(AccelerationTargetLongRun_FinalResponseAccumulatesForwardVelocity)
+        TEST_METHOD(FinalResponseAccumulatesForwardVelocity)
         {
             const AccelerationLongRunScenario scenario;
             std::wstringstream message;
@@ -887,7 +971,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(AccelerationTargetLongRun_ResponseDoesNotDivergeOppositeRequest)
+        TEST_METHOD(ResponseDoesNotDivergeOppositeRequest)
         {
             const AccelerationLongRunScenario scenario;
             std::wstringstream message;
@@ -901,22 +985,42 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(VelocityTargetLongRun_CommandsRemainFinite)
+    };
+
+    TEST_CLASS(DriveStack_DriveBaseVelocityTargetLongRunTest)
+    {
+    public:
+        TEST_METHOD(LeftCommandsRemainFinite)
         {
             const VelocityLongRunScenario scenario;
             std::wstringstream message;
             message << L"DRV30_VELOCITY_TARGET_LONG_RUN"
-                << L"\nfield=command_finite"
-                << L"\nactual=" << scenario.commandsFinite
+                << L"\nfield=left_command"
+                << L"\nactual_final=" << scenario.finalLeftCommand
                 << L"\nfinal_velocity_mps=" << scenario.finalVelocityMps
-                << L"\ncriterion=all commands finite";
+                << L"\ncriterion=all samples finite";
 
             Assert::IsTrue(
-                scenario.commandsFinite,
+                scenario.leftCommandsFinite,
                 message.str().c_str());
         }
 
-        TEST_METHOD(VelocityTargetLongRun_CommandEvidenceRemainsVisible)
+        TEST_METHOD(RightCommandsRemainFinite)
+        {
+            const VelocityLongRunScenario scenario;
+            std::wstringstream message;
+            message << L"DRV30_VELOCITY_TARGET_LONG_RUN"
+                << L"\nfield=right_command"
+                << L"\nactual_final=" << scenario.finalRightCommand
+                << L"\nfinal_velocity_mps=" << scenario.finalVelocityMps
+                << L"\ncriterion=all samples finite";
+
+            Assert::IsTrue(
+                scenario.rightCommandsFinite,
+                message.str().c_str());
+        }
+
+        TEST_METHOD(CommandEvidenceRemainsVisible)
         {
             const VelocityLongRunScenario scenario;
             std::wstringstream message;
@@ -930,7 +1034,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(VelocityTargetLongRun_RequestedForwardTargetIsPreserved)
+        TEST_METHOD(RequestedForwardTargetIsPreserved)
         {
             const VelocityLongRunScenario scenario;
             std::wstringstream message;
@@ -945,7 +1049,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(VelocityTargetLongRun_RequestedYawRateTargetIsPreserved)
+        TEST_METHOD(RequestedYawRateTargetIsPreserved)
         {
             const VelocityLongRunScenario scenario;
             std::wstringstream message;
@@ -960,7 +1064,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(VelocityTargetLongRun_ResponseApproachesPositiveTarget)
+        TEST_METHOD(ResponseApproachesPositiveTarget)
         {
             const VelocityLongRunScenario scenario;
             std::wstringstream message;
@@ -976,7 +1080,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(VelocityTargetLongRun_FinalVelocitySettlesNearTarget)
+        TEST_METHOD(FinalVelocitySettlesNearTarget)
         {
             const VelocityLongRunScenario scenario;
             std::wstringstream message;
@@ -991,7 +1095,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(VelocityTargetLongRun_ResponseDoesNotDivergeWithWrongSign)
+        TEST_METHOD(ResponseDoesNotDivergeWithWrongSign)
         {
             const VelocityLongRunScenario scenario;
             std::wstringstream message;
@@ -1005,7 +1109,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(VelocityTargetLongRun_ResponseDoesNotOvershootBeyondDiagnosticTolerance)
+        TEST_METHOD(ResponseDoesNotOvershootBeyondDiagnosticTolerance)
         {
             const VelocityLongRunScenario scenario;
             std::wstringstream message;
@@ -1020,22 +1124,42 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(YawRateTargetLongRun_CommandsRemainFinite)
+    };
+
+    TEST_CLASS(DriveStack_DriveBaseYawRateTargetLongRunTest)
+    {
+    public:
+        TEST_METHOD(LeftCommandsRemainFinite)
         {
             const YawRateLongRunScenario scenario;
             std::wstringstream message;
             message << L"DRV30_YAW_RATE_CLOSED_LOOP"
-                << L"\nfield=command_finite"
-                << L"\nactual=" << scenario.commandsFinite
+                << L"\nfield=left_command"
+                << L"\nactual_final=" << scenario.finalLeftCommand
                 << L"\nfinal_yaw_rate_radps=" << scenario.finalYawRateRadps
-                << L"\ncriterion=all commands finite";
+                << L"\ncriterion=all samples finite";
 
             Assert::IsTrue(
-                scenario.commandsFinite,
+                scenario.leftCommandsFinite,
                 message.str().c_str());
         }
 
-        TEST_METHOD(YawRateTargetLongRun_CommandEvidenceRemainsVisible)
+        TEST_METHOD(RightCommandsRemainFinite)
+        {
+            const YawRateLongRunScenario scenario;
+            std::wstringstream message;
+            message << L"DRV30_YAW_RATE_CLOSED_LOOP"
+                << L"\nfield=right_command"
+                << L"\nactual_final=" << scenario.finalRightCommand
+                << L"\nfinal_yaw_rate_radps=" << scenario.finalYawRateRadps
+                << L"\ncriterion=all samples finite";
+
+            Assert::IsTrue(
+                scenario.rightCommandsFinite,
+                message.str().c_str());
+        }
+
+        TEST_METHOD(CommandEvidenceRemainsVisible)
         {
             const YawRateLongRunScenario scenario;
             std::wstringstream message;
@@ -1049,7 +1173,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(YawRateTargetLongRun_RequestedYawRateTargetIsPreserved)
+        TEST_METHOD(RequestedYawRateTargetIsPreserved)
         {
             const YawRateLongRunScenario scenario;
             std::wstringstream message;
@@ -1064,7 +1188,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(YawRateTargetLongRun_ResponseBuildsClockwiseYawRate)
+        TEST_METHOD(ResponseBuildsClockwiseYawRate)
         {
             const YawRateLongRunScenario scenario;
             std::wstringstream message;
@@ -1079,7 +1203,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(YawRateTargetLongRun_FinalYawRateSettlesNearTarget)
+        TEST_METHOD(FinalYawRateSettlesNearTarget)
         {
             const YawRateLongRunScenario scenario;
             std::wstringstream message;
@@ -1096,7 +1220,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(YawRateTargetLongRun_DoesNotCreateLargeForwardDrift)
+        TEST_METHOD(DoesNotCreateLargeForwardDrift)
         {
             const YawRateLongRunScenario scenario;
             std::wstringstream message;
@@ -1110,22 +1234,42 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(HeadingHoldLongRun_CommandsRemainFinite)
+    };
+
+    TEST_CLASS(DriveStack_DriveBaseHeadingHoldLongRunTest)
+    {
+    public:
+        TEST_METHOD(LeftCommandsRemainFinite)
         {
             const HeadingHoldLongRunScenario scenario;
             std::wstringstream message;
             message << L"DRV30_HEADING_CLOSED_LOOP"
-                << L"\nfield=command_finite"
-                << L"\nactual=" << scenario.commandsFinite
+                << L"\nfield=left_command"
+                << L"\nactual_final=" << scenario.finalLeftCommand
                 << L"\nfinal_heading_error_rad=" << scenario.finalHeadingErrorRad
-                << L"\ncriterion=all commands finite";
+                << L"\ncriterion=all samples finite";
 
             Assert::IsTrue(
-                scenario.commandsFinite,
+                scenario.leftCommandsFinite,
                 message.str().c_str());
         }
 
-        TEST_METHOD(HeadingHoldLongRun_CommandEvidenceRemainsVisible)
+        TEST_METHOD(RightCommandsRemainFinite)
+        {
+            const HeadingHoldLongRunScenario scenario;
+            std::wstringstream message;
+            message << L"DRV30_HEADING_CLOSED_LOOP"
+                << L"\nfield=right_command"
+                << L"\nactual_final=" << scenario.finalRightCommand
+                << L"\nfinal_heading_error_rad=" << scenario.finalHeadingErrorRad
+                << L"\ncriterion=all samples finite";
+
+            Assert::IsTrue(
+                scenario.rightCommandsFinite,
+                message.str().c_str());
+        }
+
+        TEST_METHOD(CommandEvidenceRemainsVisible)
         {
             const HeadingHoldLongRunScenario scenario;
             std::wstringstream message;
@@ -1139,7 +1283,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(HeadingHoldLongRun_RequestedHeadingTargetIsPreserved)
+        TEST_METHOD(RequestedHeadingTargetIsPreserved)
         {
             const HeadingHoldLongRunScenario scenario;
             std::wstringstream message;
@@ -1154,7 +1298,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(HeadingHoldLongRun_PhysicalPlantReducesHeadingError)
+        TEST_METHOD(PhysicalPlantReducesHeadingError)
         {
             const HeadingHoldLongRunScenario scenario;
             std::wstringstream message;
@@ -1169,7 +1313,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(HeadingHoldLongRun_HeadingErrorStaysBoundedDuringCorrection)
+        TEST_METHOD(HeadingErrorStaysBoundedDuringCorrection)
         {
             const HeadingHoldLongRunScenario scenario;
             std::wstringstream message;
@@ -1184,7 +1328,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(HeadingHoldLongRun_FinalYawRateIsDamped)
+        TEST_METHOD(FinalYawRateIsDamped)
         {
             const HeadingHoldLongRunScenario scenario;
             std::wstringstream message;
@@ -1198,7 +1342,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(HeadingHoldLongRun_SingleTurn)
+        TEST_METHOD(SingleTurn)
         {
             const HeadingHoldLongRunScenario scenario;
             std::wstringstream message;

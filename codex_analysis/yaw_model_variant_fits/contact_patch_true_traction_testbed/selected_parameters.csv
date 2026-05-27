@@ -1,0 +1,15 @@
+parameter,value
+name,per_patch_full_yaw
+gate_scope,per_patch
+reserve_yield,full_yaw
+speed_knee_mps,0.5
+util_knee,0.16
+rel_weight,1.0
+speed_fade_mps,0.64
+force_sliding_nm,0.064
+nominal_total_load_n,1.932931008
+mu_ref,1.3566434596717898
+nominal_longitudinal_yield_nm,0.11096910450167499
+nominal_full_yaw_yield_nm,0.1175168045456451
+rows,118580
+runs,49

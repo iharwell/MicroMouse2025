@@ -1,0 +1,8 @@
+variant,passes_abs_command_gate,passes_command_invariance_rule,production_status,reason
+Current baseline,False,True,rejected_low_command_gate,current PlantModel right-contact scrub approximation
+Variant B Stribeck scrub,True,False,diagnostic_reference_only_if_request_activated,prior B hard-gate reference
+Variant C combined slip,False,,rejected_low_command_gate,prior C lower-command reference
+LuGre_state_steady,True,False,rejected_current_request_driven_form,round2 one-state steady bristle equilibrium
+LuGre_state_cold20ms,True,False,rejected_current_request_driven_form,round2 one-state response after 20 ms from zero bristle state
+LuGre_memoryless_eq,True,False,rejected_current_request_driven_form,round2 algebraic equilibrium approximation
+Revised force/slip-driven LuGre,,True,recommended_next_fit_not_yet_scored,"Drive bristle state from contact slip, normal load, and actual tangential contact force history; refit must still meet +0.6/-0.6 gate."

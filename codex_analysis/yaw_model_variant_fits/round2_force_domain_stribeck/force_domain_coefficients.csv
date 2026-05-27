@@ -1,0 +1,13 @@
+parameter,value,unit
+activation_source,projected_force_moment_utilization,enum
+yield_geometry,longitudinal_moment_support,enum
+nominal_longitudinal_yield_nm,0.11096910450167499,Nm
+nominal_full_yaw_yield_nm,0.1175168045456451,Nm
+equivalent_activation_nm,0.035,Nm at nominal load
+utilization_activation,0.3154031039285507,dimensionless
+stribeck_speed_mps,0.025,m/s
+speed_fade_mps,0.64,m/s
+rel_weight,0.75,dimensionless
+static_extra_nm,0.0,Nm
+sliding_nm,0.06741675635026155,Nm
+weighted_train_opposes_rmse_nm,0.024088350221216342,Nm

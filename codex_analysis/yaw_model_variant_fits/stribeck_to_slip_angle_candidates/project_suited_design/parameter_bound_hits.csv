@@ -1,0 +1,13 @@
+parameter,lower,value,upper,near_lower,near_upper
+drive_scale,0.03,0.18,0.18,False,True
+longitudinal_mu,0.0,0.3435271386348845,1.2,False,False
+longitudinal_k_mps,0.02,0.41117778806189953,0.7,False,False
+mu_peak,1.65,5.0,5.0,False,True
+mu_slide,0.0,0.26196438238896513,0.5,False,False
+stribeck_speed_mps,0.02,0.020779848356735957,0.45,True,False
+low_speed_gate_mps,0.08,0.08,0.6,True,False
+lateral_sign_eps_mps,0.001,0.017227281918155857,0.05,False,False
+alpha_floor_mps,0.03,0.8,0.8,False,True
+alpha_knee,0.02,0.07244916490000017,0.9,False,False
+corner_mu_front,0.05,0.10248528274859375,3.5,False,False
+corner_mu_rear,0.05,0.05,3.5,True,False

@@ -443,14 +443,6 @@ namespace MazeMap
         snapshot.SetLeftTiming(_vehicle.SideLeftWallSensor().LatestTiming());
         snapshot.SetRightTiming(_vehicle.SideRightWallSensor().LatestTiming());
 
-        float sideWallOnThresholdM = Config::kSideWallOnThresholdM;
-        float sideWallOffThresholdM = Config::kSideWallOffThresholdM;
-        _wallCalibration.TryComputeSideWallDistanceThresholds(
-            Config::kSideWallDistanceLatchFractionOfCalibration,
-            Config::kSideWallDistanceReleaseFractionOfCalibration,
-            sideWallOnThresholdM,
-            sideWallOffThresholdM);
-
         snapshot.SetFrontLeftDistanceM(frontLeftDistanceM);
         snapshot.SetFrontRightDistanceM(frontRightDistanceM);
         snapshot.SetFrontLeftDifferentialLight(frontLeftDifferentialLight);
@@ -551,19 +543,12 @@ namespace MazeMap
             sideRightSignalRise,
             sideRightLatchRiseThreshold,
             sideRightMissRiseThreshold);
-        const bool sideLeftFallbackValid =
-            _wallCalibration.IsSideWallFallbackDistanceValid(sideLeftRawDistanceM);
-        const bool sideRightFallbackValid =
-            _wallCalibration.IsSideWallFallbackDistanceValid(sideRightRawDistanceM);
-
         const bool sideLeftObservationEligible = _wallCalibration.IsSideWallObservationEligible(
             sideLeftWindowValid,
-            sideLeftSignalClassifiable,
-            sideLeftFallbackValid);
+            sideLeftSignalClassifiable);
         const bool sideRightObservationEligible = _wallCalibration.IsSideWallObservationEligible(
             sideRightWindowValid,
-            sideRightSignalClassifiable,
-            sideRightFallbackValid);
+            sideRightSignalClassifiable);
 
         snapshot.SetLeftTransitionDetected(_wallCalibration.DetectSideWallTransitionFromSignalRise(
             sideLeftWindowValid,
@@ -586,19 +571,13 @@ namespace MazeMap
             snapshot.LeftTransitionDetected(),
             sideLeftSignalMetricsValid,
             sideLeftSignalRise,
-            sideLeftLatchRiseThreshold,
-            sideLeftFallbackValid,
-            sideLeftRawDistanceM,
-            sideWallOffThresholdM);
+            sideLeftLatchRiseThreshold);
         const bool sideRightControlRangeValid = _wallCalibration.IsSideWallControlRangeValid(
             sideRightObservationEligible,
             snapshot.RightTransitionDetected(),
             sideRightSignalMetricsValid,
             sideRightSignalRise,
-            sideRightLatchRiseThreshold,
-            sideRightFallbackValid,
-            sideRightRawDistanceM,
-            sideWallOffThresholdM);
+            sideRightLatchRiseThreshold);
         snapshot.SetLeftWallObservationWindowValid(sideLeftObservationEligible);
         snapshot.SetRightWallObservationWindowValid(sideRightObservationEligible);
         snapshot.SetLeftDistanceValidForControl(sideLeftControlRangeValid);
@@ -606,9 +585,6 @@ namespace MazeMap
         snapshot.SetLeftWall(_wallCalibration.UpdateSideWallState(
             MazeMap::RelativeDirection::Left90,
             sideLeftDifferentialLight,
-            sideLeftRawDistanceM,
-            sideWallOnThresholdM,
-            sideWallOffThresholdM,
             sideLeftWindowValid,
             _sideLeftWallSignalFiltered,
             _sideLeftWallSignalInitialized,
@@ -616,9 +592,6 @@ namespace MazeMap
         snapshot.SetRightWall(_wallCalibration.UpdateSideWallState(
             MazeMap::RelativeDirection::Right90,
             sideRightDifferentialLight,
-            sideRightRawDistanceM,
-            sideWallOnThresholdM,
-            sideWallOffThresholdM,
             sideRightWindowValid,
             _sideRightWallSignalFiltered,
             _sideRightWallSignalInitialized,
@@ -626,14 +599,10 @@ namespace MazeMap
         snapshot.SetLeftWallObservation(_wallCalibration.ComputeSideWallObservationHit(
             MazeMap::RelativeDirection::Left90,
             sideLeftDifferentialLight,
-            sideLeftRawDistanceM,
-            sideWallOnThresholdM,
             sideLeftObservationEligible));
         snapshot.SetRightWallObservation(_wallCalibration.ComputeSideWallObservationHit(
             MazeMap::RelativeDirection::Right90,
             sideRightDifferentialLight,
-            sideRightRawDistanceM,
-            sideWallOnThresholdM,
             sideRightObservationEligible));
 
         snapshot.SetFrontLeftTelemetryValues(

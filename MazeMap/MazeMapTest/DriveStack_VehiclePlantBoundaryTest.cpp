@@ -21,12 +21,24 @@ namespace MazeMap
         {
             Vehicle::WheelSpeedsFromBodyVelocity(0.72f, 1.35f, leftWheelSpeedRadps, rightWheelSpeedRadps);
         }
+
+        App::Internal::CommandVector MakeForwardFeedforwardCommand()
+        {
+            Vehicle vehicle;
+            VehicleState runtimeState;
+            PlantModel plant(vehicle, runtimeState);
+            runtimeState.SetForwardVelocity(0.30f);
+            runtimeState.SetWheelSpeedLeft(Vehicle::WheelSpeedFromLinearVelocity(0.30f));
+            runtimeState.SetWheelSpeedRight(Vehicle::WheelSpeedFromLinearVelocity(0.30f));
+
+            return plant.ComputeFeedforward(1.20f, 0.0f);
+        }
     }
 
     TEST_CLASS(DriveStack_VehiclePlantBoundaryTest)
     {
     public:
-        TEST_METHOD(VehicleMass_DrivesPlantLongitudinalTechnicalLimit)
+        TEST_METHOD(MassDrivesLongitudinalTechnicalLimit)
         {
             Vehicle vehicle;
             VehicleState runtimeState;
@@ -61,7 +73,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(VehicleTrackWidth_DrivesMeasuredYawRate)
+        TEST_METHOD(TrackWidthDrivesMeasuredYawRate)
         {
             Vehicle vehicle;
             VehicleState runtimeState;
@@ -87,7 +99,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(VehicleYawInertia_DrivesPlantYawTechnicalLimit)
+        TEST_METHOD(YawInertiaDrivesYawTechnicalLimit)
         {
             Vehicle vehicle;
             VehicleState runtimeState;
@@ -122,7 +134,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(VehicleWheelRadius_DrivesMeasuredLinearSpeed)
+        TEST_METHOD(WheelRadiusDrivesMeasuredLinearSpeed)
         {
             Vehicle vehicle;
             VehicleState runtimeState;
@@ -148,7 +160,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(VehicleSustainedAcceleration_DrivesPlantUsage)
+        TEST_METHOD(SustainedAccelerationDrivesUsage)
         {
             Vehicle vehicle;
             VehicleState runtimeState;
@@ -170,7 +182,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(PlantDynamics_LateralAccelerationMatchesVehicleSustainedReference)
+        TEST_METHOD(LateralAccelerationMatchesSustainedReference)
         {
             Vehicle vehicle;
             VehicleState runtimeState;
@@ -196,7 +208,39 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(AccelerationFeedforward_ForwardRequestProducesPositivePlantAcceleration)
+        TEST_METHOD(ForwardFeedforwardLeftCommandIsFinite)
+        {
+            const App::Internal::CommandVector command =
+                MakeForwardFeedforwardCommand();
+            std::wstringstream message;
+            message << L"PM05_VEHICLE_PLANT_BOUNDARY"
+                << L"\nfield=forward_feedforward_left_command"
+                << L"\nleft_command=" << command.LeftCommand()
+                << L"\nright_command=" << command.RightCommand()
+                << L"\ncriterion=isfinite(left)";
+
+            Assert::IsTrue(
+                std::isfinite(command.LeftCommand()),
+                message.str().c_str());
+        }
+
+        TEST_METHOD(ForwardFeedforwardRightCommandIsFinite)
+        {
+            const App::Internal::CommandVector command =
+                MakeForwardFeedforwardCommand();
+            std::wstringstream message;
+            message << L"PM05_VEHICLE_PLANT_BOUNDARY"
+                << L"\nfield=forward_feedforward_right_command"
+                << L"\nleft_command=" << command.LeftCommand()
+                << L"\nright_command=" << command.RightCommand()
+                << L"\ncriterion=isfinite(right)";
+
+            Assert::IsTrue(
+                std::isfinite(command.RightCommand()),
+                message.str().c_str());
+        }
+
+        TEST_METHOD(ForwardFeedforwardProducesPositiveAcceleration)
         {
             Vehicle vehicle;
             VehicleState runtimeState;
@@ -209,28 +253,21 @@ namespace MazeMap
                 plant.ComputeFeedforward(1.20f, 0.0f);
             const float initialForwardVelocityMps = runtimeState.GetForwardVelocity();
             plant.integrate(command, 0.001f);
-            std::wstringstream commandMessage;
-            commandMessage << L"PM05_VEHICLE_PLANT_BOUNDARY"
-                << L"\nfield=forward_feedforward_command_finite"
-                << L"\nleft_command=" << command.LeftCommand()
-                << L"\nright_command=" << command.RightCommand()
-                << L"\ncriterion=isfinite(left)&&isfinite(right)";
-            std::wstringstream accelMessage;
-            accelMessage << L"PM05_VEHICLE_PLANT_BOUNDARY"
+            std::wstringstream message;
+            message << L"PM05_VEHICLE_PLANT_BOUNDARY"
                 << L"\nfield=forward_velocity_after_step_mps"
                 << L"\ninitial=" << initialForwardVelocityMps
                 << L"\nactual=" << runtimeState.GetForwardVelocity()
-                << L"\ncriterion=actual>initial";
+                << L"\ncriterion=actual>initial"
+                << L"\nleft_command=" << command.LeftCommand()
+                << L"\nright_command=" << command.RightCommand();
 
-            Assert::IsTrue(
-                command.IsFinite(),
-                commandMessage.str().c_str());
             Assert::IsTrue(
                 runtimeState.GetForwardVelocity() > initialForwardVelocityMps,
-                accelMessage.str().c_str());
+                message.str().c_str());
         }
 
-        TEST_METHOD(AccelerationFeedforward_ForwardRequestKeepsWheelCommandsSymmetric)
+        TEST_METHOD(ForwardFeedforwardKeepsWheelCommandsSymmetric)
         {
             Vehicle vehicle;
             VehicleState runtimeState;
@@ -255,7 +292,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(AccelerationFeedforward_ClockwiseYawRequestCommandsLeftAboveRight)
+        TEST_METHOD(ClockwiseYawFeedforwardCommandsLeftAboveRight)
         {
             Vehicle vehicle;
             VehicleState runtimeState;
@@ -275,7 +312,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(AccelerationFeedforward_ClockwiseYawRequestProducesPositiveYawAcceleration)
+        TEST_METHOD(ClockwiseYawFeedforwardProducesPositiveYawAcceleration)
         {
             Vehicle vehicle;
             VehicleState runtimeState;
@@ -298,7 +335,7 @@ namespace MazeMap
         }
 
         // This is based on directly observed yaw motion thresholds.
-        TEST_METHOD(YawFeedforwardGivesRealisticCommand)
+        TEST_METHOD(YawFeedforwardExceedsObservedThreshold)
         {
             Vehicle vehicle;
             VehicleState runtimeState;
@@ -318,7 +355,7 @@ namespace MazeMap
         }
 
         // This is based on directly observed yaw motion thresholds.
-        TEST_METHOD(YawFeedforwardGivesRealisticCommandWithRotation)
+        TEST_METHOD(YawFeedforwardWithInitialRotationExceedsObservedThreshold)
         {
             Vehicle vehicle;
             VehicleState runtimeState;
@@ -337,7 +374,7 @@ namespace MazeMap
                 ((command.LeftCommand() - command.RightCommand()) / 2.0f) > 0.55f,
                 message.str().c_str());
         }
-        TEST_METHOD(StraightFeedforwardGivesRealisticCommand)
+        TEST_METHOD(StraightFeedforwardExceedsObservedThreshold)
         {
             Vehicle vehicle;
             VehicleState runtimeState;
@@ -356,7 +393,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(Kinematics_VehicleWheelSpeedsRoundTripThroughPlantMeasuredSpeed)
+        TEST_METHOD(WheelSpeedsRoundTripThroughMeasuredSpeed)
         {
             Vehicle vehicle;
             VehicleState runtimeState;
@@ -383,7 +420,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(Kinematics_VehicleWheelSpeedsRoundTripThroughPlantMeasuredYawRate)
+        TEST_METHOD(WheelSpeedsRoundTripThroughMeasuredYawRate)
         {
             Vehicle vehicle;
             VehicleState runtimeState;

@@ -1,0 +1,44 @@
+{
+  "boundary_margin_fraction": 0.03,
+  "candidate_inputs": [
+    "abs_yawRate",
+    "abs_Vf",
+    "total_normal_load",
+    "drive_wheel_longitudinal_offset"
+  ],
+  "initial_ranges": {
+    "delta_k": [
+      0.00012,
+      5.0
+    ],
+    "k1": [
+      0.00012,
+      2.5
+    ],
+    "k3_radps": [
+      0.004,
+      2.0
+    ],
+    "load_exponent": [
+      0.0,
+      1.5
+    ],
+    "rel_weight": [
+      -3.0,
+      3.0
+    ],
+    "speed_fade_mps": [
+      0.01,
+      5.0
+    ],
+    "stribeck_speed_mps": [
+      0.00016,
+      0.65
+    ]
+  },
+  "launch_min_command": 0.6,
+  "launch_target_command": 0.646,
+  "launch_target_extra_nm": 0.06556799420449655,
+  "max_reasonable_peak_nm": 0.12,
+  "slope_policy": "derived_only_no_independent_linear_slope"
+}

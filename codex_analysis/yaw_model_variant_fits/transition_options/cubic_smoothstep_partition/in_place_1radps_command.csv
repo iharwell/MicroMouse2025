@@ -1,0 +1,2 @@
+variant,extra_opposing_yaw_torque_nm,total_opposing_yaw_torque_nm,left_command,right_command,lr_delta_command,max_abs_command,passes_abs_0p6_gate
+selected_smoothstep_partition,0.05771872812904492,0.07251297812904492,0.6,-0.6,1.2,0.6,True

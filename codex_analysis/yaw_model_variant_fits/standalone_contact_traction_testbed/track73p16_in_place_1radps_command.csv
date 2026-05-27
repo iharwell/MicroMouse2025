@@ -1,0 +1,2 @@
+family,yaw_rate_radps,forward_velocity_mps,right_velocity_mps,opposing_scrub_nm,left_command,right_command,max_abs_command,gate_pass
+yaw_static_yield_patch,1.0,0.0,0.0,0.0074777605915693525,0.6475862793170275,-0.6475862793170275,0.6475862793170275,True

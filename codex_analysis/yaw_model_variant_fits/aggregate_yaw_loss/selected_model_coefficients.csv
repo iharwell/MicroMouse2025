@@ -1,0 +1,8 @@
+model,family,physical_yaw_loss,params,feature,coefficient_nm_per_feature_unit
+E1_viscous_yaw_rate_nnls,pure_loss_viscous,True,loss = k_yaw * |yaw_rate|,abs_yaw_rate_radps,0.0
+E5_contact_faded_loss_nnls_yaw0_0.5_vrel0_0.01,pure_loss_contact_faded,True,loss = gate_vrel(0.01) * [tau_c*tanh(|yaw|/0.5) + k_yaw*|yaw|],vrel_gate_0.01_tanh_yaw_0.5,0.036898560753300884
+E5_contact_faded_loss_nnls_yaw0_0.5_vrel0_0.01,pure_loss_contact_faded,True,loss = gate_vrel(0.01) * [tau_c*tanh(|yaw|/0.5) + k_yaw*|yaw|],vrel_gate_0.01_abs_yaw,0.02461646427363359
+E8_signed_contact_relief_yaw0_0.1_vrel0_0.03,signed_contact_relief_not_pure_loss,False,loss_or_relief = tau_c*tanh(|yaw|/0.1) + k_yaw*|yaw| + tau_h*high_vrel(0.03)*tanh(|yaw|/0.1) + k_h*high_vrel(0.03)*|yaw|,tanh_yaw_0.1,0.010867613509128227
+E8_signed_contact_relief_yaw0_0.1_vrel0_0.03,signed_contact_relief_not_pure_loss,False,loss_or_relief = tau_c*tanh(|yaw|/0.1) + k_yaw*|yaw| + tau_h*high_vrel(0.03)*tanh(|yaw|/0.1) + k_h*high_vrel(0.03)*|yaw|,abs_yaw_rate_radps,0.0047070943228322846
+E8_signed_contact_relief_yaw0_0.1_vrel0_0.03,signed_contact_relief_not_pure_loss,False,loss_or_relief = tau_c*tanh(|yaw|/0.1) + k_yaw*|yaw| + tau_h*high_vrel(0.03)*tanh(|yaw|/0.1) + k_h*high_vrel(0.03)*|yaw|,high_vrel_0.03_tanh_yaw_0.1,0.0023611855934473755
+E8_signed_contact_relief_yaw0_0.1_vrel0_0.03,signed_contact_relief_not_pure_loss,False,loss_or_relief = tau_c*tanh(|yaw|/0.1) + k_yaw*|yaw| + tau_h*high_vrel(0.03)*tanh(|yaw|/0.1) + k_h*high_vrel(0.03)*|yaw|,high_vrel_0.03_abs_yaw,-0.0074428929313076365

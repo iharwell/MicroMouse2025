@@ -1,0 +1,19 @@
+{
+  "anchor_extra_opposing_yaw_torque_nm": 0.06501335920678508,
+  "anchor_vf_mps": 0.0,
+  "anchor_yaw_rate_radps": 1.0,
+  "bristle_velocity_mps": 0.008,
+  "direction_convention": "positive yaw clockwise; raw correction = -direction * opposing correction",
+  "feature_count": 27,
+  "fwd_knee_mps": 0.7,
+  "model": "Hybrid_BC_adhesion_partition",
+  "moving_surface_source": "fit from physical projected-force/contact-velocity features",
+  "nominal_load_n": 1.932931008,
+  "rel_weight": 0.75,
+  "ridge": 0.1,
+  "slide_gate_power": 2.0,
+  "speed_fade_mps": 0.64,
+  "static_branch_source": "Variant B Stribeck coefficient ratio scaled to physical velocity/load bristle basis",
+  "stribeck_speed_mps": 0.1,
+  "vrel_knee_mps": 0.05
+}

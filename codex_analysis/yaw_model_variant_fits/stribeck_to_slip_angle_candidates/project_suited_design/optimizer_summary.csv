@@ -1,0 +1,2 @@
+optimizer,scipy_available,de_population,de_generations,de_sample_rows,polish_rows,polish_iterations,de_best_objective,final_objective,objective_primary_weight,objective_downweighted_weight,objective_latest_may4_weight
+custom differential_evolution_plus_coordinate_polish,False,54,58,22000,80243,56,0.025978255888160943,0.027549429394840515,0.72,0.18,0.1

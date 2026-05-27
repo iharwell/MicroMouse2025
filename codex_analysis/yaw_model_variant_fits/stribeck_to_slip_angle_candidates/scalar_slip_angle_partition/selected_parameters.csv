@@ -1,0 +1,14 @@
+parameter,value
+yaw_activation_mps,0.057682038124963024
+stribeck_speed_mps,0.07146918769038813
+slide_ratio,2.0280018221555568e-11
+speed_gate_mps,0.004883232360091756
+v_floor_mps,0.07305332178587702
+alpha_knee_rad,0.020827970812773176
+slip_cap_nm,0.009510909223110908
+alpha_lever_m,0.027195486476626084
+stribeck_quartic_fixed,0.2
+derived_static_peak_nm,0.24807180772354895
+launch_extra_opposing_nm,0.06556799420449656
+launch_target_abs_command,0.646
+nominal_load_n,1.932931008

@@ -48,6 +48,177 @@ namespace MazeMap
         return static_cast<float>(fallbackSign);
     }
 
+    float PlantModel::PositivePart(const float value) noexcept
+    {
+        return (std::isfinite(value) && (value > 0.0f)) ? value : 0.0f;
+    }
+
+    float PlantModel::PositiveFiniteOrDefault(const float value, const float fallback) noexcept
+    {
+        return (std::isfinite(value) && (value > 0.0f)) ? value : fallback;
+    }
+
+    float PlantModel::RationalSquareGate(const float value, const float knee) noexcept
+    {
+        const float resolvedValue = std::isfinite(value) ? value : 0.0f;
+        const float resolvedKnee = PositiveFiniteOrDefault(knee, 1.0e-6f);
+        const float value2 = resolvedValue * resolvedValue;
+        const float knee2 = resolvedKnee * resolvedKnee;
+        const float denominator = value2 + knee2;
+        return (denominator > 0.0f) ? (value2 / denominator) : 0.0f;
+    }
+
+    float PlantModel::loadWeightedContactRelativeSpeedMps(
+        const WheelKinematics& kinematics,
+        const std::array<float, 4>& contactNormalLoadN,
+        const float totalNormalLoadN) noexcept
+    {
+        const float normalSum = (totalNormalLoadN > kForceEpsilonN) ? totalNormalLoadN : kForceEpsilonN;
+        float weightedSpeed2 = 0.0f;
+        for (uint8_t contactIndex = 0U; contactIndex < 4U; ++contactIndex)
+        {
+            const ContactKinematics& contactKinematics = kinematics._contacts[contactIndex];
+            const float rightSpeed = contactKinematics._rightRelativeVelocityMps;
+            const float forwardSpeed = contactKinematics._forwardRelativeVelocityMps;
+            weightedSpeed2 +=
+                (std::max)(0.0f, contactNormalLoadN[contactIndex]) *
+                ((rightSpeed * rightSpeed) + (forwardSpeed * forwardSpeed));
+        }
+        return MazeMap::Math::Sqrtf((std::max)(0.0f, weightedSpeed2 / normalSum));
+    }
+
+    float PlantModel::yawResidualOpposingMomentNm(
+        const float forwardVelocityMps,
+        const float contactRelativeSpeedMps,
+        const float projectedYawMomentAlongYawNm,
+        const float yawMomentYieldNm,
+        const float variantCOpposingMomentNm) const noexcept
+    {
+        const float relWeight = PositiveFiniteOrDefault(
+            _yawResidualForceRelWeight,
+            kDefaultYawResidualForceRelWeight);
+        const float speedV2 =
+            (forwardVelocityMps * forwardVelocityMps) +
+            ((relWeight * contactRelativeSpeedMps) * (relWeight * contactRelativeSpeedMps));
+        const float speedKnee = PositiveFiniteOrDefault(
+            _yawResidualBlendSpeedKneeMps,
+            kDefaultYawResidualBlendSpeedKneeMps);
+        const float speedKnee2 = speedKnee * speedKnee;
+        const float speedLow =
+            (speedKnee2 > 0.0f) ? (speedKnee2 / (speedKnee2 + (std::max)(0.0f, speedV2))) : 0.0f;
+        const float resolvedYieldNm = PositiveFiniteOrDefault(yawMomentYieldNm, kForceEpsilonN);
+        const float utilization = PositivePart(projectedYawMomentAlongYawNm) / resolvedYieldNm;
+        const float forceGate = RationalSquareGate(utilization, _yawResidualBlendForceKnee);
+        const float speedFade = PositiveFiniteOrDefault(
+            _yawResidualForceSpeedFadeMps,
+            kDefaultYawResidualForceSpeedFadeMps);
+        const float speedFade2 = speedFade * speedFade;
+        const float speedRelief =
+            (speedFade2 > 0.0f) ? (speedFade2 / (speedFade2 + (std::max)(0.0f, speedV2))) : 0.0f;
+        const float forceBranchOpposingMomentNm =
+            speedRelief *
+            PositiveFiniteOrDefault(_yawResidualForceSlidingMomentNm, kDefaultYawResidualForceSlidingMomentNm);
+        const float blend = (std::clamp)(speedLow * forceGate, 0.0f, 1.0f);
+        const float residualOpposingMomentNm =
+            variantCOpposingMomentNm + (blend * (forceBranchOpposingMomentNm - variantCOpposingMomentNm));
+        return std::isfinite(residualOpposingMomentNm) ? residualOpposingMomentNm : 0.0f;
+    }
+
+    float PlantModel::variantCYawResidualOpposingMomentNm(
+        const float yawDirection,
+        const float forwardVelocityMps,
+        const WheelKinematics& kinematics,
+        const std::array<float, 4>& contactRightPositionsM,
+        const std::array<float, 4>& contactForwardPositionsM,
+        const std::array<float, 4>& contactNormalLoadN,
+        const std::array<float, 4>& projectedForwardForceN,
+        const std::array<float, 4>& projectedRightForceN,
+        const float totalNormalLoadN,
+        const float maxProjectedContactUtilization) const noexcept
+    {
+        if (yawDirection == 0.0f)
+        {
+            return 0.0f;
+        }
+
+        float gainFrontRightBasis = 0.0f;
+        float gainRearRightBasis = 0.0f;
+        float gainLeftLongBasis = 0.0f;
+        float gainRightLongBasis = 0.0f;
+        float projectedMomentNm = 0.0f;
+
+        for (uint8_t contactIndex = 0U; contactIndex < 4U; ++contactIndex)
+        {
+            const float rightPositionM = contactRightPositionsM[contactIndex];
+            const float forwardPositionM = contactForwardPositionsM[contactIndex];
+            const ContactKinematics& contactKinematics = kinematics._contacts[contactIndex];
+            const float rightBasis =
+                -yawDirection * forwardPositionM * contactKinematics._rightRelativeVelocityMps;
+            const float longitudinalBasis =
+                yawDirection * rightPositionM * contactKinematics._forwardRelativeVelocityMps;
+            if (forwardPositionM > 0.0f)
+            {
+                gainFrontRightBasis += rightBasis;
+            }
+            else
+            {
+                gainRearRightBasis += rightBasis;
+            }
+
+            if (rightPositionM < 0.0f)
+            {
+                gainLeftLongBasis += longitudinalBasis;
+            }
+            else
+            {
+                gainRightLongBasis += longitudinalBasis;
+            }
+
+            const float projectedLocalMomentNm =
+                (forwardPositionM * projectedRightForceN[contactIndex]) -
+                (rightPositionM * projectedForwardForceN[contactIndex]);
+            projectedMomentNm += projectedLocalMomentNm;
+        }
+
+        const float contactRelativeSpeedMps =
+            loadWeightedContactRelativeSpeedMps(
+                kinematics,
+                contactNormalLoadN,
+                totalNormalLoadN);
+        const float relKnee = PositiveFiniteOrDefault(
+            _yawResidualVariantCRelativeSpeedKneeMps,
+            kDefaultYawResidualVariantCRelativeSpeedKneeMps);
+        const float forwardKnee = PositiveFiniteOrDefault(
+            _yawResidualVariantCForwardSpeedKneeMps,
+            kDefaultYawResidualVariantCForwardSpeedKneeMps);
+        const float lowRel =
+            1.0f /
+            (1.0f + ((contactRelativeSpeedMps * contactRelativeSpeedMps) / (relKnee * relKnee)));
+        const float lowForward =
+            1.0f /
+            (1.0f + ((forwardVelocityMps * forwardVelocityMps) / (forwardKnee * forwardKnee)));
+        const float highForward = 1.0f - lowForward;
+        const float utilization =
+            (std::clamp)(
+                std::isfinite(maxProjectedContactUtilization) ? maxProjectedContactUtilization : 0.0f,
+                0.0f,
+                5.0f);
+        const float utilSmooth = utilization / (1.0f + utilization);
+        const float projectedMomentOpposesYawNm = -yawDirection * projectedMomentNm;
+
+        const float residualOpposingMomentNm =
+            (kYawResidualVariantCLongLowRelCoeff * lowRel * (gainLeftLongBasis + gainRightLongBasis)) +
+            (kYawResidualVariantCRightBaseCoeff * (gainFrontRightBasis + gainRearRightBasis)) +
+            (kYawResidualVariantCForceMomentHighForwardCoeff * projectedMomentOpposesYawNm * highForward) +
+            (kYawResidualVariantCRightUtilCoeff * utilSmooth * (gainFrontRightBasis + gainRearRightBasis)) +
+            (kYawResidualVariantCLongBaseCoeff * (gainLeftLongBasis + gainRightLongBasis)) +
+            (kYawResidualVariantCLongUtilCoeff * utilSmooth * (gainLeftLongBasis + gainRightLongBasis)) +
+            (kYawResidualVariantCRightLowRelCoeff * lowRel * (gainFrontRightBasis + gainRearRightBasis)) +
+            (kYawResidualVariantCLongHighForwardCoeff * highForward * (gainLeftLongBasis + gainRightLongBasis)) +
+            (kYawResidualVariantCRightHighForwardCoeff * highForward * (gainFrontRightBasis + gainRearRightBasis));
+        return std::isfinite(residualOpposingMomentNm) ? residualOpposingMomentNm : 0.0f;
+    }
+
     float PlantModel::residualDecayAlpha(const float dtS, const float tauS) noexcept
     {
         if (!std::isfinite(dtS) || !(dtS > 0.0f) || !std::isfinite(tauS) || !(tauS > 0.0f))
@@ -163,7 +334,19 @@ namespace MazeMap
                 static_cast<double>(kForceEpsilonN),
                 static_cast<double>(kContactYawPatchForceGainNsPerM),
                 static_cast<double>(_vehicle.GetFanDownforceAtFullDuty()),
-                static_cast<double>(_vehicle.FrontLeftWallSensor().GetNoHitRangeM())))
+                static_cast<double>(_vehicle.FrontLeftWallSensor().GetNoHitRangeM())) ||
+            !WriteDebugTextLine(
+                context,
+                sink,
+                "plant_dump_params_yaw_residual",
+                "blend_speed_knee_mps=%.9g;blend_force_knee=%.9g;force_rel_weight=%.9g;force_speed_fade_mps=%.9g;force_sliding_nm=%.9g;variant_c_rel_knee_mps=%.9g;variant_c_fwd_knee_mps=%.9g",
+                static_cast<double>(_yawResidualBlendSpeedKneeMps),
+                static_cast<double>(_yawResidualBlendForceKnee),
+                static_cast<double>(_yawResidualForceRelWeight),
+                static_cast<double>(_yawResidualForceSpeedFadeMps),
+                static_cast<double>(_yawResidualForceSlidingMomentNm),
+                static_cast<double>(_yawResidualVariantCRelativeSpeedKneeMps),
+                static_cast<double>(_yawResidualVariantCForwardSpeedKneeMps)))
         {
             return false;
         }
@@ -732,6 +915,42 @@ namespace MazeMap
             rearRightRawMagnitudeN / (std::max)(rearRightMaxForceN, kForceEpsilonN);
         rearRightContact._saturation = (std::min)(rearRightContact._preProjectionUtilization, 1.0f);
 
+        const std::array<float, 4> projectedForwardForceN = {
+            frontLeftContact._forwardForceN,
+            frontRightContact._forwardForceN,
+            rearLeftContact._forwardForceN,
+            rearRightContact._forwardForceN
+        };
+        const std::array<float, 4> projectedRightForceN = {
+            frontLeftContact._rightForceN,
+            frontRightContact._rightForceN,
+            rearLeftContact._rightForceN,
+            rearRightContact._rightForceN
+        };
+        const std::array<float, 4> contactNormalLoadN = {
+            frontLeftContact._normalForceN,
+            frontRightContact._normalForceN,
+            rearLeftContact._normalForceN,
+            rearRightContact._normalForceN
+        };
+        const std::array<float, 4> projectedMaxForceN = {
+            frontLeftMaxForceN,
+            frontRightMaxForceN,
+            rearLeftMaxForceN,
+            rearRightMaxForceN
+        };
+        float maxProjectedContactUtilization = 0.0f;
+        for (uint8_t contactIndex = 0U; contactIndex < 4U; ++contactIndex)
+        {
+            const float projectedMagnitudeN =
+                MazeMap::Math::Sqrtf(
+                    (projectedForwardForceN[contactIndex] * projectedForwardForceN[contactIndex]) +
+                    (projectedRightForceN[contactIndex] * projectedRightForceN[contactIndex]));
+            maxProjectedContactUtilization =
+                (std::max)(
+                    maxProjectedContactUtilization,
+                    projectedMagnitudeN / (std::max)(projectedMaxForceN[contactIndex], kForceEpsilonN));
+        }
         const float leftBankForwardForceN = frontLeftContact._forwardForceN + rearLeftContact._forwardForceN;
         const float rightBankForwardForceN = frontRightContact._forwardForceN + rearRightContact._forwardForceN;
         const float frontRightForceN = frontLeftContact._rightForceN + frontRightContact._rightForceN;
@@ -746,9 +965,39 @@ namespace MazeMap
         const float contactYawHalfTrackWidthM = 0.5f * std::fabs(_vehicle.GetTrackWidth());
         const float contactYawLongitudinalOffsetM =
             std::fabs(Vehicle::GetDriveWheelLongitudinalOffsetM());
-        const float yawMomentNm =
+        const float projectedYawMomentNm =
             (contactYawHalfTrackWidthM * (leftBankForwardForceN - rightBankForwardForceN)) +
             (contactYawLongitudinalOffsetM * (frontRightForceN - rearRightForceN));
+        const float yawDirection = SignedDirection(yawRateRadps, projectedYawMomentNm);
+        const float variantCOpposingMomentNm =
+            variantCYawResidualOpposingMomentNm(
+                yawDirection,
+                forwardVelocityMps,
+                derivatives._wheelKinematics,
+                contactRightPositionsM,
+                contactForwardPositionsM,
+                contactNormalLoadN,
+                projectedForwardForceN,
+                projectedRightForceN,
+                totalNormalLoadN,
+                maxProjectedContactUtilization);
+        const float contactRelativeSpeedMps =
+            loadWeightedContactRelativeSpeedMps(
+                derivatives._wheelKinematics,
+                contactNormalLoadN,
+                totalNormalLoadN);
+        const float yawMomentYieldNm =
+            (std::max)(0.0f, sustainedContactMu * contactYawHalfTrackWidthM * totalNormalLoadN);
+        const float residualOpposingMomentNm =
+            yawResidualOpposingMomentNm(
+                forwardVelocityMps,
+                contactRelativeSpeedMps,
+                PositivePart(yawDirection * projectedYawMomentNm),
+                yawMomentYieldNm,
+                variantCOpposingMomentNm);
+        const float yawMomentNm =
+            projectedYawMomentNm -
+            (yawDirection * residualOpposingMomentNm);
 
         float sineHeading = 0.0f;
         float cosineHeading = 0.0f;
@@ -1170,9 +1419,212 @@ namespace MazeMap
             ((forwardVelocityMps - (halfTrackWidthM * yawRateRadps)) * invWheelRadiusM) :
             0.0f;
 
+        const Eigen::Matrix<float, VehicleState::kDimension, 1> currentState = BuildBoundStateVector();
+        const WheelKinematics currentKinematics = wheelKinematics(currentState, nullptr);
+        const float totalNormalLoadN =
+            (massKg * GRAVITY_MPS2) +
+            ((std::clamp)(_vehicle.GetFanDuty(), 0.0f, 1.0f) * _vehicle.GetFanDownforceAtFullDuty());
+        const float frontWheelNormalLoadN = 0.5f * kFrontLoadFraction * totalNormalLoadN;
+        const float rearWheelNormalLoadN = 0.5f * (1.0f - kFrontLoadFraction) * totalNormalLoadN;
+        const std::array<float, 4> contactNormalLoadN = {
+            frontWheelNormalLoadN,
+            frontWheelNormalLoadN,
+            rearWheelNormalLoadN,
+            rearWheelNormalLoadN
+        };
+        const std::array<float, 4> contactRightPositionsM = {
+            -halfTrackWidthM,
+            halfTrackWidthM,
+            -halfTrackWidthM,
+            halfTrackWidthM
+        };
+        const float contactLongitudinalOffsetM = std::fabs(Vehicle::GetDriveWheelLongitudinalOffsetM());
+        const std::array<float, 4> contactForwardPositionsM = {
+            contactLongitudinalOffsetM,
+            contactLongitudinalOffsetM,
+            -contactLongitudinalOffsetM,
+            -contactLongitudinalOffsetM
+        };
+        const float contactRelativeSpeedMps =
+            loadWeightedContactRelativeSpeedMps(
+                currentKinematics,
+                contactNormalLoadN,
+                totalNormalLoadN);
+        const float sustainedContactMu =
+            (std::isfinite(Vehicle::GetSustainedLateralAccelerationReferenceMps2()) &&
+             (Vehicle::GetSustainedLateralAccelerationReferenceMps2() > 0.0f) &&
+             (totalNormalLoadN > kForceEpsilonN)) ?
+            ((Vehicle::GetSustainedLateralAccelerationReferenceMps2() * massKg) / totalNormalLoadN) :
+            0.0f;
+        const float yawMomentYieldNm =
+            (std::max)(0.0f, sustainedContactMu * halfTrackWidthM * totalNormalLoadN);
+        const auto positiveGainOrZero = [](const float gain) noexcept -> float
+        {
+            return (std::isfinite(gain) && (gain > 0.0f)) ? gain : 0.0f;
+        };
+        const float frontLeftRightForceN =
+            positiveGainOrZero(_leftDrive.getFrontRightContactForceGainNPerMps()) *
+            currentKinematics._contacts[kFrontLeft]._rightRelativeVelocityMps;
+        const float frontRightRightForceN =
+            positiveGainOrZero(_rightDrive.getFrontRightContactForceGainNPerMps()) *
+            currentKinematics._contacts[kFrontRight]._rightRelativeVelocityMps;
+        const float rearLeftRightForceN =
+            positiveGainOrZero(_leftDrive.getRearRightContactForceGainNPerMps()) *
+            currentKinematics._contacts[kRearLeft]._rightRelativeVelocityMps;
+        const float rearRightRightForceN =
+            positiveGainOrZero(_rightDrive.getRearRightContactForceGainNPerMps()) *
+            currentKinematics._contacts[kRearRight]._rightRelativeVelocityMps;
+        const std::array<float, 4> synthesizedRightForceN = {
+            frontLeftRightForceN,
+            frontRightRightForceN,
+            rearLeftRightForceN,
+            rearRightRightForceN
+        };
+        const float synthesizedRightYawMomentNm =
+            contactLongitudinalOffsetM *
+            ((frontLeftRightForceN + frontRightRightForceN) -
+             (rearLeftRightForceN + rearRightRightForceN));
+
+        const float desiredYawMomentNm = yawInertiaKgM2 * desiredYawAccelRadps2;
+        const float yawDirection = SignedDirection(yawRateRadps, desiredYawMomentNm);
+        const auto variantCAtProjectedMoment = [&](const float projectedMomentAlongYawNm) noexcept -> float
+        {
+            if (yawDirection == 0.0f || !(trackWidthM > 0.0f))
+            {
+                return 0.0f;
+            }
+
+            const float projectedYawMomentNm = yawDirection * projectedMomentAlongYawNm;
+            const float longitudinalYawMomentNm = projectedYawMomentNm - synthesizedRightYawMomentNm;
+            const float yawDifferentialForceN = longitudinalYawMomentNm * invTrackWidthM;
+            const float leftForceN = yawDifferentialForceN;
+            const float rightForceN = -yawDifferentialForceN;
+            const float leftBankNormalLoadN = contactNormalLoadN[kFrontLeft] + contactNormalLoadN[kRearLeft];
+            const float rightBankNormalLoadN = contactNormalLoadN[kFrontRight] + contactNormalLoadN[kRearRight];
+            const std::array<float, 4> synthesizedForwardForceN = {
+                (leftBankNormalLoadN > kForceEpsilonN) ?
+                    (leftForceN * (contactNormalLoadN[kFrontLeft] / leftBankNormalLoadN)) :
+                    (0.5f * leftForceN),
+                (rightBankNormalLoadN > kForceEpsilonN) ?
+                    (rightForceN * (contactNormalLoadN[kFrontRight] / rightBankNormalLoadN)) :
+                    (0.5f * rightForceN),
+                (leftBankNormalLoadN > kForceEpsilonN) ?
+                    (leftForceN * (contactNormalLoadN[kRearLeft] / leftBankNormalLoadN)) :
+                    (0.5f * leftForceN),
+                (rightBankNormalLoadN > kForceEpsilonN) ?
+                    (rightForceN * (contactNormalLoadN[kRearRight] / rightBankNormalLoadN)) :
+                    (0.5f * rightForceN)
+            };
+
+            float maxUtilization = 0.0f;
+            for (uint8_t contactIndex = 0U; contactIndex < 4U; ++contactIndex)
+            {
+                const float magnitudeN =
+                    MazeMap::Math::Sqrtf(
+                        (synthesizedForwardForceN[contactIndex] * synthesizedForwardForceN[contactIndex]) +
+                        (synthesizedRightForceN[contactIndex] * synthesizedRightForceN[contactIndex]));
+                const float maxForceN =
+                    (std::max)(0.0f, sustainedContactMu * contactNormalLoadN[contactIndex]);
+                maxUtilization =
+                    (std::max)(
+                        maxUtilization,
+                        magnitudeN / (std::max)(maxForceN, kForceEpsilonN));
+            }
+
+            return variantCYawResidualOpposingMomentNm(
+                yawDirection,
+                forwardVelocityMps,
+                currentKinematics,
+                contactRightPositionsM,
+                contactForwardPositionsM,
+                contactNormalLoadN,
+                synthesizedForwardForceN,
+                synthesizedRightForceN,
+                totalNormalLoadN,
+                maxUtilization);
+        };
+        const auto residualAtProjectedMoment = [&](const float projectedMomentAlongYawNm) noexcept -> float
+        {
+            return yawResidualOpposingMomentNm(
+                forwardVelocityMps,
+                contactRelativeSpeedMps,
+                PositivePart(projectedMomentAlongYawNm),
+                yawMomentYieldNm,
+                variantCAtProjectedMoment(projectedMomentAlongYawNm));
+        };
+
+        float requestedYawMomentNm = desiredYawMomentNm;
+        if (yawDirection != 0.0f)
+        {
+            const float desiredMomentAlongYawNm = yawDirection * desiredYawMomentNm;
+            const float residualAtZeroNm = residualAtProjectedMoment(0.0f);
+            const float relWeight = PositiveFiniteOrDefault(
+                _yawResidualForceRelWeight,
+                kDefaultYawResidualForceRelWeight);
+            const float speedV2 =
+                (forwardVelocityMps * forwardVelocityMps) +
+                ((relWeight * contactRelativeSpeedMps) * (relWeight * contactRelativeSpeedMps));
+            const float speedKnee = PositiveFiniteOrDefault(
+                _yawResidualBlendSpeedKneeMps,
+                kDefaultYawResidualBlendSpeedKneeMps);
+            const float speedKnee2 = speedKnee * speedKnee;
+            const float speedLow =
+                (speedKnee2 > 0.0f) ? (speedKnee2 / (speedKnee2 + (std::max)(0.0f, speedV2))) : 0.0f;
+            if (!(yawMomentYieldNm > kForceEpsilonN) || !(speedLow > kForceEpsilonN))
+            {
+                requestedYawMomentNm = yawDirection * (desiredMomentAlongYawNm + residualAtZeroNm);
+            }
+            else if (desiredMomentAlongYawNm <= -residualAtZeroNm)
+            {
+                requestedYawMomentNm = yawDirection * (desiredMomentAlongYawNm + residualAtZeroNm);
+            }
+            else
+            {
+                const float speedFade = PositiveFiniteOrDefault(
+                    _yawResidualForceSpeedFadeMps,
+                    kDefaultYawResidualForceSpeedFadeMps);
+                const float speedFade2 = speedFade * speedFade;
+                const float forceBranchOpposingMomentNm =
+                    ((speedFade2 > 0.0f) ? (speedFade2 / (speedFade2 + (std::max)(0.0f, speedV2))) : 0.0f) *
+                    PositiveFiniteOrDefault(
+                        _yawResidualForceSlidingMomentNm,
+                        kDefaultYawResidualForceSlidingMomentNm);
+                float lo = (std::max)(0.0f, desiredMomentAlongYawNm);
+                float hi =
+                    lo +
+                    (std::max)((std::max)(forceBranchOpposingMomentNm, residualAtZeroNm), 0.0f) +
+                    (4.0f * PositiveFiniteOrDefault(_yawResidualBlendForceKnee, kDefaultYawResidualBlendForceKnee) * yawMomentYieldNm);
+                if (!(hi > lo))
+                {
+                    hi = lo + yawMomentYieldNm;
+                }
+
+                for (uint8_t grow = 0U; grow < 8U; ++grow)
+                {
+                    if ((hi - residualAtProjectedMoment(hi)) >= desiredMomentAlongYawNm)
+                    {
+                        break;
+                    }
+                    hi = lo + (2.0f * (hi - lo));
+                }
+
+                for (uint8_t iteration = 0U; iteration < 16U; ++iteration)
+                {
+                    const float mid = 0.5f * (lo + hi);
+                    if ((mid - residualAtProjectedMoment(mid)) < desiredMomentAlongYawNm)
+                    {
+                        lo = mid;
+                    }
+                    else
+                    {
+                        hi = mid;
+                    }
+                }
+
+                requestedYawMomentNm = yawDirection * hi;
+            }
+        }
         const float forwardForceRequestN = massKg * desiredAccelMps2;
-        const float requestedYawMomentNm =
-            yawInertiaKgM2 * desiredYawAccelRadps2;
         const float commonForceRequestN = 0.5f * forwardForceRequestN;
         const float differentialForceRequestN = requestedYawMomentNm * invTrackWidthM;
         const float leftForceCommandN = commonForceRequestN + differentialForceRequestN;
@@ -1638,6 +2090,83 @@ namespace MazeMap
     float PlantModel::rightDriveLongitudinalTireStiffnessN() const noexcept
     {
         return _rightDrive.getLongitudinalTireStiffnessN();
+    }
+
+    float PlantModel::yawResidualBlendSpeedKneeMps() const noexcept
+    {
+        return _yawResidualBlendSpeedKneeMps;
+    }
+
+    void PlantModel::setYawResidualBlendSpeedKneeMps(const float speedKneeMps) noexcept
+    {
+        _yawResidualBlendSpeedKneeMps =
+            PositiveFiniteOrDefault(speedKneeMps, kDefaultYawResidualBlendSpeedKneeMps);
+    }
+
+    float PlantModel::yawResidualBlendForceKnee() const noexcept
+    {
+        return _yawResidualBlendForceKnee;
+    }
+
+    void PlantModel::setYawResidualBlendForceKnee(const float forceKnee) noexcept
+    {
+        _yawResidualBlendForceKnee =
+            PositiveFiniteOrDefault(forceKnee, kDefaultYawResidualBlendForceKnee);
+    }
+
+    float PlantModel::yawResidualForceRelWeight() const noexcept
+    {
+        return _yawResidualForceRelWeight;
+    }
+
+    void PlantModel::setYawResidualForceRelWeight(const float relWeight) noexcept
+    {
+        _yawResidualForceRelWeight =
+            PositiveFiniteOrDefault(relWeight, kDefaultYawResidualForceRelWeight);
+    }
+
+    float PlantModel::yawResidualForceSpeedFadeMps() const noexcept
+    {
+        return _yawResidualForceSpeedFadeMps;
+    }
+
+    void PlantModel::setYawResidualForceSpeedFadeMps(const float speedFadeMps) noexcept
+    {
+        _yawResidualForceSpeedFadeMps =
+            PositiveFiniteOrDefault(speedFadeMps, kDefaultYawResidualForceSpeedFadeMps);
+    }
+
+    float PlantModel::yawResidualForceSlidingMomentNm() const noexcept
+    {
+        return _yawResidualForceSlidingMomentNm;
+    }
+
+    void PlantModel::setYawResidualForceSlidingMomentNm(const float slidingMomentNm) noexcept
+    {
+        _yawResidualForceSlidingMomentNm =
+            PositiveFiniteOrDefault(slidingMomentNm, kDefaultYawResidualForceSlidingMomentNm);
+    }
+
+    float PlantModel::yawResidualVariantCRelativeSpeedKneeMps() const noexcept
+    {
+        return _yawResidualVariantCRelativeSpeedKneeMps;
+    }
+
+    void PlantModel::setYawResidualVariantCRelativeSpeedKneeMps(const float relativeSpeedKneeMps) noexcept
+    {
+        _yawResidualVariantCRelativeSpeedKneeMps =
+            PositiveFiniteOrDefault(relativeSpeedKneeMps, kDefaultYawResidualVariantCRelativeSpeedKneeMps);
+    }
+
+    float PlantModel::yawResidualVariantCForwardSpeedKneeMps() const noexcept
+    {
+        return _yawResidualVariantCForwardSpeedKneeMps;
+    }
+
+    void PlantModel::setYawResidualVariantCForwardSpeedKneeMps(const float forwardSpeedKneeMps) noexcept
+    {
+        _yawResidualVariantCForwardSpeedKneeMps =
+            PositiveFiniteOrDefault(forwardSpeedKneeMps, kDefaultYawResidualVariantCForwardSpeedKneeMps);
     }
 }
 

@@ -1,0 +1,31 @@
+{
+  "build_metadata_edited": false,
+  "inputs": {
+    "constants": "codex_analysis\\contact_continuum_yaw_identification\\features\\plant_mirror_constants.csv",
+    "force_domain_reference": "codex_analysis\\yaw_model_variant_fits\\round2_force_domain_stribeck",
+    "primary": "codex_analysis\\contact_continuum_yaw_identification\\ablation\\phase_classified_feature_sample.csv",
+    "secondary": "codex_analysis\\contact_continuum_yaw_identification\\features\\contact_continuum_feature_sample.csv",
+    "variant_c_coefficients": "codex_analysis\\yaw_model_variant_fits\\combined_slip_surface\\model_coefficients.csv"
+  },
+  "nominal_load_n": 1.932931008,
+  "production_code_edited": false,
+  "rows": 118580,
+  "selected": {
+    "allocation_form": "sqrt_softplus_reserve",
+    "c_credit": 1.0,
+    "eps_nm": 0.001,
+    "force_knee_util": 0.45,
+    "in_place_max_abs_command": 0.6235274468147937,
+    "in_place_pass": 1,
+    "objective_score": 0.051844555239261375,
+    "open_fit_rb_corrected_rmse_nm": 0.032953988023582924,
+    "primary_rb_corrected_rmse_nm": 0.024795935960203026,
+    "rank": 1,
+    "speed_knee_mps": 0.03,
+    "static_peak_nm": 0.1,
+    "validation_rb_corrected_rmse_nm": 0.03822287944965288
+  },
+  "tests_edited": false,
+  "uses_command_or_request_as_traction_selector": false,
+  "uses_ukf_state_columns": false
+}

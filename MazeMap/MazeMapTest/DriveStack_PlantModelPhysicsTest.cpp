@@ -99,7 +99,7 @@ namespace MazeMap
             return runtime.plant.ComputeFeedforward(forwardAccelMps2, yawAccelRadps2);
         }
 
-        float HighCommandFirstOutOfRangeOrFinalHeading()
+        float HighCommandFirstBelowMinimumOrFinalHeading()
         {
             TestRuntime runtime;
             VehicleState state =
@@ -111,7 +111,7 @@ namespace MazeMap
                 runtime.runtimeState = state;
                 runtime.plant.integrate(command, kDirectDtSeconds);
                 state = runtime.runtimeState;
-                if (state.GetHeading() < -PI_F || state.GetHeading() > PI_F)
+                if (state.GetHeading() < -PI_F)
                 {
                     return state.GetHeading();
                 }
@@ -120,7 +120,28 @@ namespace MazeMap
             return state.GetHeading();
         }
 
-        App::Internal::CommandVector LongRunForwardFirstNonFiniteOrFinalSolveCommand()
+        float HighCommandFirstAboveMaximumOrFinalHeading()
+        {
+            TestRuntime runtime;
+            VehicleState state =
+                MakeRollingState(1.25f, 4.0f, 0.15f, 0.30f);
+            const App::Internal::CommandVector command = MakeCommand(0.85f, 0.20f);
+
+            for (int tick = 0; tick < 250; ++tick)
+            {
+                runtime.runtimeState = state;
+                runtime.plant.integrate(command, kDirectDtSeconds);
+                state = runtime.runtimeState;
+                if (state.GetHeading() > PI_F)
+                {
+                    return state.GetHeading();
+                }
+            }
+
+            return state.GetHeading();
+        }
+
+        App::Internal::CommandVector LongRunForwardFirstNonFiniteLeftOrFinalSolveCommand()
         {
             TestRuntime runtime;
             VehicleState state = MakeRollingState(0.30f, 0.0f);
@@ -130,7 +151,29 @@ namespace MazeMap
             {
                 command =
                     SolveAccelerationFeedforwardAt(runtime, state, 0.80f, 0.0f);
-                if (!command.IsFinite())
+                if (!std::isfinite(command.LeftCommand()))
+                {
+                    return command;
+                }
+                runtime.runtimeState = state;
+                runtime.plant.integrate(command, kDirectDtSeconds);
+                state = runtime.runtimeState;
+            }
+
+            return command;
+        }
+
+        App::Internal::CommandVector LongRunForwardFirstNonFiniteRightOrFinalSolveCommand()
+        {
+            TestRuntime runtime;
+            VehicleState state = MakeRollingState(0.30f, 0.0f);
+            App::Internal::CommandVector command{};
+
+            for (int tick = 0; tick < 500; ++tick)
+            {
+                command =
+                    SolveAccelerationFeedforwardAt(runtime, state, 0.80f, 0.0f);
+                if (!std::isfinite(command.RightCommand()))
                 {
                     return command;
                 }
@@ -159,12 +202,35 @@ namespace MazeMap
 
             return state.GetForwardVelocity() - initialForwardMps;
         }
+
+        struct PositiveYawAccelerationStep final
+        {
+            VehicleState initial;
+            VehicleState integrated;
+            App::Internal::CommandVector command;
+        };
+
+        PositiveYawAccelerationStep IntegratePositiveYawAcceleration()
+        {
+            TestRuntime runtime;
+            const VehicleState state =
+                MakeRollingState(0.40f, 2.0f);
+            const App::Internal::CommandVector command =
+                runtime.plant.ComputeFeedforward(0.0f, 5.0f);
+            runtime.runtimeState = state;
+            runtime.plant.integrate(command, kDirectDtSeconds);
+
+            return PositiveYawAccelerationStep{
+                state,
+                runtime.runtimeState,
+                command };
+        }
     }
 
-    TEST_CLASS(DriveStack_PlantModelPhysicsTest)
+    TEST_CLASS(DriveStack_PlantModelAxisConventionTest)
     {
     public:
-        TEST_METHOD(AxisConvention_HeadingZeroForwardMovesWorldPositiveY)
+        TEST_METHOD(HeadingZeroForwardMovesWorldPositiveY)
         {
             TestRuntime runtime;
             const App::Internal::CommandVector coast{};
@@ -185,7 +251,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(AxisConvention_HeadingZeroForwardDoesNotDriftWorldX)
+        TEST_METHOD(HeadingZeroForwardDoesNotDriftWorldX)
         {
             TestRuntime runtime;
             const App::Internal::CommandVector coast{};
@@ -208,7 +274,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(AxisConvention_HeadingRightForwardMovesWorldPositiveX)
+        TEST_METHOD(HeadingRightForwardMovesWorldPositiveX)
         {
             TestRuntime runtime;
             const App::Internal::CommandVector coast{};
@@ -229,7 +295,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(AxisConvention_HeadingRightForwardDoesNotDriftWorldY)
+        TEST_METHOD(HeadingRightForwardDoesNotDriftWorldY)
         {
             TestRuntime runtime;
             const App::Internal::CommandVector coast{};
@@ -252,7 +318,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(AxisConvention_BodyPositiveLateralMovesWorldPositiveX)
+        TEST_METHOD(BodyPositiveLateralMovesWorldPositiveX)
         {
             TestRuntime runtime;
             const App::Internal::CommandVector coast{};
@@ -273,7 +339,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(AxisConvention_PositiveYawRateIncreasesClockwiseYaw)
+        TEST_METHOD(PositiveYawRateIncreasesClockwiseYaw)
         {
             TestRuntime runtime;
             const App::Internal::CommandVector coast{};
@@ -294,7 +360,12 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(WheelYawSign_PositiveYawMakesLeftWheelLinearVelocityFaster)
+    };
+
+    TEST_CLASS(DriveStack_PlantModelWheelYawSignTest)
+    {
+    public:
+        TEST_METHOD(PositiveYawMakesLeftWheelLinearVelocityFaster)
         {
             const float leftWheelMps =
                 Vehicle::LeftWheelLinearVelocityFromBody(0.40f, 2.0f);
@@ -312,7 +383,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(WheelYawSign_EncoderYawMeasurementPreservesClockwisePositiveSign)
+        TEST_METHOD(EncoderYawMeasurementPreservesClockwisePositiveSign)
         {
             TestRuntime runtime;
             EncoderObs observation{};
@@ -339,7 +410,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(WheelYawSign_PositiveTargetYawRateRequestsFasterLeftWheel)
+        TEST_METHOD(PositiveTargetYawRateRequestsFasterLeftWheel)
         {
             const float leftWheelMps =
                 Vehicle::LeftWheelLinearVelocityFromBody(0.40f, 2.0f);
@@ -357,39 +428,45 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(WheelYawSign_PositiveTargetYawAccelerationRequestsMoreLeftAcceleration)
+        TEST_METHOD(PositiveYawAccelRaisesLeftCommand)
         {
-            TestRuntime runtime;
-            const VehicleState state =
-                MakeRollingState(0.40f, 2.0f);
-            const App::Internal::CommandVector command =
-                runtime.plant.ComputeFeedforward(0.0f, 5.0f);
-            runtime.runtimeState = state;
-            runtime.plant.integrate(command, kDirectDtSeconds);
-            const VehicleState integrated = runtime.runtimeState;
-            std::wstringstream commandMessage;
-            commandMessage << L"PM20_WHEEL_YAW_SIGN"
+            const PositiveYawAccelerationStep step =
+                IntegratePositiveYawAcceleration();
+            std::wstringstream message;
+            message << L"PM20_WHEEL_YAW_SIGN"
                 << L"\nfield=command_differential"
-                << L"\nactual=" << command.Differential()
+                << L"\nactual=" << step.command.Differential()
                 << L"\ncriterion=actual>0"
-                << L"\nleft_command=" << command.LeftCommand()
-                << L"\nright_command=" << command.RightCommand();
-            std::wstringstream accelMessage;
-            accelMessage << L"PM20_WHEEL_YAW_SIGN"
+                << L"\nleft_command=" << step.command.LeftCommand()
+                << L"\nright_command=" << step.command.RightCommand();
+
+            Assert::IsTrue(
+                step.command.Differential() > 0.0f,
+                message.str().c_str());
+        }
+
+        TEST_METHOD(PositiveYawAccelIncreasesYawRate)
+        {
+            const PositiveYawAccelerationStep step =
+                IntegratePositiveYawAcceleration();
+            std::wstringstream message;
+            message << L"PM20_WHEEL_YAW_SIGN"
                 << L"\nfield=yaw_rate_after_step_radps"
-                << L"\ninitial=" << state.GetYawRate()
-                << L"\nactual=" << integrated.GetYawRate()
+                << L"\ninitial=" << step.initial.GetYawRate()
+                << L"\nactual=" << step.integrated.GetYawRate()
                 << L"\ncriterion=actual>initial";
 
             Assert::IsTrue(
-                command.Differential() > 0.0f,
-                commandMessage.str().c_str());
-            Assert::IsTrue(
-                integrated.GetYawRate() > state.GetYawRate(),
-                accelMessage.str().c_str());
+                step.integrated.GetYawRate() > step.initial.GetYawRate(),
+                message.str().c_str());
         }
 
-        TEST_METHOD(SymmetricDrive_LeftRightForwardForceSymmetry)
+    };
+
+    TEST_CLASS(DriveStack_PlantModelSymmetricDriveTest)
+    {
+    public:
+        TEST_METHOD(LeftRightForwardForceSymmetry)
         {
             TestRuntime runtime;
             const VehicleState state = MakeRollingState(0.80f, 0.0f);
@@ -413,7 +490,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(SymmetricDrive_WheelAccelerationSymmetry)
+        TEST_METHOD(WheelAccelerationSymmetry)
         {
             TestRuntime runtime;
             const VehicleState state = MakeRollingState(0.80f, 0.0f);
@@ -438,7 +515,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(SymmetricDrive_LeftRightWheelSpeedSymmetryAfterStep)
+        TEST_METHOD(LeftRightWheelSpeedSymmetryAfterStep)
         {
             TestRuntime runtime;
             const VehicleState state = MakeRollingState(0.80f, 0.0f);
@@ -459,7 +536,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(SymmetricDrive_WheelSpeedSymmetryPersistsAcrossTicks)
+        TEST_METHOD(WheelSpeedSymmetryPersistsAcrossTicks)
         {
             TestRuntime runtime;
             VehicleState state = MakeRollingState(0.80f, 0.0f);
@@ -483,7 +560,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(SymmetricDrive_NoYawAccelerationBias)
+        TEST_METHOD(NoYawAccelerationBias)
         {
             TestRuntime runtime;
             const VehicleState state = MakeRollingState(0.80f, 0.0f);
@@ -504,7 +581,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(SymmetricDrive_NoLateralAccelerationBias)
+        TEST_METHOD(NoLateralAccelerationBias)
         {
             TestRuntime runtime;
             const VehicleState state = MakeRollingState(0.80f, 0.0f);
@@ -525,7 +602,12 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(Stiction_SubthresholdDriveDoesNotAccelerateLeftWheelAtRest)
+    };
+
+    TEST_CLASS(DriveStack_PlantModelStictionTest)
+    {
+    public:
+        TEST_METHOD(SubthresholdDriveDoesNotAccelerateLeftWheelAtRest)
         {
             TestRuntime runtime;
             const VehicleState state =
@@ -549,7 +631,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(Stiction_SubthresholdDriveDoesNotAccelerateRightWheelAtRest)
+        TEST_METHOD(SubthresholdDriveDoesNotAccelerateRightWheelAtRest)
         {
             TestRuntime runtime;
             const VehicleState state =
@@ -573,7 +655,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(Stiction_DirectIntegrationDoesNotDriftPositionX)
+        TEST_METHOD(DirectIntegrationDoesNotDriftPositionX)
         {
             TestRuntime runtime;
             VehicleState state =
@@ -599,7 +681,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(Stiction_DirectIntegrationDoesNotDriftPositionY)
+        TEST_METHOD(DirectIntegrationDoesNotDriftPositionY)
         {
             TestRuntime runtime;
             VehicleState state =
@@ -625,7 +707,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(Stiction_DirectIntegrationDoesNotDriftYaw)
+        TEST_METHOD(DirectIntegrationDoesNotDriftYaw)
         {
             TestRuntime runtime;
             VehicleState state =
@@ -651,7 +733,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(Stiction_DirectIntegrationDoesNotDriftForwardVelocity)
+        TEST_METHOD(DirectIntegrationDoesNotDriftForwardVelocity)
         {
             TestRuntime runtime;
             VehicleState state =
@@ -677,7 +759,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(Stiction_DirectIntegrationDoesNotDriftLateralVelocity)
+        TEST_METHOD(DirectIntegrationDoesNotDriftLateralVelocity)
         {
             TestRuntime runtime;
             VehicleState state =
@@ -703,7 +785,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(Stiction_DirectIntegrationDoesNotDriftYawRate)
+        TEST_METHOD(DirectIntegrationDoesNotDriftYawRate)
         {
             TestRuntime runtime;
             VehicleState state =
@@ -729,7 +811,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(Stiction_DirectIntegrationDoesNotDriftLeftWheelSpeed)
+        TEST_METHOD(DirectIntegrationDoesNotDriftLeftWheelSpeed)
         {
             TestRuntime runtime;
             VehicleState state =
@@ -755,7 +837,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(Stiction_DirectIntegrationDoesNotDriftRightWheelSpeed)
+        TEST_METHOD(DirectIntegrationDoesNotDriftRightWheelSpeed)
         {
             TestRuntime runtime;
             VehicleState state =
@@ -781,7 +863,12 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(FanLoad_NoFanContactNormalSumMatchesConfiguredLoad)
+    };
+
+    TEST_CLASS(DriveStack_PlantModelFanLoadTest)
+    {
+    public:
+        TEST_METHOD(NoFanContactNormalSumMatchesConfiguredLoad)
         {
             TestRuntime runtime(0.0f);
             runtime.runtimeState = MakeRollingState(0.75f, 0.0f);
@@ -802,7 +889,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(FanLoad_FanOnContactNormalSumMatchesConfiguredLoad)
+        TEST_METHOD(FanOnContactNormalSumMatchesConfiguredLoad)
         {
             TestRuntime runtime(0.80f);
             runtime.runtimeState = MakeRollingState(0.75f, 0.0f);
@@ -825,7 +912,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(FanLoad_FanDutyIncreasesTotalContactNormalLoad)
+        TEST_METHOD(FanDutyIncreasesTotalContactNormalLoad)
         {
             TestRuntime fanOffRuntime(0.0f);
             TestRuntime fanOnRuntime(0.80f);
@@ -847,7 +934,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(FanLoad_Contact0NormalIncreasesWithFanDuty)
+        TEST_METHOD(Contact0NormalIncreasesWithFanDuty)
         {
             TestRuntime fanOffRuntime(0.0f);
             TestRuntime fanOnRuntime(0.80f);
@@ -869,7 +956,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(FanLoad_Contact1NormalIncreasesWithFanDuty)
+        TEST_METHOD(Contact1NormalIncreasesWithFanDuty)
         {
             TestRuntime fanOffRuntime(0.0f);
             TestRuntime fanOnRuntime(0.80f);
@@ -891,7 +978,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(FanLoad_Contact2NormalIncreasesWithFanDuty)
+        TEST_METHOD(Contact2NormalIncreasesWithFanDuty)
         {
             TestRuntime fanOffRuntime(0.0f);
             TestRuntime fanOnRuntime(0.80f);
@@ -913,7 +1000,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(FanLoad_Contact3NormalIncreasesWithFanDuty)
+        TEST_METHOD(Contact3NormalIncreasesWithFanDuty)
         {
             TestRuntime fanOffRuntime(0.0f);
             TestRuntime fanOnRuntime(0.80f);
@@ -935,7 +1022,12 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(IntegrateDirect_ZeroDtDoesNotChangePositionX)
+    };
+
+    TEST_CLASS(DriveStack_PlantModelDirectIntegrationTest)
+    {
+    public:
+        TEST_METHOD(ZeroDtDoesNotChangePositionX)
         {
             const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
             TestRuntime runtime;
@@ -958,7 +1050,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(IntegrateDirect_ZeroDtDoesNotChangePositionY)
+        TEST_METHOD(ZeroDtDoesNotChangePositionY)
         {
             const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
             TestRuntime runtime;
@@ -981,7 +1073,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(IntegrateDirect_ZeroDtDoesNotChangeYaw)
+        TEST_METHOD(ZeroDtDoesNotChangeYaw)
         {
             const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
             TestRuntime runtime;
@@ -1004,7 +1096,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(IntegrateDirect_ZeroDtDoesNotChangeForwardVelocity)
+        TEST_METHOD(ZeroDtDoesNotChangeForwardVelocity)
         {
             const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
             TestRuntime runtime;
@@ -1027,7 +1119,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(IntegrateDirect_ZeroDtDoesNotChangeLateralVelocity)
+        TEST_METHOD(ZeroDtDoesNotChangeLateralVelocity)
         {
             const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
             TestRuntime runtime;
@@ -1050,7 +1142,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(IntegrateDirect_ZeroDtDoesNotChangeYawRate)
+        TEST_METHOD(ZeroDtDoesNotChangeYawRate)
         {
             const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
             TestRuntime runtime;
@@ -1073,7 +1165,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(IntegrateDirect_ZeroDtDoesNotChangeLeftWheelSpeed)
+        TEST_METHOD(ZeroDtDoesNotChangeLeftWheelSpeed)
         {
             const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
             TestRuntime runtime;
@@ -1096,7 +1188,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(IntegrateDirect_ZeroDtDoesNotChangeRightWheelSpeed)
+        TEST_METHOD(ZeroDtDoesNotChangeRightWheelSpeed)
         {
             const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
             TestRuntime runtime;
@@ -1119,7 +1211,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(IntegrateDirect_NegativeDtDoesNotChangePositionX)
+        TEST_METHOD(NegativeDtDoesNotChangePositionX)
         {
             const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
             TestRuntime runtime;
@@ -1142,7 +1234,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(IntegrateDirect_NonFiniteDtDoesNotChangePositionX)
+        TEST_METHOD(NonFiniteDtDoesNotChangePositionX)
         {
             const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
             TestRuntime runtime;
@@ -1165,7 +1257,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(IntegrateDirect_SingleStepPositionXStaysFinite)
+        TEST_METHOD(SingleStepPositionXStaysFinite)
         {
             TestRuntime runtime;
             const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
@@ -1186,7 +1278,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(IntegrateDirect_SingleStepPositionYStaysFinite)
+        TEST_METHOD(SingleStepPositionYStaysFinite)
         {
             TestRuntime runtime;
             const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
@@ -1207,7 +1299,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(IntegrateDirect_SingleStepYawStaysFinite)
+        TEST_METHOD(SingleStepYawStaysFinite)
         {
             TestRuntime runtime;
             const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
@@ -1228,7 +1320,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(IntegrateDirect_SingleStepForwardVelocityStaysFinite)
+        TEST_METHOD(SingleStepForwardVelocityStaysFinite)
         {
             TestRuntime runtime;
             const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
@@ -1249,7 +1341,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(IntegrateDirect_SingleStepLateralVelocityStaysFinite)
+        TEST_METHOD(SingleStepLateralVelocityStaysFinite)
         {
             TestRuntime runtime;
             const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
@@ -1270,7 +1362,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(IntegrateDirect_SingleStepYawRateStaysFinite)
+        TEST_METHOD(SingleStepYawRateStaysFinite)
         {
             TestRuntime runtime;
             const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
@@ -1291,7 +1383,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(IntegrateDirect_SingleStepLeftWheelSpeedStaysFinite)
+        TEST_METHOD(SingleStepLeftWheelSpeedStaysFinite)
         {
             TestRuntime runtime;
             const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
@@ -1312,7 +1404,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(IntegrateDirect_SingleStepRightWheelSpeedStaysFinite)
+        TEST_METHOD(SingleStepRightWheelSpeedStaysFinite)
         {
             TestRuntime runtime;
             const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
@@ -1333,7 +1425,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(IntegrateDirect_SubstepPositionXStaysFinite)
+        TEST_METHOD(SubstepPositionXStaysFinite)
         {
             TestRuntime runtime;
             const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
@@ -1359,7 +1451,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(IntegrateDirect_SubstepPositionYStaysFinite)
+        TEST_METHOD(SubstepPositionYStaysFinite)
         {
             TestRuntime runtime;
             const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
@@ -1385,7 +1477,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(IntegrateDirect_SubstepYawStaysFinite)
+        TEST_METHOD(SubstepYawStaysFinite)
         {
             TestRuntime runtime;
             const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
@@ -1411,7 +1503,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(IntegrateDirect_SubstepForwardVelocityStaysFinite)
+        TEST_METHOD(SubstepForwardVelocityStaysFinite)
         {
             TestRuntime runtime;
             const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
@@ -1437,7 +1529,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(IntegrateDirect_SubstepLateralVelocityStaysFinite)
+        TEST_METHOD(SubstepLateralVelocityStaysFinite)
         {
             TestRuntime runtime;
             const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
@@ -1463,7 +1555,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(IntegrateDirect_SubstepYawRateStaysFinite)
+        TEST_METHOD(SubstepYawRateStaysFinite)
         {
             TestRuntime runtime;
             const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
@@ -1489,7 +1581,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(IntegrateDirect_SubstepLeftWheelSpeedStaysFinite)
+        TEST_METHOD(SubstepLeftWheelSpeedStaysFinite)
         {
             TestRuntime runtime;
             const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
@@ -1515,7 +1607,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(IntegrateDirect_SubstepRightWheelSpeedStaysFinite)
+        TEST_METHOD(SubstepRightWheelSpeedStaysFinite)
         {
             TestRuntime runtime;
             const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
@@ -1541,7 +1633,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(IntegrateDirect_PositionXRemainsCloseBetweenSingleStepAndSubsteps)
+        TEST_METHOD(PositionXRemainsCloseBetweenSingleStepAndSubsteps)
         {
             TestRuntime runtime;
             runtime.runtimeState = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
@@ -1569,7 +1661,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(IntegrateDirect_PositionYRemainsCloseBetweenSingleStepAndSubsteps)
+        TEST_METHOD(PositionYRemainsCloseBetweenSingleStepAndSubsteps)
         {
             TestRuntime runtime;
             runtime.runtimeState = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
@@ -1597,7 +1689,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(IntegrateDirect_ForwardVelocityRemainsCloseBetweenSingleStepAndSubsteps)
+        TEST_METHOD(ForwardVelocityRemainsCloseBetweenSingleStepAndSubsteps)
         {
             TestRuntime runtime;
             runtime.runtimeState = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
@@ -1625,7 +1717,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(IntegrateDirect_YawRateRemainsCloseBetweenSingleStepAndSubsteps)
+        TEST_METHOD(YawRateRemainsCloseBetweenSingleStepAndSubsteps)
         {
             TestRuntime runtime;
             runtime.runtimeState = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
@@ -1654,7 +1746,12 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(NumericStability_PositionXStaysFiniteUnderPlausibleHighCommand)
+    };
+
+    TEST_CLASS(DriveStack_PlantModelNumericStabilityTest)
+    {
+    public:
+        TEST_METHOD(PositionXStaysFiniteUnderPlausibleHighCommand)
         {
             TestRuntime runtime;
             VehicleState state = MakeRollingState(1.25f, 4.0f, 0.15f, 0.30f);
@@ -1681,7 +1778,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(NumericStability_PositionYStaysFiniteUnderPlausibleHighCommand)
+        TEST_METHOD(PositionYStaysFiniteUnderPlausibleHighCommand)
         {
             TestRuntime runtime;
             VehicleState state = MakeRollingState(1.25f, 4.0f, 0.15f, 0.30f);
@@ -1708,7 +1805,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(NumericStability_YawStaysFiniteUnderPlausibleHighCommand)
+        TEST_METHOD(YawStaysFiniteUnderPlausibleHighCommand)
         {
             TestRuntime runtime;
             VehicleState state = MakeRollingState(1.25f, 4.0f, 0.15f, 0.30f);
@@ -1735,7 +1832,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(NumericStability_ForwardVelocityStaysFiniteUnderPlausibleHighCommand)
+        TEST_METHOD(ForwardVelocityStaysFiniteUnderPlausibleHighCommand)
         {
             TestRuntime runtime;
             VehicleState state = MakeRollingState(1.25f, 4.0f, 0.15f, 0.30f);
@@ -1762,7 +1859,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(NumericStability_LateralVelocityStaysFiniteUnderPlausibleHighCommand)
+        TEST_METHOD(LateralVelocityStaysFiniteUnderPlausibleHighCommand)
         {
             TestRuntime runtime;
             VehicleState state = MakeRollingState(1.25f, 4.0f, 0.15f, 0.30f);
@@ -1789,7 +1886,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(NumericStability_YawRateStaysFiniteUnderPlausibleHighCommand)
+        TEST_METHOD(YawRateStaysFiniteUnderPlausibleHighCommand)
         {
             TestRuntime runtime;
             VehicleState state = MakeRollingState(1.25f, 4.0f, 0.15f, 0.30f);
@@ -1816,7 +1913,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(NumericStability_LeftWheelSpeedStaysFiniteUnderPlausibleHighCommand)
+        TEST_METHOD(LeftWheelSpeedStaysFiniteUnderPlausibleHighCommand)
         {
             TestRuntime runtime;
             VehicleState state = MakeRollingState(1.25f, 4.0f, 0.15f, 0.30f);
@@ -1843,7 +1940,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(NumericStability_RightWheelSpeedStaysFiniteUnderPlausibleHighCommand)
+        TEST_METHOD(RightWheelSpeedStaysFiniteUnderPlausibleHighCommand)
         {
             TestRuntime runtime;
             VehicleState state = MakeRollingState(1.25f, 4.0f, 0.15f, 0.30f);
@@ -1870,23 +1967,37 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(NumericStability_HeadingStaysNormalizedUnderPlausibleHighCommand)
+        TEST_METHOD(HeadingDoesNotGoBelowNegativePi)
         {
-            const float actual = HighCommandFirstOutOfRangeOrFinalHeading();
+            const float actual = HighCommandFirstBelowMinimumOrFinalHeading();
             std::wstringstream message;
             message << L"PM22_NUMERIC_STABILITY"
                 << L"\nfield=yaw_rad"
                 << L"\nactual=" << actual
                 << L"\nminimum=" << -PI_F
-                << L"\nmaximum=" << PI_F
-                << L"\ncriterion=minimum<=actual<=maximum";
+                << L"\ncriterion=actual>=minimum";
 
             Assert::IsTrue(
-                actual >= -PI_F && actual <= PI_F,
+                actual >= -PI_F,
                 message.str().c_str());
         }
 
-        TEST_METHOD(NumericStability_FinalForwardVelocityStaysWithinPlausibleBounds)
+        TEST_METHOD(HeadingDoesNotExceedPi)
+        {
+            const float actual = HighCommandFirstAboveMaximumOrFinalHeading();
+            std::wstringstream message;
+            message << L"PM22_NUMERIC_STABILITY"
+                << L"\nfield=yaw_rad"
+                << L"\nactual=" << actual
+                << L"\nmaximum=" << PI_F
+                << L"\ncriterion=actual<=maximum";
+
+            Assert::IsTrue(
+                actual <= PI_F,
+                message.str().c_str());
+        }
+
+        TEST_METHOD(FinalForwardVelocityStaysWithinPlausibleBounds)
         {
             TestRuntime runtime;
             VehicleState state = MakeRollingState(1.25f, 4.0f, 0.15f, 0.30f);
@@ -1909,7 +2020,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(NumericStability_FinalYawRateStaysWithinPlausibleBounds)
+        TEST_METHOD(FinalYawRateStaysWithinPlausibleBounds)
         {
             TestRuntime runtime;
             VehicleState state = MakeRollingState(1.25f, 4.0f, 0.15f, 0.30f);
@@ -1932,7 +2043,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(NumericStability_FinalLeftWheelSpeedStaysWithinPlausibleBounds)
+        TEST_METHOD(FinalLeftWheelSpeedStaysWithinPlausibleBounds)
         {
             TestRuntime runtime;
             VehicleState state = MakeRollingState(1.25f, 4.0f, 0.15f, 0.30f);
@@ -1955,7 +2066,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(NumericStability_FinalRightWheelSpeedStaysWithinPlausibleBounds)
+        TEST_METHOD(FinalRightWheelSpeedStaysWithinPlausibleBounds)
         {
             TestRuntime runtime;
             VehicleState state = MakeRollingState(1.25f, 4.0f, 0.15f, 0.30f);
@@ -1978,7 +2089,12 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(AccelerationFeedforward_ForwardAccelerationCommandIsFinite)
+    };
+
+    TEST_CLASS(DriveStack_PlantModelAccelerationFeedforwardTest)
+    {
+    public:
+        TEST_METHOD(ForwardAccelerationLeftCommandIsFinite)
         {
             TestRuntime runtime;
             const App::Internal::CommandVector command =
@@ -1989,17 +2105,38 @@ namespace MazeMap
                     0.0f);
             std::wstringstream message;
             message << L"PM23_INVERSE_SIGN"
-                << L"\nfield=forward_accel_feedforward_command"
+                << L"\nfield=forward_accel_left_command"
                 << L"\nleft_command=" << command.LeftCommand()
                 << L"\nright_command=" << command.RightCommand()
-                << L"\ncriterion=isfinite(left)&&isfinite(right)";
+                << L"\ncriterion=isfinite(left)";
 
             Assert::IsTrue(
-                command.IsFinite(),
+                std::isfinite(command.LeftCommand()),
                 message.str().c_str());
         }
 
-        TEST_METHOD(AccelerationFeedforward_ReverseAccelerationCommandIsFinite)
+        TEST_METHOD(ForwardAccelerationRightCommandIsFinite)
+        {
+            TestRuntime runtime;
+            const App::Internal::CommandVector command =
+                SolveAccelerationFeedforwardAt(
+                    runtime,
+                    MakeRollingState(0.60f, 0.0f),
+                    0.80f,
+                    0.0f);
+            std::wstringstream message;
+            message << L"PM23_INVERSE_SIGN"
+                << L"\nfield=forward_accel_right_command"
+                << L"\nleft_command=" << command.LeftCommand()
+                << L"\nright_command=" << command.RightCommand()
+                << L"\ncriterion=isfinite(right)";
+
+            Assert::IsTrue(
+                std::isfinite(command.RightCommand()),
+                message.str().c_str());
+        }
+
+        TEST_METHOD(ReverseAccelerationLeftCommandIsFinite)
         {
             TestRuntime runtime;
             const App::Internal::CommandVector command =
@@ -2010,17 +2147,38 @@ namespace MazeMap
                     0.0f);
             std::wstringstream message;
             message << L"PM23_INVERSE_SIGN"
-                << L"\nfield=reverse_accel_feedforward_command"
+                << L"\nfield=reverse_accel_left_command"
                 << L"\nleft_command=" << command.LeftCommand()
                 << L"\nright_command=" << command.RightCommand()
-                << L"\ncriterion=isfinite(left)&&isfinite(right)";
+                << L"\ncriterion=isfinite(left)";
 
             Assert::IsTrue(
-                command.IsFinite(),
+                std::isfinite(command.LeftCommand()),
                 message.str().c_str());
         }
 
-        TEST_METHOD(AccelerationFeedforward_ClockwiseYawCommandIsFinite)
+        TEST_METHOD(ReverseAccelerationRightCommandIsFinite)
+        {
+            TestRuntime runtime;
+            const App::Internal::CommandVector command =
+                SolveAccelerationFeedforwardAt(
+                    runtime,
+                    MakeRollingState(0.60f, 0.0f),
+                    -0.80f,
+                    0.0f);
+            std::wstringstream message;
+            message << L"PM23_INVERSE_SIGN"
+                << L"\nfield=reverse_accel_right_command"
+                << L"\nleft_command=" << command.LeftCommand()
+                << L"\nright_command=" << command.RightCommand()
+                << L"\ncriterion=isfinite(right)";
+
+            Assert::IsTrue(
+                std::isfinite(command.RightCommand()),
+                message.str().c_str());
+        }
+
+        TEST_METHOD(ClockwiseYawLeftCommandIsFinite)
         {
             TestRuntime runtime;
             const App::Internal::CommandVector command =
@@ -2031,17 +2189,38 @@ namespace MazeMap
                     8.0f);
             std::wstringstream message;
             message << L"PM23_INVERSE_SIGN"
-                << L"\nfield=yaw_accel_feedforward_command"
+                << L"\nfield=yaw_accel_left_command"
                 << L"\nleft_command=" << command.LeftCommand()
                 << L"\nright_command=" << command.RightCommand()
-                << L"\ncriterion=isfinite(left)&&isfinite(right)";
+                << L"\ncriterion=isfinite(left)";
 
             Assert::IsTrue(
-                command.IsFinite(),
+                std::isfinite(command.LeftCommand()),
                 message.str().c_str());
         }
 
-        TEST_METHOD(AccelerationFeedforward_PositiveForwardAccelerationCommandsMoreAverageThanReverse)
+        TEST_METHOD(ClockwiseYawRightCommandIsFinite)
+        {
+            TestRuntime runtime;
+            const App::Internal::CommandVector command =
+                SolveAccelerationFeedforwardAt(
+                    runtime,
+                    MakeRollingState(0.60f, 0.0f),
+                    0.0f,
+                    8.0f);
+            std::wstringstream message;
+            message << L"PM23_INVERSE_SIGN"
+                << L"\nfield=yaw_accel_right_command"
+                << L"\nleft_command=" << command.LeftCommand()
+                << L"\nright_command=" << command.RightCommand()
+                << L"\ncriterion=isfinite(right)";
+
+            Assert::IsTrue(
+                std::isfinite(command.RightCommand()),
+                message.str().c_str());
+        }
+
+        TEST_METHOD(PositiveForwardAccelerationCommandsMoreAverageThanReverse)
         {
             TestRuntime runtime;
             const VehicleState state = MakeRollingState(0.60f, 0.0f);
@@ -2061,7 +2240,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(AccelerationFeedforward_PositiveClockwiseYawCommandsLeftGreaterThanRight)
+        TEST_METHOD(PositiveClockwiseYawCommandsLeftGreaterThanRight)
         {
             TestRuntime runtime;
             const App::Internal::CommandVector clockwise =
@@ -2083,23 +2262,39 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(AccelerationFeedforward_LongRunForwardSolveCommandStaysFinite)
+        TEST_METHOD(LongRunForwardSolveLeftCommandStaysFinite)
         {
             const App::Internal::CommandVector command =
-                LongRunForwardFirstNonFiniteOrFinalSolveCommand();
+                LongRunForwardFirstNonFiniteLeftOrFinalSolveCommand();
             std::wstringstream message;
             message << L"PM23_INVERSE_SIGN"
-                << L"\nfield=long_run_forward_solve_command"
+                << L"\nfield=long_run_forward_solve_left_command"
                 << L"\nleft_command=" << command.LeftCommand()
                 << L"\nright_command=" << command.RightCommand()
-                << L"\ncriterion=isfinite(left)&&isfinite(right)";
+                << L"\ncriterion=isfinite(left)";
 
             Assert::IsTrue(
-                command.IsFinite(),
+                std::isfinite(command.LeftCommand()),
                 message.str().c_str());
         }
 
-        TEST_METHOD(AccelerationFeedforward_LongRunPositionXStaysFinite)
+        TEST_METHOD(LongRunForwardSolveRightCommandStaysFinite)
+        {
+            const App::Internal::CommandVector command =
+                LongRunForwardFirstNonFiniteRightOrFinalSolveCommand();
+            std::wstringstream message;
+            message << L"PM23_INVERSE_SIGN"
+                << L"\nfield=long_run_forward_solve_right_command"
+                << L"\nleft_command=" << command.LeftCommand()
+                << L"\nright_command=" << command.RightCommand()
+                << L"\ncriterion=isfinite(right)";
+
+            Assert::IsTrue(
+                std::isfinite(command.RightCommand()),
+                message.str().c_str());
+        }
+
+        TEST_METHOD(LongRunPositionXStaysFinite)
         {
             TestRuntime runtime;
             VehicleState state = MakeRollingState(0.30f, 0.0f);
@@ -2127,7 +2322,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(AccelerationFeedforward_LongRunPositionYStaysFinite)
+        TEST_METHOD(LongRunPositionYStaysFinite)
         {
             TestRuntime runtime;
             VehicleState state = MakeRollingState(0.30f, 0.0f);
@@ -2155,7 +2350,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(AccelerationFeedforward_LongRunYawStaysFinite)
+        TEST_METHOD(LongRunYawStaysFinite)
         {
             TestRuntime runtime;
             VehicleState state = MakeRollingState(0.30f, 0.0f);
@@ -2183,7 +2378,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(AccelerationFeedforward_LongRunForwardVelocityStaysFinite)
+        TEST_METHOD(LongRunForwardVelocityStaysFinite)
         {
             TestRuntime runtime;
             VehicleState state = MakeRollingState(0.30f, 0.0f);
@@ -2211,7 +2406,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(AccelerationFeedforward_LongRunLateralVelocityStaysFinite)
+        TEST_METHOD(LongRunLateralVelocityStaysFinite)
         {
             TestRuntime runtime;
             VehicleState state = MakeRollingState(0.30f, 0.0f);
@@ -2239,7 +2434,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(AccelerationFeedforward_LongRunYawRateStaysFinite)
+        TEST_METHOD(LongRunYawRateStaysFinite)
         {
             TestRuntime runtime;
             VehicleState state = MakeRollingState(0.30f, 0.0f);
@@ -2267,7 +2462,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(AccelerationFeedforward_LongRunLeftWheelSpeedStaysFinite)
+        TEST_METHOD(LongRunLeftWheelSpeedStaysFinite)
         {
             TestRuntime runtime;
             VehicleState state = MakeRollingState(0.30f, 0.0f);
@@ -2295,7 +2490,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(AccelerationFeedforward_LongRunRightWheelSpeedStaysFinite)
+        TEST_METHOD(LongRunRightWheelSpeedStaysFinite)
         {
             TestRuntime runtime;
             VehicleState state = MakeRollingState(0.30f, 0.0f);
@@ -2323,7 +2518,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(AccelerationFeedforward_LongRunPositiveAccelerationIncreasesForwardVelocity)
+        TEST_METHOD(LongRunPositiveAccelerationIncreasesForwardVelocity)
         {
             const float actualDelta = LongRunForwardVelocityDelta();
             std::wstringstream message;

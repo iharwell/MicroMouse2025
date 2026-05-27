@@ -1,0 +1,13 @@
+parameter,value,lower_bound,upper_bound,near_boundary
+drive_scale,0.10811574979623492,0.05,0.15,False
+longitudinal_mu,0.5746342453690183,0.0,0.7,False
+longitudinal_k_mps,0.5353902607802853,0.005,0.6,False
+stribeck_slide_mu,0.23303250139117337,0.0,0.4,False
+stribeck_static_extra_mu,0.07184304916397219,0.02,0.7,False
+stribeck_speed_mps,0.29476074628852084,0.004,0.3,True
+transition_vf_mps,0.03055172044396741,0.02,0.9,True
+alpha_stiff_base,0.6947729044920873,0.0,8.0,False
+alpha_stiff_speed_gain,0.7175835277932026,0.0,16.0,False
+alpha_stiff_speed_k_mps,1.9893213409967352,0.03,2.0,True
+alpha_saturation_mu,1.63355497542322,0.05,2.2,False
+alpha_floor_mps,0.031713318840781435,0.015,0.6,False

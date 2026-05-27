@@ -1,0 +1,28 @@
+{
+  "hard_gate_abs_command_max": 0.72,
+  "hard_gate_abs_command_min": 0.6,
+  "hard_gate_abs_command_reference": 0.646,
+  "hard_gate_condition": "Vf=0, Vr=0, yaw=+1 rad/s",
+  "model_input_rule": "continuous contact primitives only; no maneuver labels in prediction",
+  "positive_yaw": "clockwise",
+  "vf_grid_mps": [
+    0.0,
+    0.03,
+    0.06,
+    0.09,
+    0.12,
+    0.15
+  ],
+  "yaw_grid_radps": [
+    0.2,
+    0.844444444,
+    1.488888889,
+    2.133333333,
+    2.777777778,
+    3.422222222,
+    4.066666667,
+    4.711111111,
+    5.355555556,
+    6.0
+  ]
+}

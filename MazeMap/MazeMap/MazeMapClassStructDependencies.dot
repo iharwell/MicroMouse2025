@@ -607,7 +607,6 @@ digraph MazeMapClassStructDependencies {
   fn_MazeMap__TryComputeFrontWallHalfwayIntoAdjacentDistanceM [label="MazeMap::TryComputeFrontWallHalfwayIntoAdjacentDistanceM", tooltip="WallDetectionThresholds.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__TryComputeInverseSquareDistanceFromReferenceSignal [label="MazeMap::TryComputeInverseSquareDistanceFromReferenceSignal", tooltip="WallDetectionThresholds.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__TryComputeInverseSquareSignalAtDistanceFromReference [label="MazeMap::TryComputeInverseSquareSignalAtDistanceFromReference", tooltip="WallDetectionThresholds.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
-  fn_MazeMap__TryComputeLinearWallSignalDistanceThresholdM [label="MazeMap::TryComputeLinearWallSignalDistanceThresholdM", tooltip="WallDetectionThresholds.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__TryComputeMeasuredValueForActualDistanceUsingAmbientAwareLogSignalModel [label="MazeMap::TryComputeMeasuredValueForActualDistanceUsingAmbientAwareLogSignalModel", tooltip="WallDetectionThresholds.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__TryComputeNormalizedWallSignalBalanceError [label="MazeMap::TryComputeNormalizedWallSignalBalanceError", tooltip="DiagonalWallCentering.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__TryComputeProjectedDistanceToTargetM [label="MazeMap::TryComputeProjectedDistanceToTargetM", tooltip="MotionTargetProjection.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
@@ -2303,7 +2302,6 @@ digraph MazeMapClassStructDependencies {
   class_WallDistanceCalibration -> fn_MazeMap__TryComputeConservativeSignalRiseThresholdsFromBands [weight=1];
   class_WallDistanceCalibration -> fn_MazeMap__TryComputeFrontWallHalfwayIntoAdjacentDistanceM [weight=1];
   class_WallDistanceCalibration -> fn_MazeMap__TryComputeInverseSquareDistanceFromReferenceSignal [weight=1];
-  class_WallDistanceCalibration -> fn_MazeMap__TryComputeLinearWallSignalDistanceThresholdM [weight=1];
   class_WallDistanceCalibration -> fn_MazeMap__TryComputeMeasuredValueForActualDistanceUsingAmbientAwareLogSignalModel [weight=1];
   class_WallDistanceCalibration -> fn_MazeMap__TryComputeSignalHighThresholds [weight=1];
   class_WallDistanceCalibration -> fn_MazeMap__TryComputeSignalRiseThresholds [weight=1];

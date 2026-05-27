@@ -455,38 +455,6 @@ bool WallDistanceCalibration::TryGetFrontDirectRiseThresholds(
         offRiseThreshold < onRiseThreshold;
 }
 
-bool WallDistanceCalibration::TryComputeSideWallDistanceThresholds(float latchSignalFraction, float releaseSignalFraction, float& onThresholdM, float& offThresholdM) const
-{
-    onThresholdM = MazeMap::Config::kSideWallOnThresholdM;
-    offThresholdM = MazeMap::Config::kSideWallOffThresholdM;
-
-    float derivedOnThresholdM = 0.0f;
-    float derivedOffThresholdM = 0.0f;
-    if (!MazeMap::TryComputeLinearWallSignalDistanceThresholdM(
-            _expectedSideWallDistanceM,
-            latchSignalFraction,
-            derivedOnThresholdM) ||
-        !MazeMap::TryComputeLinearWallSignalDistanceThresholdM(
-            _expectedSideWallDistanceM,
-            releaseSignalFraction,
-            derivedOffThresholdM))
-    {
-        return false;
-    }
-
-    if (!(std::isfinite(derivedOnThresholdM) &&
-        std::isfinite(derivedOffThresholdM) &&
-        derivedOnThresholdM > 0.0f &&
-        derivedOffThresholdM >= derivedOnThresholdM))
-    {
-        return false;
-    }
-
-    onThresholdM = derivedOnThresholdM;
-    offThresholdM = derivedOffThresholdM;
-    return true;
-}
-
 void WallDistanceCalibration::SetSideWallReferenceDifferentialLight(
     MazeMap::RelativeDirection side,
     float differentialLight)
@@ -1296,17 +1264,11 @@ bool WallDistanceCalibration::IsSideWallSignalClassifiable(
             (signalRise <= missRiseThreshold));
 }
 
-bool WallDistanceCalibration::IsSideWallFallbackDistanceValid(const float fallbackDistanceM) const noexcept
-{
-    return std::isfinite(fallbackDistanceM) && (fallbackDistanceM > 0.0f);
-}
-
 bool WallDistanceCalibration::IsSideWallObservationEligible(
     const bool detectionWindowValid,
-    const bool signalClassifiable,
-    const bool fallbackDistanceValid) const noexcept
+    const bool signalClassifiable) const noexcept
 {
-    return detectionWindowValid && (signalClassifiable || fallbackDistanceValid);
+    return detectionWindowValid && signalClassifiable;
 }
 
 bool WallDistanceCalibration::IsSideWallControlRangeValid(
@@ -1314,22 +1276,14 @@ bool WallDistanceCalibration::IsSideWallControlRangeValid(
     const bool transitionDetected,
     const bool signalMetricsValid,
     const float signalRise,
-    const float latchRiseThreshold,
-    const bool fallbackDistanceValid,
-    const float fallbackDistanceM,
-    const float offThresholdM) const noexcept
+    const float latchRiseThreshold) const noexcept
 {
     if (!observationEligible || transitionDetected)
     {
         return false;
     }
 
-    if (signalMetricsValid)
-    {
-        return signalRise >= latchRiseThreshold;
-    }
-
-    return fallbackDistanceValid && (fallbackDistanceM < offThresholdM);
+    return signalMetricsValid && (signalRise >= latchRiseThreshold);
 }
 
 bool WallDistanceCalibration::DetectSideWallTransitionFromSignalRise(
@@ -1362,8 +1316,6 @@ bool WallDistanceCalibration::DetectSideWallTransitionFromSignalRise(
 bool WallDistanceCalibration::ComputeSideWallObservationHit(
     const MazeMap::RelativeDirection side,
     const float measuredDifferentialLight,
-    const float fallbackDistanceM,
-    const float onThresholdM,
     const bool detectionWindowValid) const
 {
     if (!detectionWindowValid)
@@ -1385,15 +1337,12 @@ bool WallDistanceCalibration::ComputeSideWallObservationHit(
         return ComputeCalibratedSideSignalRise(measuredDifferentialLight, signalBaseline) >= onMeasuredThreshold;
     }
 
-    return std::isfinite(fallbackDistanceM) && (fallbackDistanceM < onThresholdM);
+    return false;
 }
 
 bool WallDistanceCalibration::UpdateSideWallState(
     const MazeMap::RelativeDirection side,
     const float measuredDifferentialLight,
-    const float fallbackDistanceM,
-    const float onThresholdM,
-    const float offThresholdM,
     const bool detectionWindowValid,
     float& filteredSignal,
     bool& signalInitialized,
@@ -1428,7 +1377,7 @@ bool WallDistanceCalibration::UpdateSideWallState(
     }
 
     signalInitialized = false;
-    currentState = currentState ? (fallbackDistanceM < offThresholdM) : (fallbackDistanceM < onThresholdM);
+    currentState = false;
     return currentState;
 }
 

@@ -1,0 +1,4 @@
+source,variant,left_command,right_command,lr_delta_command,extra_opposing_yaw_torque_nm,note
+in_place_1radps_command_estimate.csv,Variant B Stribeck scrub,0.6427496056765714,-0.6427496056765714,1.2854992113531427,0.06501335920678508,correct branch reference; fixed point through request-only activation
+round2_hybrid_b_c/in_place_1radps_command.csv,B_stribeck,0.6427496056765714,-0.6427496056765714,1.2854992113531427,0.06501335920678508,"B_stribeck should match reference; Hybrid_BC is a mixed B/C diagnostic, not the requested B branch"
+round2_hybrid_b_c/in_place_1radps_command.csv,Hybrid_BC_adhesion_partition,0.625297549999602,-0.625297549999602,1.250595099999204,0.062035406411738776,"B_stribeck should match reference; Hybrid_BC is a mixed B/C diagnostic, not the requested B branch"

@@ -128,6 +128,20 @@ namespace MazeMap
             const App::Internal::CommandVector& control) const noexcept;
         float backLeftImuForwardAccelerationMps2(
             const App::Internal::CommandVector& control) const noexcept;
+        float yawResidualBlendSpeedKneeMps() const noexcept;
+        void setYawResidualBlendSpeedKneeMps(float speedKneeMps) noexcept;
+        float yawResidualBlendForceKnee() const noexcept;
+        void setYawResidualBlendForceKnee(float forceKnee) noexcept;
+        float yawResidualForceRelWeight() const noexcept;
+        void setYawResidualForceRelWeight(float relWeight) noexcept;
+        float yawResidualForceSpeedFadeMps() const noexcept;
+        void setYawResidualForceSpeedFadeMps(float speedFadeMps) noexcept;
+        float yawResidualForceSlidingMomentNm() const noexcept;
+        void setYawResidualForceSlidingMomentNm(float slidingMomentNm) noexcept;
+        float yawResidualVariantCRelativeSpeedKneeMps() const noexcept;
+        void setYawResidualVariantCRelativeSpeedKneeMps(float relativeSpeedKneeMps) noexcept;
+        float yawResidualVariantCForwardSpeedKneeMps() const noexcept;
+        void setYawResidualVariantCForwardSpeedKneeMps(float forwardSpeedKneeMps) noexcept;
 
     private:
         friend class Estimator;
@@ -150,6 +164,22 @@ namespace MazeMap
         // Delay-calibrated replay on 2026-05-24 found no problem-solving gain under +4 command-to-gyro alignment
         // once +5 derivative-onset and yaw-launch sustained-step checks were applied.
         static constexpr float kContactYawPatchForceGainNsPerM = 0.0f;
+        static constexpr float kDefaultYawResidualBlendSpeedKneeMps = 0.500f;
+        static constexpr float kDefaultYawResidualBlendForceKnee = 0.10f;
+        static constexpr float kDefaultYawResidualForceRelWeight = 0.75f;
+        static constexpr float kDefaultYawResidualForceSpeedFadeMps = 0.64f;
+        static constexpr float kDefaultYawResidualForceSlidingMomentNm = 0.067416756f;
+        static constexpr float kDefaultYawResidualVariantCRelativeSpeedKneeMps = 0.060f;
+        static constexpr float kDefaultYawResidualVariantCForwardSpeedKneeMps = 0.700f;
+        static constexpr float kYawResidualVariantCLongLowRelCoeff = -3.40047972f;
+        static constexpr float kYawResidualVariantCRightBaseCoeff = 13.2601696f;
+        static constexpr float kYawResidualVariantCForceMomentHighForwardCoeff = -4.82022237f;
+        static constexpr float kYawResidualVariantCRightUtilCoeff = -23.1307703f;
+        static constexpr float kYawResidualVariantCLongBaseCoeff = -0.698421232f;
+        static constexpr float kYawResidualVariantCLongUtilCoeff = 1.44882457f;
+        static constexpr float kYawResidualVariantCRightLowRelCoeff = 15.6895342f;
+        static constexpr float kYawResidualVariantCLongHighForwardCoeff = 5.50859152f;
+        static constexpr float kYawResidualVariantCRightHighForwardCoeff = -29.7563404f;
         static constexpr float kFrontLoadFraction = 0.5f;
         static constexpr float kMuFront = 1.65f;
         static constexpr float kMuRear = 1.65f;
@@ -306,6 +336,30 @@ namespace MazeMap
             const char* format,
             ...) noexcept;
         static float SignedDirection(float preferredValue, float fallbackValue) noexcept;
+        static float PositivePart(float value) noexcept;
+        static float PositiveFiniteOrDefault(float value, float fallback) noexcept;
+        static float RationalSquareGate(float value, float knee) noexcept;
+        float yawResidualOpposingMomentNm(
+            float forwardVelocityMps,
+            float contactRelativeSpeedMps,
+            float projectedYawMomentAlongYawNm,
+            float yawMomentYieldNm,
+            float variantCOpposingMomentNm) const noexcept;
+        float variantCYawResidualOpposingMomentNm(
+            float yawDirection,
+            float forwardVelocityMps,
+            const WheelKinematics& kinematics,
+            const std::array<float, 4>& contactRightPositionsM,
+            const std::array<float, 4>& contactForwardPositionsM,
+            const std::array<float, 4>& contactNormalLoadN,
+            const std::array<float, 4>& projectedForwardForceN,
+            const std::array<float, 4>& projectedRightForceN,
+            float totalNormalLoadN,
+            float maxProjectedContactUtilization) const noexcept;
+        static float loadWeightedContactRelativeSpeedMps(
+            const WheelKinematics& kinematics,
+            const std::array<float, 4>& contactNormalLoadN,
+            float totalNormalLoadN) noexcept;
         static float residualDecayAlpha(float dtS, float tauS) noexcept;
         PlantDerivatives forwardStep(
             const App::Internal::CommandVector& control) const noexcept;
@@ -351,5 +405,12 @@ namespace MazeMap
         VehicleState& _runtimeState;
         const MotorEncoderDrive& _leftDrive;
         const MotorEncoderDrive& _rightDrive;
+        float _yawResidualBlendSpeedKneeMps = kDefaultYawResidualBlendSpeedKneeMps;
+        float _yawResidualBlendForceKnee = kDefaultYawResidualBlendForceKnee;
+        float _yawResidualForceRelWeight = kDefaultYawResidualForceRelWeight;
+        float _yawResidualForceSpeedFadeMps = kDefaultYawResidualForceSpeedFadeMps;
+        float _yawResidualForceSlidingMomentNm = kDefaultYawResidualForceSlidingMomentNm;
+        float _yawResidualVariantCRelativeSpeedKneeMps = kDefaultYawResidualVariantCRelativeSpeedKneeMps;
+        float _yawResidualVariantCForwardSpeedKneeMps = kDefaultYawResidualVariantCForwardSpeedKneeMps;
     };
 }

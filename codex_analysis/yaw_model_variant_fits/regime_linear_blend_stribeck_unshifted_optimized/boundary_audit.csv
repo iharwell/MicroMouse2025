@@ -1,0 +1,17 @@
+variant,parameter,value,range_min,range_max,normalized_margin_to_nearest_boundary,boundary_adjacent,search_status
+standard,k1,6.103337837732789e-06,9.6e-07,2.5,0.12520848646560745,False,unresolved_boundary_after_expansion
+standard,delta_k,9.538464283430103e-06,4.8e-06,5.0,0.04955976449088933,False,unresolved_boundary_after_expansion
+standard,k3_radps,0.3751744861061835,0.004,2.0,0.2692866901663753,False,unresolved_boundary_after_expansion
+standard,stribeck_speed_mps,0.00043133163983859966,0.00016,0.65,0.11934496913498104,False,unresolved_boundary_after_expansion
+standard,speed_fade_mps,0.060488702340218026,0.01,5.0,0.28961947204422345,False,unresolved_boundary_after_expansion
+standard,rel_weight,-0.010345278211839393,-3.0,3.0,0.49827578696469343,False,unresolved_boundary_after_expansion
+standard,load_exponent,1.0,0.0,1.5,0.33333333333333337,False,unresolved_boundary_after_expansion
+standard,interpretation,reach_x2,meet_x1;reach_x2,meet_x1;reach_x2,1.0,False,unresolved_boundary_after_expansion
+latest_weighted,k1,5.2497629401310495e-06,9.6e-07,2.5,0.11501037311649749,False,unresolved_boundary_after_expansion
+latest_weighted,delta_k,4.8e-06,9.6e-07,5.0,0.10406451564018912,False,unresolved_boundary_after_expansion
+latest_weighted,k3_radps,1.2425964758531518,0.004,2.0,0.07658472593703536,False,unresolved_boundary_after_expansion
+latest_weighted,stribeck_speed_mps,0.0006649493134704142,0.00016,0.65,0.17143363312783644,False,unresolved_boundary_after_expansion
+latest_weighted,speed_fade_mps,0.04926763594190004,0.01,5.0,0.25660223065727894,False,unresolved_boundary_after_expansion
+latest_weighted,rel_weight,-0.019350084744483357,-3.0,3.0,0.49677498587591945,False,unresolved_boundary_after_expansion
+latest_weighted,load_exponent,1.0,0.0,1.5,0.33333333333333337,False,unresolved_boundary_after_expansion
+latest_weighted,interpretation,reach_x2,meet_x1;reach_x2,meet_x1;reach_x2,1.0,False,unresolved_boundary_after_expansion

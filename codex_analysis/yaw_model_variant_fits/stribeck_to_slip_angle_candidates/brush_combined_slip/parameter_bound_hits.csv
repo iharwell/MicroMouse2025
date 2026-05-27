@@ -1,0 +1,5 @@
+parameter,value,hit,lower_bound,upper_bound
+mu_peak,5.0,upper,0.65,5.0
+long_speed_floor_mps,1.0,upper,0.02,1.0
+longitudinal_slip_knee_mps,0.7,upper,0.01,0.7
+longitudinal_envelope_shape,2.5,upper,0.45,2.5

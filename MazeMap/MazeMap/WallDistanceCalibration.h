@@ -66,7 +66,6 @@ public:
         float& signalBaseline,
         float& onRiseThreshold,
         float& offRiseThreshold) const;
-    bool TryComputeSideWallDistanceThresholds(float latchSignalFraction, float releaseSignalFraction, float& onThresholdM, float& offThresholdM) const;
     void SetSideWallReferenceDifferentialLight(MazeMap::RelativeDirection side, float differentialLight);
     void SetSideWallReferenceDifferentialLightBand(MazeMap::RelativeDirection side, float lowDifferentialLight, float highDifferentialLight);
     void SetSideWallReferenceDistanceM(MazeMap::RelativeDirection side, float distanceM);
@@ -94,20 +93,15 @@ public:
         float signalRise,
         float latchRiseThreshold,
         float missRiseThreshold) const noexcept;
-    bool IsSideWallFallbackDistanceValid(float fallbackDistanceM) const noexcept;
     bool IsSideWallObservationEligible(
         bool detectionWindowValid,
-        bool signalClassifiable,
-        bool fallbackDistanceValid) const noexcept;
+        bool signalClassifiable) const noexcept;
     bool IsSideWallControlRangeValid(
         bool observationEligible,
         bool transitionDetected,
         bool signalMetricsValid,
         float signalRise,
-        float latchRiseThreshold,
-        bool fallbackDistanceValid,
-        float fallbackDistanceM,
-        float offThresholdM) const noexcept;
+        float latchRiseThreshold) const noexcept;
     bool DetectSideWallTransitionFromSignalRise(
         bool detectionWindowValid,
         bool signalMetricsValid,
@@ -119,15 +113,10 @@ public:
     bool ComputeSideWallObservationHit(
         MazeMap::RelativeDirection side,
         float measuredDifferentialLight,
-        float fallbackDistanceM,
-        float onThresholdM,
         bool detectionWindowValid) const;
     bool UpdateSideWallState(
         MazeMap::RelativeDirection side,
         float measuredDifferentialLight,
-        float fallbackDistanceM,
-        float onThresholdM,
-        float offThresholdM,
         bool detectionWindowValid,
         float& filteredSignal,
         bool& signalInitialized,

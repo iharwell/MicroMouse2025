@@ -1,0 +1,3 @@
+variant,extra_opposing_yaw_torque_nm,baseline_opposing_yaw_torque_nm,total_opposing_yaw_torque_nm,left_command,right_command,max_abs_command,target_abs_command,passes_abs_0p6_gate
+standard,0.06556799420449655,0.014794249999999998,0.08036224420449654,0.6459999999999998,-0.6459999999999998,0.6459999999999998,0.646,True
+latest_weighted,0.06556799420449656,0.014794249999999998,0.08036224420449656,0.646,-0.646,0.646,0.646,True

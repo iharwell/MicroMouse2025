@@ -329,16 +329,6 @@ namespace MazeMap::Config
     constexpr uint8_t kSearchRollingObservationSampleCount = 9U;
     constexpr uint8_t kSearchRollingObservationMajorityCount =
         static_cast<uint8_t>((kSearchRollingObservationSampleCount / 2U) + 1U);
-    // [High] Distance-domain side-wall threshold fallback geometry. This remains the "wall versus next-cell wall"
-    // ratio used only when the measured-signal threshold path is unavailable.
-    constexpr float kSideWallDistanceLatchFractionOfCalibration = (1.0f / 6.0f);
-    // [High] Distance-domain side-wall release fallback fraction.
-    constexpr float kSideWallDistanceReleaseFractionOfCalibration = (1.0f / 8.0f);
-    // [High] Side-wall detection threshold fallback for latching "wall present". The preferred threshold is now derived
-    // from the calibrated side-wall distance and the linear inverse-square signal model.
-    constexpr float kSideWallOnThresholdM = 0.120f;
-    // [High] Side-wall release threshold fallback. See the ON-threshold note above.
-    constexpr float kSideWallOffThresholdM = 0.140f;
     // [High] Number of raw samples averaged for each startup wall-calibration capture. Raise it if calibration still
     // jitters; lower it only if startup time matters more than wall-fit quality.
     constexpr uint16_t kWallCalibrationAverageSampleCount = 50U;

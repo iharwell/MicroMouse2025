@@ -560,13 +560,6 @@ namespace MazeMap
 			Assert::AreEqual(0.35f, recoveredCorrection, 1.0e-6f);
 		}
 
-		TEST_METHOD(TryComputeLinearWallSignalDistanceThresholdMUsesInverseSquareScaling)
-		{
-			float thresholdDistanceM = 0.0f;
-			Assert::IsTrue(TryComputeLinearWallSignalDistanceThresholdM(0.0550f, 1.0f / 6.0f, thresholdDistanceM));
-			Assert::AreEqual(0.1347219f, thresholdDistanceM, 0.0001f);
-		}
-
 		TEST_METHOD(TryComputeInverseSquareSignalAtDistanceFromReferenceKeepsThresholdGeometryConsistent)
 		{
 			float normalizedReferenceSignal = 0.0f;

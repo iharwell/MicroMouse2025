@@ -1,0 +1,2 @@
+total_opposing_yaw_torque_nm,left_command,right_command,lr_delta_command,max_abs_command,passes_abs_0p6_gate,target_command_abs
+0.009341084053676967,0.6457284642640345,-0.6457284642640345,1.291456928528069,0.6457284642640345,True,0.646

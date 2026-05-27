@@ -1,0 +1,19 @@
+variant,round_index,selected_objective,selected_gate_pass,selected_gate_reason,selected_shape_json,selected_interpretation,boundary_changes,ranges_json,parameter,value,range_min,range_max,normalized_margin_to_nearest_boundary,boundary_adjacent,search_status
+standard,1.0,0.038443722365629936,True,pass,"{""delta_k"": 1.2158081388989472, ""k1"": 0.036373659653569874, ""k3_radps"": 1.176190200278695, ""load_exponent"": 1.3012714327603032, ""rel_weight"": 0.1832154107120683, ""speed_fade_mps"": 0.8453528681116539, ""stribeck_speed_mps"": 0.005205010831897792}",reach_x2,,"{""delta_k"": [0.015, 5.0], ""k1"": [0.015, 2.5], ""k3_radps"": [0.004, 2.0], ""load_exponent"": [0.0, 1.5], ""rel_weight"": [0.0, 3.0], ""speed_fade_mps"": [0.05, 5.0], ""stribeck_speed_mps"": [0.004, 0.65]}",,,,,,,
+standard,,,,,,,,,k1,0.036373659653569874,0.015,2.5,0.173142181627646,False,interior_selected
+standard,,,,,,,,,delta_k,1.2158081388989472,0.015,5.0,0.24341437699282287,False,interior_selected
+standard,,,,,,,,,k3_radps,1.176190200278695,0.004,2.0,0.0854223791465002,False,interior_selected
+standard,,,,,,,,,stribeck_speed_mps,0.005205010831897792,0.004,0.65,0.051727377357118444,False,interior_selected
+standard,,,,,,,,,speed_fade_mps,0.8453528681116539,0.05,5.0,0.385965986933006,False,interior_selected
+standard,,,,,,,,,rel_weight,0.1832154107120683,0.0,3.0,0.06107180357068943,False,interior_selected
+standard,,,,,,,,,load_exponent,1.3012714327603032,0.0,1.5,0.13248571149313115,False,interior_selected
+standard,,,,,,,,,interpretation,reach_x2,meet_x1;reach_x2,meet_x1;reach_x2,1.0,False,interior_selected
+latest_weighted,1.0,0.0374729242545051,True,pass,"{""delta_k"": 3.2296856339228057, ""k1"": 0.6952117993222168, ""k3_radps"": 1.4250274897386914, ""load_exponent"": 1.2425925256198946, ""rel_weight"": 0.1638709848456119, ""speed_fade_mps"": 0.0652262844617298, ""stribeck_speed_mps"": 0.004959029894328769}",reach_x2,,"{""delta_k"": [0.015, 5.0], ""k1"": [0.015, 2.5], ""k3_radps"": [0.004, 2.0], ""load_exponent"": [0.0, 1.5], ""rel_weight"": [0.0, 3.0], ""speed_fade_mps"": [0.05, 5.0], ""stribeck_speed_mps"": [0.004, 0.65]}",,,,,,,
+latest_weighted,,,,,,,,,k1,0.6952117993222168,0.015,2.5,0.25016233634343266,False,interior_selected
+latest_weighted,,,,,,,,,delta_k,3.2296856339228057,0.015,5.0,0.07523538456941459,False,interior_selected
+latest_weighted,,,,,,,,,k3_radps,1.4250274897386914,0.004,2.0,0.05454182638914307,False,interior_selected
+latest_weighted,,,,,,,,,stribeck_speed_mps,0.004959029894328769,0.004,0.65,0.042217514954199606,False,interior_selected
+latest_weighted,,,,,,,,,speed_fade_mps,0.0652262844617298,0.05,5.0,0.0577263179093722,False,interior_selected
+latest_weighted,,,,,,,,,rel_weight,0.1638709848456119,0.0,3.0,0.05462366161520397,False,interior_selected
+latest_weighted,,,,,,,,,load_exponent,1.2425925256198946,0.0,1.5,0.1716049829200702,False,interior_selected
+latest_weighted,,,,,,,,,interpretation,reach_x2,meet_x1;reach_x2,meet_x1;reach_x2,1.0,False,interior_selected

@@ -237,8 +237,8 @@ Tune the sensing and wall-following group:
 - `kExpectedSideWallDistanceM`
 - `kFrontWallOnThresholdM`
 - `kFrontWallOffThresholdM`
-- `kSideWallOnThresholdM`
-- `kSideWallOffThresholdM`
+- `kSideWallMeasuredSignalLatchThreshold`
+- `kSideWallMeasuredSignalReleaseThreshold`
 - `kStraightHeadingKp`
 - `kStraightYawD`
 - `kWallCenterGain`

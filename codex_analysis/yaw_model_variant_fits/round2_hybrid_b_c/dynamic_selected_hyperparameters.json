@@ -1,0 +1,13 @@
+{
+  "anchor_extra_opposing_yaw_torque_nm": 0.06501335920678508,
+  "bristle_length_m": 0.002,
+  "coulomb_fraction": 0.65,
+  "fwd_knee_mps": 0.7,
+  "model": "Dynamic_LuGre_bristle",
+  "nominal_load_n": 1.932931008,
+  "ridge": 0.03,
+  "static_gain_nm": 0.06578288683442375,
+  "stribeck_speed_mps": 0.06,
+  "uses_command_or_request_as_traction_input": false,
+  "vrel_knee_mps": 0.05
+}

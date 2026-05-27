@@ -1,0 +1,2 @@
+scenario,opposing_bristle_scrub_nm,left_command,right_command,max_abs_command,gate_pass,target_abs_command,target_abs_error
+Vf0_Vr0_yawRate_pos1,0.00868710894173264,0.6459287016071994,-0.6459287016071994,0.6459287016071994,True,0.646,7.129839280062278e-05

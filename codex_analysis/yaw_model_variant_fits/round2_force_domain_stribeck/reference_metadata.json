@@ -1,0 +1,54 @@
+{
+  "inputs": {
+    "primary": "codex_analysis\\contact_continuum_yaw_identification\\ablation\\phase_classified_feature_sample.csv",
+    "secondary": "codex_analysis\\contact_continuum_yaw_identification\\features\\contact_continuum_feature_sample.csv",
+    "constants": "codex_analysis\\contact_continuum_yaw_identification\\features\\plant_mirror_constants.csv"
+  },
+  "metadata": {
+    "nominal_total_load_n": 1.932931008,
+    "mu_ref": 1.3566434596717898,
+    "nominal_longitudinal_yield_nm": 0.11096910450167499,
+    "nominal_full_yaw_yield_nm": 0.1175168045456451,
+    "rows": 118580,
+    "runs": 49
+  },
+  "selected": {
+    "role": "selected_projected_force_domain",
+    "activation_source": "projected_force_moment_utilization",
+    "yield_geometry": "longitudinal_moment_support",
+    "equivalent_activation_nm": 0.035,
+    "utilization_activation": 0.3154031039285507,
+    "stribeck_speed_mps": 0.025,
+    "speed_fade_mps": 0.64,
+    "rel_weight": 0.75,
+    "static_extra_nm": 0.0,
+    "sliding_nm": 0.06741675635026155,
+    "weighted_train_opposes_rmse_nm": 0.024088350221216342,
+    "primary_corrected_rmse_nm": 0.027907821180421354,
+    "open_floor_validation_corrected_rmse_nm": 0.01139376781450519,
+    "in_place_left_command": 0.6550644654532793,
+    "in_place_right_command": -0.6550644654532793,
+    "in_place_extra_opposing_yaw_torque_nm": 0.06711472031698633
+  },
+  "rejected_request_moment_diagnostic": {
+    "role": "rejected_request_moment_command_gate",
+    "activation_source": "request_moment_utilization",
+    "yield_geometry": "longitudinal_moment_support",
+    "equivalent_activation_nm": 0.035,
+    "utilization_activation": 0.3154031039285507,
+    "stribeck_speed_mps": 0.1,
+    "speed_fade_mps": 0.64,
+    "rel_weight": 0.75,
+    "static_extra_nm": 0.0028707314261316157,
+    "sliding_nm": 0.06252832523970436,
+    "weighted_train_opposes_rmse_nm": 0.0243401682965182,
+    "primary_corrected_rmse_nm": 0.028524072603624426,
+    "open_floor_validation_corrected_rmse_nm": 0.011372543472361286,
+    "in_place_left_command": 0.6425685451006024,
+    "in_place_right_command": -0.6425685451006024,
+    "in_place_extra_opposing_yaw_torque_nm": 0.06498246371468605
+  },
+  "production_code_edited": false,
+  "build_metadata_edited": false,
+  "tests_edited": false
+}

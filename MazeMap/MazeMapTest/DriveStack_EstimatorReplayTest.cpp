@@ -296,10 +296,10 @@ namespace MazeMap
         }
     }
 
-    TEST_CLASS(DriveStack_EstimatorReplayTest)
+    TEST_CLASS(DriveStack_ForwardEncoderReplayTest)
     {
     public:
-        TEST_METHOD(EncoderOnlyForwardReplay_LeftCountsPositive)
+        TEST_METHOD(LeftCountsPositive)
         {
             const ReplayScenarioResult result = RunForwardEncoderReplay();
             std::wstringstream message;
@@ -311,7 +311,7 @@ namespace MazeMap
             Assert::IsTrue(result.leftEncoderTotalCounts > 0, message.str().c_str());
         }
 
-        TEST_METHOD(EncoderOnlyForwardReplay_LeftRightCountsMatch)
+        TEST_METHOD(LeftRightCountsMatch)
         {
             const ReplayScenarioResult result = RunForwardEncoderReplay();
             std::wstringstream message;
@@ -327,7 +327,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(EncoderOnlyForwardReplay_LeftDistanceMatchesCounts)
+        TEST_METHOD(LeftDistanceMatchesCounts)
         {
             const ReplayScenarioResult result = RunForwardEncoderReplay();
             std::wstringstream message;
@@ -344,7 +344,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(EncoderOnlyForwardReplay_PositionYMatchesEncoderDistance)
+        TEST_METHOD(PositionYMatchesEncoderDistance)
         {
             const ReplayScenarioResult result = RunForwardEncoderReplay();
             std::wstringstream message;
@@ -361,7 +361,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(EncoderOnlyForwardReplay_PositionXStaysNearZero)
+        TEST_METHOD(PositionXStaysNearZero)
         {
             const ReplayScenarioResult result = RunForwardEncoderReplay();
             std::wstringstream message;
@@ -378,7 +378,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(EncoderOnlyForwardReplay_YawStaysNearZero)
+        TEST_METHOD(YawStaysNearZero)
         {
             const ReplayScenarioResult result = RunForwardEncoderReplay();
             std::wstringstream message;
@@ -395,7 +395,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(EncoderOnlyForwardReplay_VelocityMatchesForward)
+        TEST_METHOD(VelocityMatchesForward)
         {
             const ReplayScenarioResult result = RunForwardEncoderReplay();
             std::wstringstream message;
@@ -412,7 +412,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(EncoderOnlyForwardReplay_EstimatorFaultClear)
+        TEST_METHOD(EstimatorFaultClear)
         {
             const ReplayScenarioResult result = RunForwardEncoderReplay();
             std::wstringstream message;
@@ -423,8 +423,12 @@ namespace MazeMap
 
             Assert::IsFalse(result.estimatorFault, message.str().c_str());
         }
+    };
 
-        TEST_METHOD(EncoderDifferentialReplay_LeftCountsGreaterThanRight)
+    TEST_CLASS(DriveStack_DifferentialEncoderReplayTest)
+    {
+    public:
+        TEST_METHOD(LeftCountsGreaterThanRight)
         {
             const ReplayScenarioResult result = RunDifferentialEncoderReplay();
             std::wstringstream message;
@@ -439,7 +443,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(EncoderDifferentialReplay_YawSignPositive)
+        TEST_METHOD(YawSignPositive)
         {
             const ReplayScenarioResult result = RunDifferentialEncoderReplay();
             std::wstringstream message;
@@ -451,7 +455,7 @@ namespace MazeMap
             Assert::IsTrue(result.yawRad > 0.0f, message.str().c_str());
         }
 
-        TEST_METHOD(EncoderDifferentialReplay_YawRateMatchesEncoderDifferential)
+        TEST_METHOD(YawRateMatchesEncoderDifferential)
         {
             const ReplayScenarioResult result = RunDifferentialEncoderReplay();
             std::wstringstream message;
@@ -468,7 +472,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(EncoderDifferentialReplay_YawMatchesEncoderIntegration)
+        TEST_METHOD(YawMatchesEncoderIntegration)
         {
             const ReplayScenarioResult result = RunDifferentialEncoderReplay();
             std::wstringstream message;
@@ -485,7 +489,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(EncoderDifferentialReplay_EstimatorFaultClear)
+        TEST_METHOD(EstimatorFaultClear)
         {
             const ReplayScenarioResult result = RunDifferentialEncoderReplay();
             std::wstringstream message;
@@ -496,8 +500,12 @@ namespace MazeMap
 
             Assert::IsFalse(result.estimatorFault, message.str().c_str());
         }
+    };
 
-        TEST_METHOD(GyroOnlyReplay_YawSignPositive)
+    TEST_CLASS(DriveStack_GyroOnlyReplayTest)
+    {
+    public:
+        TEST_METHOD(YawSignPositive)
         {
             const ReplayScenarioResult result = RunGyroOnlyReplay();
             std::wstringstream message;
@@ -509,7 +517,7 @@ namespace MazeMap
             Assert::IsTrue(result.yawRad > 0.0f, message.str().c_str());
         }
 
-        TEST_METHOD(GyroOnlyReplay_YawMatchesGyroIntegration)
+        TEST_METHOD(YawMatchesGyroIntegration)
         {
             const ReplayScenarioResult result = RunGyroOnlyReplay();
             std::wstringstream message;
@@ -526,7 +534,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(GyroOnlyReplay_YawRateMatchesGyro)
+        TEST_METHOD(YawRateMatchesGyro)
         {
             const ReplayScenarioResult result = RunGyroOnlyReplay();
             std::wstringstream message;
@@ -543,7 +551,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(GyroOnlyReplay_ForwardVelocityStaysZero)
+        TEST_METHOD(ForwardVelocityStaysZero)
         {
             const ReplayScenarioResult result = RunGyroOnlyReplay();
             std::wstringstream message;
@@ -560,7 +568,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(GyroOnlyReplay_EstimatorFaultClear)
+        TEST_METHOD(EstimatorFaultClear)
         {
             const ReplayScenarioResult result = RunGyroOnlyReplay();
             std::wstringstream message;
@@ -571,8 +579,12 @@ namespace MazeMap
 
             Assert::IsFalse(result.estimatorFault, message.str().c_str());
         }
+    };
 
-        TEST_METHOD(CombinedEncoderGyroReplay_PositionXFinite)
+    TEST_CLASS(DriveStack_CombinedEncoderGyroReplayTest)
+    {
+    public:
+        TEST_METHOD(PositionXFinite)
         {
             const ReplayScenarioResult result = RunCombinedReplay();
             std::wstringstream message;
@@ -584,7 +596,7 @@ namespace MazeMap
             Assert::IsTrue(std::isfinite(result.positionXM), message.str().c_str());
         }
 
-        TEST_METHOD(CombinedEncoderGyroReplay_PositionYFinite)
+        TEST_METHOD(PositionYFinite)
         {
             const ReplayScenarioResult result = RunCombinedReplay();
             std::wstringstream message;
@@ -596,7 +608,7 @@ namespace MazeMap
             Assert::IsTrue(std::isfinite(result.positionYM), message.str().c_str());
         }
 
-        TEST_METHOD(CombinedEncoderGyroReplay_YawFinite)
+        TEST_METHOD(YawFinite)
         {
             const ReplayScenarioResult result = RunCombinedReplay();
             std::wstringstream message;
@@ -608,7 +620,7 @@ namespace MazeMap
             Assert::IsTrue(std::isfinite(result.yawRad), message.str().c_str());
         }
 
-        TEST_METHOD(CombinedEncoderGyroReplay_PositionXPositive)
+        TEST_METHOD(PositionXPositive)
         {
             const ReplayScenarioResult result = RunCombinedReplay();
             std::wstringstream message;
@@ -620,7 +632,7 @@ namespace MazeMap
             Assert::IsTrue(result.positionXM > 0.0f, message.str().c_str());
         }
 
-        TEST_METHOD(CombinedEncoderGyroReplay_PositionYPositive)
+        TEST_METHOD(PositionYPositive)
         {
             const ReplayScenarioResult result = RunCombinedReplay();
             std::wstringstream message;
@@ -632,7 +644,7 @@ namespace MazeMap
             Assert::IsTrue(result.positionYM > 0.0f, message.str().c_str());
         }
 
-        TEST_METHOD(CombinedEncoderGyroReplay_PositionXMatchesArc)
+        TEST_METHOD(PositionXMatchesArc)
         {
             const ReplayScenarioResult result = RunCombinedReplay();
             std::wstringstream message;
@@ -649,7 +661,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(CombinedEncoderGyroReplay_PositionYMatchesArc)
+        TEST_METHOD(PositionYMatchesArc)
         {
             const ReplayScenarioResult result = RunCombinedReplay();
             std::wstringstream message;
@@ -666,7 +678,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(CombinedEncoderGyroReplay_YawMatchesGyroIntegration)
+        TEST_METHOD(YawMatchesGyroIntegration)
         {
             const ReplayScenarioResult result = RunCombinedReplay();
             std::wstringstream message;
@@ -683,7 +695,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(CombinedEncoderGyroReplay_VelocityMatchesEncoderAverage)
+        TEST_METHOD(VelocityMatchesEncoderAverage)
         {
             const ReplayScenarioResult result = RunCombinedReplay();
             std::wstringstream message;
@@ -700,7 +712,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(CombinedEncoderGyroReplay_YawRateMatchesGyro)
+        TEST_METHOD(YawRateMatchesGyro)
         {
             const ReplayScenarioResult result = RunCombinedReplay();
             std::wstringstream message;
@@ -717,7 +729,7 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(CombinedEncoderGyroReplay_EstimatorFaultClear)
+        TEST_METHOD(EstimatorFaultClear)
         {
             const ReplayScenarioResult result = RunCombinedReplay();
             std::wstringstream message;

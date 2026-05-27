@@ -1,0 +1,1 @@
+C:\Users\thene\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe C:/Users/thene/source/repos/MicroMouse2025/codex_analysis/yaw_model_variant_fits/stribeck_to_slip_angle_candidates/brush_combined_slip/fit_brush_combined_slip.py

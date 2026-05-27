@@ -1,0 +1,40 @@
+{
+  "rows": 118580,
+  "runs": 49,
+  "base_candidate_evaluations": 69958,
+  "latest_weighted_candidate_evaluations": 69960,
+  "base_search_rows": 14000,
+  "latest_weighted_search_rows": 14000,
+  "final_ranges": {
+    "k1": [
+      0.025,
+      2.22
+    ],
+    "k2": [
+      0.25,
+      14.8
+    ],
+    "k3": [
+      0.035,
+      5.476000000000001
+    ],
+    "peak_frac": [
+      0.12,
+      0.96
+    ],
+    "decay0": [
+      0.12,
+      9.0
+    ],
+    "decay_v": [
+      0.0,
+      6.0
+    ],
+    "vf_fade": [
+      0.016200000000000003,
+      4.0
+    ]
+  },
+  "selected_boundary_status": "unresolved_boundary:k2:high;peak_frac:high;decay0:low;decay_v:low;vf_fade:low",
+  "selected_is_interior": false
+}

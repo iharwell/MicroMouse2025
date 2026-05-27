@@ -1,0 +1,2 @@
+variant,yaw_rate_radps,target_total_opposing_yaw_torque_nm,achieved_total_opposing_yaw_torque_nm,derived_static_extra_mu,launch_solve_error_nm,left_command,right_command,lr_delta_command,max_abs_command,passes_abs_0p6_gate,target_command_abs,target_abs_error
+project_suited_stribeck_slip_angle,1.0,0.08036224420449659,0.08036224420449657,7.496899889894687,-1.3877787807814457e-17,0.646,-0.646,1.292,0.646,True,0.646,0.0

@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -242,7 +242,29 @@
     <ClCompile Include="SearchRunPlannerTest.cpp" />
     <ClCompile Include="EstimatorBiasAndStationaryTest.cpp" />
     <ClCompile Include="EstimatorModeAndDiagnosticsTest.cpp" />
-    <ClCompile Include="EstimatorMotionUpdateTest.cpp" />
+    <ClCompile Include="EstimatorActiveCommandStorageTest.cpp" />
+    <ClCompile Include="EstimatorBiasedYawRateUpdateTest.cpp" />
+    <ClCompile Include="EstimatorControlDirectionTrackingTest.cpp" />
+    <ClCompile Include="EstimatorDirectEncoderUpdateTest.cpp" />
+    <ClCompile Include="EstimatorFeedforwardRuntimeTest.cpp" />
+    <ClCompile Include="EstimatorLatestEncoderUpdateTest.cpp" />
+    <ClCompile Include="EstimatorLaunchEncoderYawUpdateTest.cpp" />
+    <ClCompile Include="EstimatorMovingEncoderUpdateTest.cpp" />
+    <ClCompile Include="EstimatorMovingPredictGyroBiasTest.cpp" />
+    <ClCompile Include="EstimatorOpposedControlUpdateTest.cpp" />
+    <ClCompile Include="EstimatorRejectedEncoderUpdateTest.cpp" />
+    <ClCompile Include="EstimatorSplitCommandPredictTest.cpp" />
+    <ClCompile Include="EstimatorSplitDrivePredictTest.cpp" />
+    <ClCompile Include="EstimatorTorqueRefreshTest.cpp" />
+    <ClCompile Include="EstimatorUnopposedControlPredictTest.cpp" />
+    <ClCompile Include="EstimatorWallUpdateTest.cpp" />
+    <ClCompile Include="EstimatorYawResidualCrossCovarianceTest.cpp" />
+    <ClCompile Include="EstimatorZeroVelocityEncoderUpdateTest.cpp" />
+    <ClCompile Include="EstimatorEncoderMotionUpdateTestSupport.cpp" />
+    <ClCompile Include="EstimatorControlMotionUpdateTestSupport.cpp" />
+    <ClCompile Include="EstimatorYawMotionUpdateTestSupport.cpp" />
+    <ClCompile Include="EstimatorWallMotionUpdateTestSupport.cpp" />
+    <ClCompile Include="EstimatorRuntimeMotionUpdateTestSupport.cpp" />
     <ClCompile Include="EstimatorReplayRegressionTest.cpp" />
     <ClCompile Include="UKFTest.cpp">
       <ObjectFileName>$(IntDir)UKFTest.obj</ObjectFileName>
@@ -257,6 +279,12 @@
     <ClInclude Include="EstimatorFilterTestSupport.h" />
     <ClInclude Include="Templates.h" />
     <ClInclude Include="TimeStepPropagationTestSupport.h" />
+    <ClInclude Include="EstimatorMotionUpdateAccess.h" />
+    <ClInclude Include="EstimatorEncoderMotionUpdateTestSupport.h" />
+    <ClInclude Include="EstimatorControlMotionUpdateTestSupport.h" />
+    <ClInclude Include="EstimatorYawMotionUpdateTestSupport.h" />
+    <ClInclude Include="EstimatorWallMotionUpdateTestSupport.h" />
+    <ClInclude Include="EstimatorRuntimeMotionUpdateTestSupport.h" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\MazeMap\MazeMap.vcxproj">

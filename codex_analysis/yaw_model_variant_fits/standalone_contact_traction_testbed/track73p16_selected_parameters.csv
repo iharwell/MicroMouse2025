@@ -1,0 +1,9 @@
+parameter,value
+family,yaw_static_yield_patch
+dyn_k_mps,0.16
+static_k_mps,0.08
+static_fwd_k_mps,0.1
+drive_scale,0.10712517561520885
+lateral_dynamic_mu,0.8599236912514392
+lateral_static_yield_mu,0.19614437231032594
+longitudinal_dynamic_mu,0.22089401533350206

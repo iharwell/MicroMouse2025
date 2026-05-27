@@ -1,0 +1,16 @@
+parameter,value
+search_status,unresolved_no_accepted_interior_candidate
+branch,base
+interpretation,line_maintains_peak
+k1,0.28736394078867655
+k2,14.8
+k3,1.0611396357940581
+peak_frac,0.96
+decay0,0.12
+decay_v,0.0
+vf_fade,0.016200000000000003
+slide_nm,0.01834219829706491
+peak_delta_nm,0.0412835642838121
+peak_extra_nm,0.05962576258087701
+linear_slope_policy,derived from selected interpretation; no independent slope fitted
+boundary_status,unresolved_boundary:k2:high;peak_frac:high;decay0:low;decay_v:low;vf_fade:low

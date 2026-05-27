@@ -66,21 +66,53 @@ namespace MazeMap::App
 
         struct ManeuverExecutionTrace final
         {
+            bool initialPoseReset = false;
+            bool entryPoseReset = false;
             bool started = false;
             bool completed = false;
-            bool allReturnedCommandsFinite = true;
-            bool commandEvidenceMatchesReturnedCommand = true;
-            bool bodyObjectivesFinite = true;
+            bool estimatorFault = false;
+            bool leftReturnedCommandFinite = false;
+            bool rightReturnedCommandFinite = false;
+            bool bodyProposalEvidenceSet = false;
+            bool commandTelemetryEvidenceSet = false;
+            bool leftCommandEvidenceMatchesReturnedCommand = false;
+            bool rightCommandEvidenceMatchesReturnedCommand = false;
+            bool requestedForwardMpsFinite = false;
+            bool requestedYawRateRadpsFinite = false;
+            bool requestedForwardAccelMps2Finite = false;
+            bool requestedYawAccelRadps2Finite = false;
+            bool requestedYawRadFinite = false;
             float elapsedSeconds = 0.0f;
+            CommandVector lastReturnedCommand;
+            DriveTelemetry lastTelemetry{};
             VehicleState truthState;
             std::vector<CommandSample> samples;
         };
 
-        struct CheckResult final
+        const wchar_t* BoolText(const bool value) noexcept
         {
-            bool passed = false;
-            std::wstring message;
-        };
+            return value ? L"true" : L"false";
+        }
+
+        std::wstring BuildTraceStatusMessage(const ManeuverExecutionTrace& trace)
+        {
+            return
+                std::wstring(L" initial_pose_reset=") + BoolText(trace.initialPoseReset) +
+                L" entry_pose_reset=" + BoolText(trace.entryPoseReset) +
+                L" started=" + BoolText(trace.started) +
+                L" completed=" + BoolText(trace.completed) +
+                L" estimator_fault=" + BoolText(trace.estimatorFault) +
+                L" samples=" + std::to_wstring(trace.samples.size()) +
+                L" elapsed_s=" + std::to_wstring(trace.elapsedSeconds);
+        }
+
+        bool AccumulateSampleFlag(
+            const bool hasPriorSample,
+            const bool previousValue,
+            const bool currentValue) noexcept
+        {
+            return hasPriorSample ? (previousValue && currentValue) : currentValue;
+        }
 
         SensorSnapshot BuildDriveManeuverSensorSnapshot(const float yawRateRadps = 0.0f) noexcept
         {
@@ -150,19 +182,6 @@ namespace MazeMap::App
                 appliedControl);
         }
 
-        bool IsVehicleStateFinite(const VehicleState& state) noexcept
-        {
-            return
-                std::isfinite(state.GetPositionX()) &&
-                std::isfinite(state.GetPositionY()) &&
-                std::isfinite(state.GetHeading()) &&
-                std::isfinite(state.GetForwardVelocity()) &&
-                std::isfinite(state.GetRightwardVelocity()) &&
-                std::isfinite(state.GetYawRate()) &&
-                std::isfinite(state.GetWheelSpeedLeft()) &&
-                std::isfinite(state.GetWheelSpeedRight()) &&
-                std::isfinite(state.GetGyroBiasZ());
-        }
 
         VehicleState BuildTruthState(const float linearSpeedMps) noexcept
         {
@@ -174,7 +193,7 @@ namespace MazeMap::App
             return state;
         }
 
-        void PrimeDriveForSmoothEntry(
+        bool PrimeDriveForSmoothEntry(
             Internal::SharedRobotRuntime& runtime,
             VehicleState& truthState,
             float& leftEncoderRemainderCounts,
@@ -192,7 +211,11 @@ namespace MazeMap::App
                 projectedRightEncoderRemainderCounts);
             const float projectedForwardDistanceM =
                 0.5f * static_cast<float>(projectedLeftCounts + projectedRightCounts) * distancePerCountM;
-            Assert::IsTrue(runtime.Estimator().ResetPose(0.0f, -projectedForwardDistanceM, 0.0f));
+            if (!runtime.Estimator().ResetPose(0.0f, -projectedForwardDistanceM, 0.0f))
+            {
+                return false;
+            }
+
             ApplyEncoderObservation(
                 runtime.Estimator(),
                 runtime.RuntimeState(),
@@ -202,6 +225,7 @@ namespace MazeMap::App
                 leftEncoderRemainderCounts,
                 rightEncoderRemainderCounts,
                 kSimulationDtSeconds);
+            return true;
         }
 
         void SimulateRuntimeDriveCycle(
@@ -311,17 +335,27 @@ namespace MazeMap::App
 
             runtime.DriveBase().ClearCommandEvidence();
 
-            Assert::IsTrue(runtime.Estimator().ResetPose(0.0f, 0.0f, 0.0f));
+            trace.initialPoseReset = runtime.Estimator().ResetPose(0.0f, 0.0f, 0.0f);
+            if (!trace.initialPoseReset)
+            {
+                return trace;
+            }
+
             if (smoothTurn)
             {
-                PrimeDriveForSmoothEntry(
+                trace.entryPoseReset = PrimeDriveForSmoothEntry(
                     runtime,
                     trace.truthState,
                     leftEncoderRemainderCounts,
                     rightEncoderRemainderCounts);
+                if (!trace.entryPoseReset)
+                {
+                    return trace;
+                }
             }
             else
             {
+                trace.entryPoseReset = true;
                 trace.truthState = BuildTruthState(0.0f);
             }
             PlantModel truthPlant(runtime.Vehicle(), trace.truthState);
@@ -340,6 +374,7 @@ namespace MazeMap::App
             {
                 if (runtime.Estimator().HasFault())
                 {
+                    trace.estimatorFault = true;
                     return trace;
                 }
 
@@ -352,21 +387,58 @@ namespace MazeMap::App
                 }
 
                 const DriveTelemetry& telemetry = runtime.DriveBase().LastTelemetry();
-                trace.allReturnedCommandsFinite =
-                    trace.allReturnedCommandsFinite && control.IsFinite();
-                trace.commandEvidenceMatchesReturnedCommand =
-                    trace.commandEvidenceMatchesReturnedCommand &&
-                    ((telemetry.commandKindFlags & DriveTelemetry::kCommandKindBodyProposal) != 0U) &&
-                    ((telemetry.telemetryValidFlags & DriveTelemetry::kTelemetryCommandEvidenceValid) != 0U) &&
-                    (std::fabs(control.LeftCommand() - telemetry.leftDriveCommand) <= 1.0e-6f) &&
-                    (std::fabs(control.RightCommand() - telemetry.rightDriveCommand) <= 1.0e-6f);
-                trace.bodyObjectivesFinite =
-                    trace.bodyObjectivesFinite &&
-                    std::isfinite(telemetry.requestedForwardMps) &&
-                    std::isfinite(telemetry.requestedYawRateRadps) &&
-                    std::isfinite(telemetry.requestedForwardAccelMps2) &&
-                    std::isfinite(telemetry.requestedYawAccelRadps2) &&
-                    std::isfinite(telemetry.requestedYawRad);
+                const bool hasPriorSample = !trace.samples.empty();
+                const bool leftReturnedCommandFinite = std::isfinite(control.LeftCommand());
+                const bool rightReturnedCommandFinite = std::isfinite(control.RightCommand());
+                const bool bodyProposalEvidenceSet =
+                    (telemetry.commandKindFlags & DriveTelemetry::kCommandKindBodyProposal) != 0U;
+                const bool commandTelemetryEvidenceSet =
+                    (telemetry.telemetryValidFlags & DriveTelemetry::kTelemetryCommandEvidenceValid) != 0U;
+                const bool leftCommandEvidenceMatchesReturnedCommand =
+                    std::fabs(control.LeftCommand() - telemetry.leftDriveCommand) <= 1.0e-6f;
+                const bool rightCommandEvidenceMatchesReturnedCommand =
+                    std::fabs(control.RightCommand() - telemetry.rightDriveCommand) <= 1.0e-6f;
+                const bool requestedForwardMpsFinite = std::isfinite(telemetry.requestedForwardMps);
+                const bool requestedYawRateRadpsFinite = std::isfinite(telemetry.requestedYawRateRadps);
+                const bool requestedForwardAccelMps2Finite = std::isfinite(telemetry.requestedForwardAccelMps2);
+                const bool requestedYawAccelRadps2Finite = std::isfinite(telemetry.requestedYawAccelRadps2);
+                const bool requestedYawRadFinite = std::isfinite(telemetry.requestedYawRad);
+                trace.leftReturnedCommandFinite =
+                    AccumulateSampleFlag(hasPriorSample, trace.leftReturnedCommandFinite, leftReturnedCommandFinite);
+                trace.rightReturnedCommandFinite =
+                    AccumulateSampleFlag(hasPriorSample, trace.rightReturnedCommandFinite, rightReturnedCommandFinite);
+                trace.bodyProposalEvidenceSet =
+                    AccumulateSampleFlag(hasPriorSample, trace.bodyProposalEvidenceSet, bodyProposalEvidenceSet);
+                trace.commandTelemetryEvidenceSet =
+                    AccumulateSampleFlag(hasPriorSample, trace.commandTelemetryEvidenceSet, commandTelemetryEvidenceSet);
+                trace.leftCommandEvidenceMatchesReturnedCommand =
+                    AccumulateSampleFlag(
+                        hasPriorSample,
+                        trace.leftCommandEvidenceMatchesReturnedCommand,
+                        leftCommandEvidenceMatchesReturnedCommand);
+                trace.rightCommandEvidenceMatchesReturnedCommand =
+                    AccumulateSampleFlag(
+                        hasPriorSample,
+                        trace.rightCommandEvidenceMatchesReturnedCommand,
+                        rightCommandEvidenceMatchesReturnedCommand);
+                trace.requestedForwardMpsFinite =
+                    AccumulateSampleFlag(hasPriorSample, trace.requestedForwardMpsFinite, requestedForwardMpsFinite);
+                trace.requestedYawRateRadpsFinite =
+                    AccumulateSampleFlag(hasPriorSample, trace.requestedYawRateRadpsFinite, requestedYawRateRadpsFinite);
+                trace.requestedForwardAccelMps2Finite =
+                    AccumulateSampleFlag(
+                        hasPriorSample,
+                        trace.requestedForwardAccelMps2Finite,
+                        requestedForwardAccelMps2Finite);
+                trace.requestedYawAccelRadps2Finite =
+                    AccumulateSampleFlag(
+                        hasPriorSample,
+                        trace.requestedYawAccelRadps2Finite,
+                        requestedYawAccelRadps2Finite);
+                trace.requestedYawRadFinite =
+                    AccumulateSampleFlag(hasPriorSample, trace.requestedYawRadFinite, requestedYawRadFinite);
+                trace.lastReturnedCommand = control;
+                trace.lastTelemetry = telemetry;
 
                 trace.samples.push_back(
                     CommandSample{
@@ -389,40 +461,12 @@ namespace MazeMap::App
             return trace;
         }
 
-        CheckResult EvaluateManeuverCompletes(const ManeuverCode code, const bool smoothTurn)
+        std::wstring BuildManeuverMessage(
+            const wchar_t* const field,
+            const ManeuverCode code,
+            const ManeuverExecutionTrace& trace)
         {
-            const ManeuverExecutionTrace trace = SimulateDriveManeuver(code, smoothTurn);
-            CheckResult result{};
-            result.passed = trace.started && trace.completed && !trace.samples.empty();
-            result.message =
-                L"completion code=" + CodeLabel(code) +
-                L" started=" + (trace.started ? L"true" : L"false") +
-                L" completed=" + (trace.completed ? L"true" : L"false") +
-                L" samples=" + std::to_wstring(trace.samples.size()) +
-                L" elapsed_s=" + std::to_wstring(trace.elapsedSeconds);
-            return result;
-        }
-
-        CheckResult EvaluateManeuverCommandEvidence(const ManeuverCode code, const bool smoothTurn)
-        {
-            const ManeuverExecutionTrace trace = SimulateDriveManeuver(code, smoothTurn);
-            CheckResult result{};
-            result.passed =
-                trace.started &&
-                trace.completed &&
-                !trace.samples.empty() &&
-                trace.allReturnedCommandsFinite &&
-                trace.commandEvidenceMatchesReturnedCommand &&
-                trace.bodyObjectivesFinite &&
-                IsVehicleStateFinite(trace.truthState);
-            result.message =
-                L"command evidence code=" + CodeLabel(code) +
-                L" completed=" + (trace.completed ? L"true" : L"false") +
-                L" finite_commands=" + (trace.allReturnedCommandsFinite ? L"true" : L"false") +
-                L" evidence_matches=" + (trace.commandEvidenceMatchesReturnedCommand ? L"true" : L"false") +
-                L" finite_objectives=" + (trace.bodyObjectivesFinite ? L"true" : L"false") +
-                L" truth_finite=" + (IsVehicleStateFinite(trace.truthState) ? L"true" : L"false");
-            return result;
+            return std::wstring(field) + L" code=" + CodeLabel(code) + BuildTraceStatusMessage(trace);
         }
 
         float ComputeNormalizedSpan(const std::vector<float>& values) noexcept
@@ -564,228 +608,4357 @@ namespace MazeMap::App
             return magnitudes;
         }
 
-        CheckResult EvaluateInPlaceShift(const ManeuverCode code)
+        float InvalidManeuverMeasurement() noexcept
         {
-            const ManeuverExecutionTrace trace = SimulateDriveManeuver(code, false);
-            const float shiftMeters =
+            return (std::numeric_limits<float>::infinity)();
+        }
+
+        float ComputeInPlaceShiftMeters(const ManeuverExecutionTrace& trace) noexcept
+        {
+            if (!trace.completed)
+            {
+                return InvalidManeuverMeasurement();
+            }
+
+            return
                 std::hypot(
                     trace.truthState.GetPositionX(),
                     trace.truthState.GetPositionY());
-            CheckResult result{};
-            result.passed = trace.started && trace.completed && (shiftMeters < kInPlacePositionToleranceM);
-            result.message =
-                L"shift code=" + CodeLabel(code) +
-                L" actual_m=" + std::to_wstring(shiftMeters) +
-                L" limit_m=" + std::to_wstring(kInPlacePositionToleranceM) +
-                L" completed=" + (trace.completed ? L"true" : L"false");
-            return result;
         }
 
-        CheckResult EvaluateInPlaceHeading(const ManeuverCode code)
+        float ComputeInPlaceHeadingErrorRad(
+            const ManeuverCode code,
+            const ManeuverExecutionTrace& trace) noexcept
         {
-            const ManeuverExecutionTrace trace = SimulateDriveManeuver(code, false);
-            const float headingErrorRad =
-                std::fabs(AngleErrorRad(BuildNominalEndYawRad(code), trace.truthState.GetHeading()));
-            CheckResult result{};
-            result.passed = trace.started && trace.completed && (headingErrorRad <= kHeadingToleranceRad);
-            result.message =
-                L"heading code=" + CodeLabel(code) +
-                L" error_deg=" + std::to_wstring(headingErrorRad * RAD_TO_DEG_F) +
-                L" limit_deg=" + std::to_wstring(kHeadingToleranceRad * RAD_TO_DEG_F) +
-                L" completed=" + (trace.completed ? L"true" : L"false");
-            return result;
+            if (!trace.completed)
+            {
+                return InvalidManeuverMeasurement();
+            }
+
+            return std::fabs(AngleErrorRad(BuildNominalEndYawRad(code), trace.truthState.GetHeading()));
         }
 
-        CheckResult EvaluateInPlaceTime(const ManeuverCode code)
+        float ComputeInPlaceExpectedTimeSeconds(const ManeuverCode code)
         {
-            const ManeuverExecutionTrace trace = SimulateDriveManeuver(code, false);
             Internal::SharedRobotRuntime runtime(kSimulationDtSeconds);
-            const float expectedTimeSeconds =
+            return
                 ComputeInPlaceTurnKinematicTimeSeconds(
                     std::fabs(BuildNominalEndYawRad(code)),
                     runtime.DriveService().GetLimits());
-            const float relativeError =
+        }
+
+        float ComputeInPlaceRelativeTimeError(
+            const ManeuverCode code,
+            const ManeuverExecutionTrace& trace)
+        {
+            if (!trace.completed)
+            {
+                return InvalidManeuverMeasurement();
+            }
+
+            const float expectedTimeSeconds = ComputeInPlaceExpectedTimeSeconds(code);
+            return
                 (expectedTimeSeconds > 0.0f) ?
                 (std::fabs(trace.elapsedSeconds - expectedTimeSeconds) / expectedTimeSeconds) :
                 (std::numeric_limits<float>::infinity)();
-            CheckResult result{};
-            result.passed = trace.started && trace.completed && (relativeError <= kTimeToleranceFraction);
-            result.message =
-                L"time code=" + CodeLabel(code) +
-                L" elapsed_s=" + std::to_wstring(trace.elapsedSeconds) +
-                L" expected_s=" + std::to_wstring(expectedTimeSeconds) +
-                L" rel_err=" + std::to_wstring(relativeError) +
-                L" limit=" + std::to_wstring(kTimeToleranceFraction) +
-                L" completed=" + (trace.completed ? L"true" : L"false");
-            return result;
         }
 
-        CheckResult EvaluateSmoothVelocityConstancy(const ManeuverCode code)
+        float ComputeSmoothVelocityNormalizedSpan(const ManeuverExecutionTrace& trace)
         {
-            const ManeuverExecutionTrace trace = SimulateDriveManeuver(code, true);
-            const float normalizedSpan = ComputeNormalizedSpan(CollectLinearCommandMagnitudes(trace));
-            CheckResult result{};
-            result.passed = trace.started && trace.completed && (normalizedSpan < kVelocityVariationLimit);
-            result.message =
-                L"velocity code=" + CodeLabel(code) +
-                L" span=" + std::to_wstring(normalizedSpan) +
-                L" limit=" + std::to_wstring(kVelocityVariationLimit) +
-                L" completed=" + (trace.completed ? L"true" : L"false");
-            return result;
+            return trace.completed ?
+                ComputeNormalizedSpan(CollectLinearCommandMagnitudes(trace)) :
+                InvalidManeuverMeasurement();
         }
 
-        CheckResult EvaluateSmoothYawAccelerationConstancy(const ManeuverCode code)
+        float ComputeSmoothYawAccelerationNormalizedSpan(const ManeuverExecutionTrace& trace)
         {
-            const ManeuverExecutionTrace trace = SimulateDriveManeuver(code, true);
-            const float normalizedSpan = ComputeNormalizedSpan(CollectRampYawAccelMagnitudes(trace));
-            CheckResult result{};
-            result.passed = trace.started && trace.completed && (normalizedSpan < kYawAccelerationVariationLimit);
-            result.message =
-                L"yaw_accel code=" + CodeLabel(code) +
-                L" span=" + std::to_wstring(normalizedSpan) +
-                L" limit=" + std::to_wstring(kYawAccelerationVariationLimit) +
-                L" completed=" + (trace.completed ? L"true" : L"false");
-            return result;
+            return trace.completed ?
+                ComputeNormalizedSpan(CollectRampYawAccelMagnitudes(trace)) :
+                InvalidManeuverMeasurement();
         }
 
-        CheckResult EvaluateSmoothYawRateConstancy(const ManeuverCode code)
+        float ComputeSmoothYawRateNormalizedSpan(const ManeuverExecutionTrace& trace)
         {
-            const ManeuverExecutionTrace trace = SimulateDriveManeuver(code, true);
-            const float normalizedSpan = ComputeNormalizedSpan(CollectTurnYawRateMagnitudes(trace));
-            CheckResult result{};
-            result.passed = trace.started && trace.completed && (normalizedSpan < kYawRateVariationLimit);
-            result.message =
-                L"yaw_rate code=" + CodeLabel(code) +
-                L" span=" + std::to_wstring(normalizedSpan) +
-                L" limit=" + std::to_wstring(kYawRateVariationLimit) +
-                L" completed=" + (trace.completed ? L"true" : L"false");
-            return result;
+            return trace.completed ?
+                ComputeNormalizedSpan(CollectTurnYawRateMagnitudes(trace)) :
+                InvalidManeuverMeasurement();
         }
 
-        CheckResult EvaluateSmoothFinalPosition(const ManeuverCode code)
+        float ComputeSmoothFinalPositionErrorMeters(
+            const ManeuverCode code,
+            const ManeuverExecutionTrace& trace) noexcept
         {
-            const ManeuverExecutionTrace trace = SimulateDriveManeuver(code, true);
-            const float positionErrorMeters =
+            if (!trace.completed)
+            {
+                return InvalidManeuverMeasurement();
+            }
+
+            return
                 std::hypot(
                     trace.truthState.GetPositionX() - BuildNominalEndXMeters(code),
                     trace.truthState.GetPositionY() - BuildNominalEndYMeters(code));
-            CheckResult result{};
-            result.passed = trace.started && trace.completed && (positionErrorMeters <= kSmoothPositionToleranceM);
-            result.message =
-                L"position code=" + CodeLabel(code) +
-                L" error_m=" + std::to_wstring(positionErrorMeters) +
-                L" limit_m=" + std::to_wstring(kSmoothPositionToleranceM) +
-                L" completed=" + (trace.completed ? L"true" : L"false");
-            return result;
         }
 
-        CheckResult EvaluateSmoothFinalHeading(const ManeuverCode code)
+        float ComputeSmoothFinalHeadingErrorRad(
+            const ManeuverCode code,
+            const ManeuverExecutionTrace& trace) noexcept
         {
-            const ManeuverExecutionTrace trace = SimulateDriveManeuver(code, true);
-            const float headingErrorRad =
-                std::fabs(AngleErrorRad(BuildNominalEndYawRad(code), trace.truthState.GetHeading()));
-            CheckResult result{};
-            result.passed = trace.started && trace.completed && (headingErrorRad <= kHeadingToleranceRad);
-            result.message =
-                L"heading code=" + CodeLabel(code) +
-                L" error_deg=" + std::to_wstring(headingErrorRad * RAD_TO_DEG_F) +
-                L" limit_deg=" + std::to_wstring(kHeadingToleranceRad * RAD_TO_DEG_F) +
-                L" completed=" + (trace.completed ? L"true" : L"false");
-            return result;
+            if (!trace.completed)
+            {
+                return InvalidManeuverMeasurement();
+            }
+
+            return std::fabs(AngleErrorRad(BuildNominalEndYawRad(code), trace.truthState.GetHeading()));
         }
     }
-
-#define DRIVE_IN_PLACE_CONTRACT_TESTS(NAME, CODE) \
-    TEST_METHOD(NAME##_Completes) \
-    { \
-        const CheckResult result = EvaluateManeuverCompletes(CODE, false); \
-        Assert::IsTrue(result.passed, result.message.c_str()); \
-    } \
-    TEST_METHOD(NAME##_CommandEvidenceMatchesReturnedCommand) \
-    { \
-        const CheckResult result = EvaluateManeuverCommandEvidence(CODE, false); \
-        Assert::IsTrue(result.passed, result.message.c_str()); \
-    } \
-    TEST_METHOD(NAME##_ShiftAcceptable) \
-    { \
-        const CheckResult result = EvaluateInPlaceShift(CODE); \
-        Assert::IsTrue(result.passed, result.message.c_str()); \
-    } \
-    TEST_METHOD(NAME##_HeadingAcceptable) \
-    { \
-        const CheckResult result = EvaluateInPlaceHeading(CODE); \
-        Assert::IsTrue(result.passed, result.message.c_str()); \
-    } \
-    TEST_METHOD(NAME##_TimeAcceptable) \
-    { \
-        const CheckResult result = EvaluateInPlaceTime(CODE); \
-        Assert::IsTrue(result.passed, result.message.c_str()); \
-    }
-
-#define DRIVE_SMOOTH_CONTRACT_TESTS(NAME, CODE) \
-    TEST_METHOD(NAME##_Completes) \
-    { \
-        const CheckResult result = EvaluateManeuverCompletes(CODE, true); \
-        Assert::IsTrue(result.passed, result.message.c_str()); \
-    } \
-    TEST_METHOD(NAME##_CommandEvidenceMatchesReturnedCommand) \
-    { \
-        const CheckResult result = EvaluateManeuverCommandEvidence(CODE, true); \
-        Assert::IsTrue(result.passed, result.message.c_str()); \
-    } \
-    TEST_METHOD(NAME##_VelocityVariationAcceptable) \
-    { \
-        const CheckResult result = EvaluateSmoothVelocityConstancy(CODE); \
-        Assert::IsTrue(result.passed, result.message.c_str()); \
-    } \
-    TEST_METHOD(NAME##_YawAccelerationVariationAcceptable) \
-    { \
-        const CheckResult result = EvaluateSmoothYawAccelerationConstancy(CODE); \
-        Assert::IsTrue(result.passed, result.message.c_str()); \
-    } \
-    TEST_METHOD(NAME##_YawRateVariationAcceptable) \
-    { \
-        const CheckResult result = EvaluateSmoothYawRateConstancy(CODE); \
-        Assert::IsTrue(result.passed, result.message.c_str()); \
-    } \
-    TEST_METHOD(NAME##_FinalPositionAcceptable) \
-    { \
-        const CheckResult result = EvaluateSmoothFinalPosition(CODE); \
-        Assert::IsTrue(result.passed, result.message.c_str()); \
-    } \
-    TEST_METHOD(NAME##_FinalHeadingAcceptable) \
-    { \
-        const CheckResult result = EvaluateSmoothFinalHeading(CODE); \
-        Assert::IsTrue(result.passed, result.message.c_str()); \
-    }
-
-    TEST_CLASS(DriveManeuverTests)
+    TEST_CLASS(DriveManeuverIP45ContractTest)
     {
-    public:
-        DRIVE_IN_PLACE_CONTRACT_TESTS(DriveManeuver_IP45, IP45)
-        DRIVE_IN_PLACE_CONTRACT_TESTS(DriveManeuver_IP90, IP90)
-        DRIVE_IN_PLACE_CONTRACT_TESTS(DriveManeuver_IP135, IP135)
-        DRIVE_IN_PLACE_CONTRACT_TESTS(DriveManeuver_IP180, IP180)
+        static constexpr ManeuverCode kCode = IP45;
+        static constexpr bool kSmoothTurn = false;
 
-        DRIVE_SMOOTH_CONTRACT_TESTS(DriveManeuver_S45LS, S45LS)
-        DRIVE_SMOOTH_CONTRACT_TESTS(DriveManeuver_S45LD, S45LD)
-        DRIVE_SMOOTH_CONTRACT_TESTS(DriveManeuver_S45SS, S45SS)
-        DRIVE_SMOOTH_CONTRACT_TESTS(DriveManeuver_S45SD, S45SD)
-        DRIVE_SMOOTH_CONTRACT_TESTS(DriveManeuver_S90LS, S90LS)
-        DRIVE_SMOOTH_CONTRACT_TESTS(DriveManeuver_S90SS, S90SS)
-        DRIVE_SMOOTH_CONTRACT_TESTS(DriveManeuver_S90SD, S90SD)
-        DRIVE_SMOOTH_CONTRACT_TESTS(DriveManeuver_S135LS, S135LS)
-        DRIVE_SMOOTH_CONTRACT_TESTS(DriveManeuver_S135LD, S135LD)
-        DRIVE_SMOOTH_CONTRACT_TESTS(DriveManeuver_S135SS, S135SS)
-        DRIVE_SMOOTH_CONTRACT_TESTS(DriveManeuver_S135SD, S135SD)
-        DRIVE_SMOOTH_CONTRACT_TESTS(DriveManeuver_S180LS, S180LS)
-        DRIVE_SMOOTH_CONTRACT_TESTS(DriveManeuver_S180SS, S180SS)
+    public:
+        TEST_METHOD(Completes)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"completion", kCode, trace);
+            Assert::IsTrue(trace.completed, message.c_str());
+        }
+
+        TEST_METHOD(CommandSamplesCaptured)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"command_samples", kCode, trace);
+            Assert::IsTrue(!trace.samples.empty(), message.c_str());
+        }
+
+        TEST_METHOD(LeftReturnedCommandIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"left_returned_command", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastReturnedCommand.LeftCommand()) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.leftReturnedCommandFinite, message.c_str());
+        }
+
+        TEST_METHOD(RightReturnedCommandIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"right_returned_command", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastReturnedCommand.RightCommand()) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.rightReturnedCommandFinite, message.c_str());
+        }
+
+        TEST_METHOD(BodyProposalEvidenceIsSet)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"body_proposal_evidence", kCode, trace) +
+                L" actual_flags=" + std::to_wstring(trace.lastTelemetry.commandKindFlags) +
+                L" required_mask=" + std::to_wstring(DriveTelemetry::kCommandKindBodyProposal);
+            Assert::IsTrue(trace.bodyProposalEvidenceSet, message.c_str());
+        }
+
+        TEST_METHOD(CommandTelemetryEvidenceIsSet)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"command_telemetry_evidence", kCode, trace) +
+                L" actual_flags=" + std::to_wstring(trace.lastTelemetry.telemetryValidFlags) +
+                L" required_mask=" + std::to_wstring(DriveTelemetry::kTelemetryCommandEvidenceValid);
+            Assert::IsTrue(trace.commandTelemetryEvidenceSet, message.c_str());
+        }
+
+        TEST_METHOD(LeftDriveEvidenceMatchesCommand)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"left_drive_evidence", kCode, trace) +
+                L" expected=" + std::to_wstring(trace.lastReturnedCommand.LeftCommand()) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.leftDriveCommand) +
+                L" tolerance=1e-6";
+            Assert::IsTrue(trace.leftCommandEvidenceMatchesReturnedCommand, message.c_str());
+        }
+
+        TEST_METHOD(RightDriveEvidenceMatchesCommand)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"right_drive_evidence", kCode, trace) +
+                L" expected=" + std::to_wstring(trace.lastReturnedCommand.RightCommand()) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.rightDriveCommand) +
+                L" tolerance=1e-6";
+            Assert::IsTrue(trace.rightCommandEvidenceMatchesReturnedCommand, message.c_str());
+        }
+
+        TEST_METHOD(RequestedForwardIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_forward_mps", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedForwardMps) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedForwardMpsFinite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawRateIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_rate_radps", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawRateRadps) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawRateRadpsFinite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedForwardAccelIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_forward_accel_mps2", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedForwardAccelMps2) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedForwardAccelMps2Finite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawAccelIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_accel_radps2", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawAccelRadps2) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawAccelRadps2Finite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_rad", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawRad) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawRadFinite, message.c_str());
+        }
+
+        TEST_METHOD(TruthPositionXIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetPositionX();
+            const std::wstring message = BuildManeuverMessage(L"truth_position_x", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthPositionYIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetPositionY();
+            const std::wstring message = BuildManeuverMessage(L"truth_position_y", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthHeadingIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetHeading();
+            const std::wstring message = BuildManeuverMessage(L"truth_heading", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthForwardVelocityIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetForwardVelocity();
+            const std::wstring message = BuildManeuverMessage(L"truth_forward_velocity", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthRightwardVelocityIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetRightwardVelocity();
+            const std::wstring message = BuildManeuverMessage(L"truth_rightward_velocity", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthYawRateIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetYawRate();
+            const std::wstring message = BuildManeuverMessage(L"truth_yaw_rate", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthLeftWheelSpeedIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetWheelSpeedLeft();
+            const std::wstring message = BuildManeuverMessage(L"truth_left_wheel_speed", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthRightWheelSpeedIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetWheelSpeedRight();
+            const std::wstring message = BuildManeuverMessage(L"truth_right_wheel_speed", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthGyroBiasIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetGyroBiasZ();
+            const std::wstring message = BuildManeuverMessage(L"truth_gyro_bias", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(ShiftWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float shiftMeters = ComputeInPlaceShiftMeters(trace);
+            const std::wstring message = BuildManeuverMessage(L"shift", kCode, trace) +
+                L" actual_m=" + std::to_wstring(shiftMeters) +
+                L" limit_m=" + std::to_wstring(kInPlacePositionToleranceM);
+            Assert::IsTrue(shiftMeters < kInPlacePositionToleranceM, message.c_str());
+        }
+
+        TEST_METHOD(HeadingWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float headingErrorRad = ComputeInPlaceHeadingErrorRad(kCode, trace);
+            const std::wstring message = BuildManeuverMessage(L"heading", kCode, trace) +
+                L" error_deg=" + std::to_wstring(headingErrorRad * RAD_TO_DEG_F) +
+                L" limit_deg=" + std::to_wstring(kHeadingToleranceRad * RAD_TO_DEG_F);
+            Assert::IsTrue(headingErrorRad <= kHeadingToleranceRad, message.c_str());
+        }
+
+        TEST_METHOD(DurationWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float expectedTimeSeconds = ComputeInPlaceExpectedTimeSeconds(kCode);
+            const float relativeError = ComputeInPlaceRelativeTimeError(kCode, trace);
+            const std::wstring message = BuildManeuverMessage(L"time", kCode, trace) +
+                L" elapsed_s=" + std::to_wstring(trace.elapsedSeconds) +
+                L" expected_s=" + std::to_wstring(expectedTimeSeconds) +
+                L" rel_err=" + std::to_wstring(relativeError) +
+                L" limit=" + std::to_wstring(kTimeToleranceFraction);
+            Assert::IsTrue(relativeError <= kTimeToleranceFraction, message.c_str());
+        }
+
     };
 
-#undef DRIVE_SMOOTH_CONTRACT_TESTS
-#undef DRIVE_IN_PLACE_CONTRACT_TESTS
+    TEST_CLASS(DriveManeuverIP90ContractTest)
+    {
+        static constexpr ManeuverCode kCode = IP90;
+        static constexpr bool kSmoothTurn = false;
+
+    public:
+        TEST_METHOD(Completes)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"completion", kCode, trace);
+            Assert::IsTrue(trace.completed, message.c_str());
+        }
+
+        TEST_METHOD(CommandSamplesCaptured)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"command_samples", kCode, trace);
+            Assert::IsTrue(!trace.samples.empty(), message.c_str());
+        }
+
+        TEST_METHOD(LeftReturnedCommandIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"left_returned_command", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastReturnedCommand.LeftCommand()) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.leftReturnedCommandFinite, message.c_str());
+        }
+
+        TEST_METHOD(RightReturnedCommandIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"right_returned_command", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastReturnedCommand.RightCommand()) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.rightReturnedCommandFinite, message.c_str());
+        }
+
+        TEST_METHOD(BodyProposalEvidenceIsSet)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"body_proposal_evidence", kCode, trace) +
+                L" actual_flags=" + std::to_wstring(trace.lastTelemetry.commandKindFlags) +
+                L" required_mask=" + std::to_wstring(DriveTelemetry::kCommandKindBodyProposal);
+            Assert::IsTrue(trace.bodyProposalEvidenceSet, message.c_str());
+        }
+
+        TEST_METHOD(CommandTelemetryEvidenceIsSet)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"command_telemetry_evidence", kCode, trace) +
+                L" actual_flags=" + std::to_wstring(trace.lastTelemetry.telemetryValidFlags) +
+                L" required_mask=" + std::to_wstring(DriveTelemetry::kTelemetryCommandEvidenceValid);
+            Assert::IsTrue(trace.commandTelemetryEvidenceSet, message.c_str());
+        }
+
+        TEST_METHOD(LeftDriveEvidenceMatchesCommand)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"left_drive_evidence", kCode, trace) +
+                L" expected=" + std::to_wstring(trace.lastReturnedCommand.LeftCommand()) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.leftDriveCommand) +
+                L" tolerance=1e-6";
+            Assert::IsTrue(trace.leftCommandEvidenceMatchesReturnedCommand, message.c_str());
+        }
+
+        TEST_METHOD(RightDriveEvidenceMatchesCommand)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"right_drive_evidence", kCode, trace) +
+                L" expected=" + std::to_wstring(trace.lastReturnedCommand.RightCommand()) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.rightDriveCommand) +
+                L" tolerance=1e-6";
+            Assert::IsTrue(trace.rightCommandEvidenceMatchesReturnedCommand, message.c_str());
+        }
+
+        TEST_METHOD(RequestedForwardIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_forward_mps", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedForwardMps) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedForwardMpsFinite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawRateIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_rate_radps", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawRateRadps) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawRateRadpsFinite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedForwardAccelIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_forward_accel_mps2", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedForwardAccelMps2) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedForwardAccelMps2Finite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawAccelIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_accel_radps2", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawAccelRadps2) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawAccelRadps2Finite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_rad", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawRad) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawRadFinite, message.c_str());
+        }
+
+        TEST_METHOD(TruthPositionXIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetPositionX();
+            const std::wstring message = BuildManeuverMessage(L"truth_position_x", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthPositionYIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetPositionY();
+            const std::wstring message = BuildManeuverMessage(L"truth_position_y", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthHeadingIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetHeading();
+            const std::wstring message = BuildManeuverMessage(L"truth_heading", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthForwardVelocityIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetForwardVelocity();
+            const std::wstring message = BuildManeuverMessage(L"truth_forward_velocity", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthRightwardVelocityIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetRightwardVelocity();
+            const std::wstring message = BuildManeuverMessage(L"truth_rightward_velocity", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthYawRateIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetYawRate();
+            const std::wstring message = BuildManeuverMessage(L"truth_yaw_rate", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthLeftWheelSpeedIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetWheelSpeedLeft();
+            const std::wstring message = BuildManeuverMessage(L"truth_left_wheel_speed", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthRightWheelSpeedIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetWheelSpeedRight();
+            const std::wstring message = BuildManeuverMessage(L"truth_right_wheel_speed", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthGyroBiasIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetGyroBiasZ();
+            const std::wstring message = BuildManeuverMessage(L"truth_gyro_bias", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(ShiftWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float shiftMeters = ComputeInPlaceShiftMeters(trace);
+            const std::wstring message = BuildManeuverMessage(L"shift", kCode, trace) +
+                L" actual_m=" + std::to_wstring(shiftMeters) +
+                L" limit_m=" + std::to_wstring(kInPlacePositionToleranceM);
+            Assert::IsTrue(shiftMeters < kInPlacePositionToleranceM, message.c_str());
+        }
+
+        TEST_METHOD(HeadingWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float headingErrorRad = ComputeInPlaceHeadingErrorRad(kCode, trace);
+            const std::wstring message = BuildManeuverMessage(L"heading", kCode, trace) +
+                L" error_deg=" + std::to_wstring(headingErrorRad * RAD_TO_DEG_F) +
+                L" limit_deg=" + std::to_wstring(kHeadingToleranceRad * RAD_TO_DEG_F);
+            Assert::IsTrue(headingErrorRad <= kHeadingToleranceRad, message.c_str());
+        }
+
+        TEST_METHOD(DurationWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float expectedTimeSeconds = ComputeInPlaceExpectedTimeSeconds(kCode);
+            const float relativeError = ComputeInPlaceRelativeTimeError(kCode, trace);
+            const std::wstring message = BuildManeuverMessage(L"time", kCode, trace) +
+                L" elapsed_s=" + std::to_wstring(trace.elapsedSeconds) +
+                L" expected_s=" + std::to_wstring(expectedTimeSeconds) +
+                L" rel_err=" + std::to_wstring(relativeError) +
+                L" limit=" + std::to_wstring(kTimeToleranceFraction);
+            Assert::IsTrue(relativeError <= kTimeToleranceFraction, message.c_str());
+        }
+
+    };
+
+    TEST_CLASS(DriveManeuverIP135ContractTest)
+    {
+        static constexpr ManeuverCode kCode = IP135;
+        static constexpr bool kSmoothTurn = false;
+
+    public:
+        TEST_METHOD(Completes)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"completion", kCode, trace);
+            Assert::IsTrue(trace.completed, message.c_str());
+        }
+
+        TEST_METHOD(CommandSamplesCaptured)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"command_samples", kCode, trace);
+            Assert::IsTrue(!trace.samples.empty(), message.c_str());
+        }
+
+        TEST_METHOD(LeftReturnedCommandIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"left_returned_command", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastReturnedCommand.LeftCommand()) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.leftReturnedCommandFinite, message.c_str());
+        }
+
+        TEST_METHOD(RightReturnedCommandIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"right_returned_command", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastReturnedCommand.RightCommand()) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.rightReturnedCommandFinite, message.c_str());
+        }
+
+        TEST_METHOD(BodyProposalEvidenceIsSet)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"body_proposal_evidence", kCode, trace) +
+                L" actual_flags=" + std::to_wstring(trace.lastTelemetry.commandKindFlags) +
+                L" required_mask=" + std::to_wstring(DriveTelemetry::kCommandKindBodyProposal);
+            Assert::IsTrue(trace.bodyProposalEvidenceSet, message.c_str());
+        }
+
+        TEST_METHOD(CommandTelemetryEvidenceIsSet)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"command_telemetry_evidence", kCode, trace) +
+                L" actual_flags=" + std::to_wstring(trace.lastTelemetry.telemetryValidFlags) +
+                L" required_mask=" + std::to_wstring(DriveTelemetry::kTelemetryCommandEvidenceValid);
+            Assert::IsTrue(trace.commandTelemetryEvidenceSet, message.c_str());
+        }
+
+        TEST_METHOD(LeftDriveEvidenceMatchesCommand)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"left_drive_evidence", kCode, trace) +
+                L" expected=" + std::to_wstring(trace.lastReturnedCommand.LeftCommand()) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.leftDriveCommand) +
+                L" tolerance=1e-6";
+            Assert::IsTrue(trace.leftCommandEvidenceMatchesReturnedCommand, message.c_str());
+        }
+
+        TEST_METHOD(RightDriveEvidenceMatchesCommand)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"right_drive_evidence", kCode, trace) +
+                L" expected=" + std::to_wstring(trace.lastReturnedCommand.RightCommand()) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.rightDriveCommand) +
+                L" tolerance=1e-6";
+            Assert::IsTrue(trace.rightCommandEvidenceMatchesReturnedCommand, message.c_str());
+        }
+
+        TEST_METHOD(RequestedForwardIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_forward_mps", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedForwardMps) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedForwardMpsFinite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawRateIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_rate_radps", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawRateRadps) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawRateRadpsFinite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedForwardAccelIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_forward_accel_mps2", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedForwardAccelMps2) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedForwardAccelMps2Finite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawAccelIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_accel_radps2", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawAccelRadps2) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawAccelRadps2Finite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_rad", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawRad) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawRadFinite, message.c_str());
+        }
+
+        TEST_METHOD(TruthPositionXIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetPositionX();
+            const std::wstring message = BuildManeuverMessage(L"truth_position_x", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthPositionYIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetPositionY();
+            const std::wstring message = BuildManeuverMessage(L"truth_position_y", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthHeadingIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetHeading();
+            const std::wstring message = BuildManeuverMessage(L"truth_heading", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthForwardVelocityIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetForwardVelocity();
+            const std::wstring message = BuildManeuverMessage(L"truth_forward_velocity", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthRightwardVelocityIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetRightwardVelocity();
+            const std::wstring message = BuildManeuverMessage(L"truth_rightward_velocity", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthYawRateIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetYawRate();
+            const std::wstring message = BuildManeuverMessage(L"truth_yaw_rate", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthLeftWheelSpeedIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetWheelSpeedLeft();
+            const std::wstring message = BuildManeuverMessage(L"truth_left_wheel_speed", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthRightWheelSpeedIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetWheelSpeedRight();
+            const std::wstring message = BuildManeuverMessage(L"truth_right_wheel_speed", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthGyroBiasIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetGyroBiasZ();
+            const std::wstring message = BuildManeuverMessage(L"truth_gyro_bias", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(ShiftWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float shiftMeters = ComputeInPlaceShiftMeters(trace);
+            const std::wstring message = BuildManeuverMessage(L"shift", kCode, trace) +
+                L" actual_m=" + std::to_wstring(shiftMeters) +
+                L" limit_m=" + std::to_wstring(kInPlacePositionToleranceM);
+            Assert::IsTrue(shiftMeters < kInPlacePositionToleranceM, message.c_str());
+        }
+
+        TEST_METHOD(HeadingWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float headingErrorRad = ComputeInPlaceHeadingErrorRad(kCode, trace);
+            const std::wstring message = BuildManeuverMessage(L"heading", kCode, trace) +
+                L" error_deg=" + std::to_wstring(headingErrorRad * RAD_TO_DEG_F) +
+                L" limit_deg=" + std::to_wstring(kHeadingToleranceRad * RAD_TO_DEG_F);
+            Assert::IsTrue(headingErrorRad <= kHeadingToleranceRad, message.c_str());
+        }
+
+        TEST_METHOD(DurationWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float expectedTimeSeconds = ComputeInPlaceExpectedTimeSeconds(kCode);
+            const float relativeError = ComputeInPlaceRelativeTimeError(kCode, trace);
+            const std::wstring message = BuildManeuverMessage(L"time", kCode, trace) +
+                L" elapsed_s=" + std::to_wstring(trace.elapsedSeconds) +
+                L" expected_s=" + std::to_wstring(expectedTimeSeconds) +
+                L" rel_err=" + std::to_wstring(relativeError) +
+                L" limit=" + std::to_wstring(kTimeToleranceFraction);
+            Assert::IsTrue(relativeError <= kTimeToleranceFraction, message.c_str());
+        }
+
+    };
+
+    TEST_CLASS(DriveManeuverIP180ContractTest)
+    {
+        static constexpr ManeuverCode kCode = IP180;
+        static constexpr bool kSmoothTurn = false;
+
+    public:
+        TEST_METHOD(Completes)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"completion", kCode, trace);
+            Assert::IsTrue(trace.completed, message.c_str());
+        }
+
+        TEST_METHOD(CommandSamplesCaptured)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"command_samples", kCode, trace);
+            Assert::IsTrue(!trace.samples.empty(), message.c_str());
+        }
+
+        TEST_METHOD(LeftReturnedCommandIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"left_returned_command", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastReturnedCommand.LeftCommand()) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.leftReturnedCommandFinite, message.c_str());
+        }
+
+        TEST_METHOD(RightReturnedCommandIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"right_returned_command", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastReturnedCommand.RightCommand()) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.rightReturnedCommandFinite, message.c_str());
+        }
+
+        TEST_METHOD(BodyProposalEvidenceIsSet)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"body_proposal_evidence", kCode, trace) +
+                L" actual_flags=" + std::to_wstring(trace.lastTelemetry.commandKindFlags) +
+                L" required_mask=" + std::to_wstring(DriveTelemetry::kCommandKindBodyProposal);
+            Assert::IsTrue(trace.bodyProposalEvidenceSet, message.c_str());
+        }
+
+        TEST_METHOD(CommandTelemetryEvidenceIsSet)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"command_telemetry_evidence", kCode, trace) +
+                L" actual_flags=" + std::to_wstring(trace.lastTelemetry.telemetryValidFlags) +
+                L" required_mask=" + std::to_wstring(DriveTelemetry::kTelemetryCommandEvidenceValid);
+            Assert::IsTrue(trace.commandTelemetryEvidenceSet, message.c_str());
+        }
+
+        TEST_METHOD(LeftDriveEvidenceMatchesCommand)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"left_drive_evidence", kCode, trace) +
+                L" expected=" + std::to_wstring(trace.lastReturnedCommand.LeftCommand()) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.leftDriveCommand) +
+                L" tolerance=1e-6";
+            Assert::IsTrue(trace.leftCommandEvidenceMatchesReturnedCommand, message.c_str());
+        }
+
+        TEST_METHOD(RightDriveEvidenceMatchesCommand)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"right_drive_evidence", kCode, trace) +
+                L" expected=" + std::to_wstring(trace.lastReturnedCommand.RightCommand()) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.rightDriveCommand) +
+                L" tolerance=1e-6";
+            Assert::IsTrue(trace.rightCommandEvidenceMatchesReturnedCommand, message.c_str());
+        }
+
+        TEST_METHOD(RequestedForwardIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_forward_mps", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedForwardMps) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedForwardMpsFinite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawRateIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_rate_radps", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawRateRadps) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawRateRadpsFinite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedForwardAccelIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_forward_accel_mps2", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedForwardAccelMps2) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedForwardAccelMps2Finite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawAccelIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_accel_radps2", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawAccelRadps2) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawAccelRadps2Finite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_rad", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawRad) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawRadFinite, message.c_str());
+        }
+
+        TEST_METHOD(TruthPositionXIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetPositionX();
+            const std::wstring message = BuildManeuverMessage(L"truth_position_x", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthPositionYIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetPositionY();
+            const std::wstring message = BuildManeuverMessage(L"truth_position_y", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthHeadingIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetHeading();
+            const std::wstring message = BuildManeuverMessage(L"truth_heading", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthForwardVelocityIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetForwardVelocity();
+            const std::wstring message = BuildManeuverMessage(L"truth_forward_velocity", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthRightwardVelocityIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetRightwardVelocity();
+            const std::wstring message = BuildManeuverMessage(L"truth_rightward_velocity", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthYawRateIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetYawRate();
+            const std::wstring message = BuildManeuverMessage(L"truth_yaw_rate", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthLeftWheelSpeedIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetWheelSpeedLeft();
+            const std::wstring message = BuildManeuverMessage(L"truth_left_wheel_speed", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthRightWheelSpeedIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetWheelSpeedRight();
+            const std::wstring message = BuildManeuverMessage(L"truth_right_wheel_speed", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthGyroBiasIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetGyroBiasZ();
+            const std::wstring message = BuildManeuverMessage(L"truth_gyro_bias", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(ShiftWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float shiftMeters = ComputeInPlaceShiftMeters(trace);
+            const std::wstring message = BuildManeuverMessage(L"shift", kCode, trace) +
+                L" actual_m=" + std::to_wstring(shiftMeters) +
+                L" limit_m=" + std::to_wstring(kInPlacePositionToleranceM);
+            Assert::IsTrue(shiftMeters < kInPlacePositionToleranceM, message.c_str());
+        }
+
+        TEST_METHOD(HeadingWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float headingErrorRad = ComputeInPlaceHeadingErrorRad(kCode, trace);
+            const std::wstring message = BuildManeuverMessage(L"heading", kCode, trace) +
+                L" error_deg=" + std::to_wstring(headingErrorRad * RAD_TO_DEG_F) +
+                L" limit_deg=" + std::to_wstring(kHeadingToleranceRad * RAD_TO_DEG_F);
+            Assert::IsTrue(headingErrorRad <= kHeadingToleranceRad, message.c_str());
+        }
+
+        TEST_METHOD(DurationWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float expectedTimeSeconds = ComputeInPlaceExpectedTimeSeconds(kCode);
+            const float relativeError = ComputeInPlaceRelativeTimeError(kCode, trace);
+            const std::wstring message = BuildManeuverMessage(L"time", kCode, trace) +
+                L" elapsed_s=" + std::to_wstring(trace.elapsedSeconds) +
+                L" expected_s=" + std::to_wstring(expectedTimeSeconds) +
+                L" rel_err=" + std::to_wstring(relativeError) +
+                L" limit=" + std::to_wstring(kTimeToleranceFraction);
+            Assert::IsTrue(relativeError <= kTimeToleranceFraction, message.c_str());
+        }
+
+    };
+
+    TEST_CLASS(DriveManeuverS45LSContractTest)
+    {
+        static constexpr ManeuverCode kCode = S45LS;
+        static constexpr bool kSmoothTurn = true;
+
+    public:
+        TEST_METHOD(Completes)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"completion", kCode, trace);
+            Assert::IsTrue(trace.completed, message.c_str());
+        }
+
+        TEST_METHOD(CommandSamplesCaptured)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"command_samples", kCode, trace);
+            Assert::IsTrue(!trace.samples.empty(), message.c_str());
+        }
+
+        TEST_METHOD(LeftReturnedCommandIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"left_returned_command", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastReturnedCommand.LeftCommand()) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.leftReturnedCommandFinite, message.c_str());
+        }
+
+        TEST_METHOD(RightReturnedCommandIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"right_returned_command", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastReturnedCommand.RightCommand()) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.rightReturnedCommandFinite, message.c_str());
+        }
+
+        TEST_METHOD(BodyProposalEvidenceIsSet)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"body_proposal_evidence", kCode, trace) +
+                L" actual_flags=" + std::to_wstring(trace.lastTelemetry.commandKindFlags) +
+                L" required_mask=" + std::to_wstring(DriveTelemetry::kCommandKindBodyProposal);
+            Assert::IsTrue(trace.bodyProposalEvidenceSet, message.c_str());
+        }
+
+        TEST_METHOD(CommandTelemetryEvidenceIsSet)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"command_telemetry_evidence", kCode, trace) +
+                L" actual_flags=" + std::to_wstring(trace.lastTelemetry.telemetryValidFlags) +
+                L" required_mask=" + std::to_wstring(DriveTelemetry::kTelemetryCommandEvidenceValid);
+            Assert::IsTrue(trace.commandTelemetryEvidenceSet, message.c_str());
+        }
+
+        TEST_METHOD(LeftDriveEvidenceMatchesCommand)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"left_drive_evidence", kCode, trace) +
+                L" expected=" + std::to_wstring(trace.lastReturnedCommand.LeftCommand()) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.leftDriveCommand) +
+                L" tolerance=1e-6";
+            Assert::IsTrue(trace.leftCommandEvidenceMatchesReturnedCommand, message.c_str());
+        }
+
+        TEST_METHOD(RightDriveEvidenceMatchesCommand)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"right_drive_evidence", kCode, trace) +
+                L" expected=" + std::to_wstring(trace.lastReturnedCommand.RightCommand()) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.rightDriveCommand) +
+                L" tolerance=1e-6";
+            Assert::IsTrue(trace.rightCommandEvidenceMatchesReturnedCommand, message.c_str());
+        }
+
+        TEST_METHOD(RequestedForwardIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_forward_mps", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedForwardMps) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedForwardMpsFinite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawRateIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_rate_radps", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawRateRadps) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawRateRadpsFinite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedForwardAccelIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_forward_accel_mps2", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedForwardAccelMps2) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedForwardAccelMps2Finite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawAccelIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_accel_radps2", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawAccelRadps2) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawAccelRadps2Finite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_rad", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawRad) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawRadFinite, message.c_str());
+        }
+
+        TEST_METHOD(TruthPositionXIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetPositionX();
+            const std::wstring message = BuildManeuverMessage(L"truth_position_x", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthPositionYIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetPositionY();
+            const std::wstring message = BuildManeuverMessage(L"truth_position_y", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthHeadingIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetHeading();
+            const std::wstring message = BuildManeuverMessage(L"truth_heading", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthForwardVelocityIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetForwardVelocity();
+            const std::wstring message = BuildManeuverMessage(L"truth_forward_velocity", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthRightwardVelocityIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetRightwardVelocity();
+            const std::wstring message = BuildManeuverMessage(L"truth_rightward_velocity", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthYawRateIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetYawRate();
+            const std::wstring message = BuildManeuverMessage(L"truth_yaw_rate", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthLeftWheelSpeedIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetWheelSpeedLeft();
+            const std::wstring message = BuildManeuverMessage(L"truth_left_wheel_speed", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthRightWheelSpeedIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetWheelSpeedRight();
+            const std::wstring message = BuildManeuverMessage(L"truth_right_wheel_speed", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthGyroBiasIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetGyroBiasZ();
+            const std::wstring message = BuildManeuverMessage(L"truth_gyro_bias", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(VelocityStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothVelocityNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"velocity", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kVelocityVariationLimit);
+            Assert::IsTrue(normalizedSpan < kVelocityVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(YawAccelerationStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothYawAccelerationNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"yaw_accel", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kYawAccelerationVariationLimit);
+            Assert::IsTrue(normalizedSpan < kYawAccelerationVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(YawRateStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothYawRateNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"yaw_rate", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kYawRateVariationLimit);
+            Assert::IsTrue(normalizedSpan < kYawRateVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(FinalPositionWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float positionErrorMeters = ComputeSmoothFinalPositionErrorMeters(kCode, trace);
+            const std::wstring message = BuildManeuverMessage(L"position", kCode, trace) +
+                L" error_m=" + std::to_wstring(positionErrorMeters) +
+                L" limit_m=" + std::to_wstring(kSmoothPositionToleranceM);
+            Assert::IsTrue(positionErrorMeters <= kSmoothPositionToleranceM, message.c_str());
+        }
+
+        TEST_METHOD(FinalHeadingWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float headingErrorRad = ComputeSmoothFinalHeadingErrorRad(kCode, trace);
+            const std::wstring message = BuildManeuverMessage(L"heading", kCode, trace) +
+                L" error_deg=" + std::to_wstring(headingErrorRad * RAD_TO_DEG_F) +
+                L" limit_deg=" + std::to_wstring(kHeadingToleranceRad * RAD_TO_DEG_F);
+            Assert::IsTrue(headingErrorRad <= kHeadingToleranceRad, message.c_str());
+        }
+
+    };
+
+    TEST_CLASS(DriveManeuverS45LDContractTest)
+    {
+        static constexpr ManeuverCode kCode = S45LD;
+        static constexpr bool kSmoothTurn = true;
+
+    public:
+        TEST_METHOD(Completes)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"completion", kCode, trace);
+            Assert::IsTrue(trace.completed, message.c_str());
+        }
+
+        TEST_METHOD(CommandSamplesCaptured)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"command_samples", kCode, trace);
+            Assert::IsTrue(!trace.samples.empty(), message.c_str());
+        }
+
+        TEST_METHOD(LeftReturnedCommandIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"left_returned_command", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastReturnedCommand.LeftCommand()) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.leftReturnedCommandFinite, message.c_str());
+        }
+
+        TEST_METHOD(RightReturnedCommandIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"right_returned_command", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastReturnedCommand.RightCommand()) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.rightReturnedCommandFinite, message.c_str());
+        }
+
+        TEST_METHOD(BodyProposalEvidenceIsSet)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"body_proposal_evidence", kCode, trace) +
+                L" actual_flags=" + std::to_wstring(trace.lastTelemetry.commandKindFlags) +
+                L" required_mask=" + std::to_wstring(DriveTelemetry::kCommandKindBodyProposal);
+            Assert::IsTrue(trace.bodyProposalEvidenceSet, message.c_str());
+        }
+
+        TEST_METHOD(CommandTelemetryEvidenceIsSet)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"command_telemetry_evidence", kCode, trace) +
+                L" actual_flags=" + std::to_wstring(trace.lastTelemetry.telemetryValidFlags) +
+                L" required_mask=" + std::to_wstring(DriveTelemetry::kTelemetryCommandEvidenceValid);
+            Assert::IsTrue(trace.commandTelemetryEvidenceSet, message.c_str());
+        }
+
+        TEST_METHOD(LeftDriveEvidenceMatchesCommand)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"left_drive_evidence", kCode, trace) +
+                L" expected=" + std::to_wstring(trace.lastReturnedCommand.LeftCommand()) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.leftDriveCommand) +
+                L" tolerance=1e-6";
+            Assert::IsTrue(trace.leftCommandEvidenceMatchesReturnedCommand, message.c_str());
+        }
+
+        TEST_METHOD(RightDriveEvidenceMatchesCommand)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"right_drive_evidence", kCode, trace) +
+                L" expected=" + std::to_wstring(trace.lastReturnedCommand.RightCommand()) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.rightDriveCommand) +
+                L" tolerance=1e-6";
+            Assert::IsTrue(trace.rightCommandEvidenceMatchesReturnedCommand, message.c_str());
+        }
+
+        TEST_METHOD(RequestedForwardIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_forward_mps", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedForwardMps) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedForwardMpsFinite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawRateIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_rate_radps", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawRateRadps) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawRateRadpsFinite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedForwardAccelIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_forward_accel_mps2", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedForwardAccelMps2) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedForwardAccelMps2Finite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawAccelIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_accel_radps2", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawAccelRadps2) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawAccelRadps2Finite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_rad", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawRad) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawRadFinite, message.c_str());
+        }
+
+        TEST_METHOD(TruthPositionXIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetPositionX();
+            const std::wstring message = BuildManeuverMessage(L"truth_position_x", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthPositionYIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetPositionY();
+            const std::wstring message = BuildManeuverMessage(L"truth_position_y", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthHeadingIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetHeading();
+            const std::wstring message = BuildManeuverMessage(L"truth_heading", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthForwardVelocityIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetForwardVelocity();
+            const std::wstring message = BuildManeuverMessage(L"truth_forward_velocity", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthRightwardVelocityIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetRightwardVelocity();
+            const std::wstring message = BuildManeuverMessage(L"truth_rightward_velocity", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthYawRateIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetYawRate();
+            const std::wstring message = BuildManeuverMessage(L"truth_yaw_rate", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthLeftWheelSpeedIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetWheelSpeedLeft();
+            const std::wstring message = BuildManeuverMessage(L"truth_left_wheel_speed", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthRightWheelSpeedIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetWheelSpeedRight();
+            const std::wstring message = BuildManeuverMessage(L"truth_right_wheel_speed", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthGyroBiasIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetGyroBiasZ();
+            const std::wstring message = BuildManeuverMessage(L"truth_gyro_bias", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(VelocityStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothVelocityNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"velocity", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kVelocityVariationLimit);
+            Assert::IsTrue(normalizedSpan < kVelocityVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(YawAccelerationStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothYawAccelerationNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"yaw_accel", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kYawAccelerationVariationLimit);
+            Assert::IsTrue(normalizedSpan < kYawAccelerationVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(YawRateStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothYawRateNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"yaw_rate", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kYawRateVariationLimit);
+            Assert::IsTrue(normalizedSpan < kYawRateVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(FinalPositionWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float positionErrorMeters = ComputeSmoothFinalPositionErrorMeters(kCode, trace);
+            const std::wstring message = BuildManeuverMessage(L"position", kCode, trace) +
+                L" error_m=" + std::to_wstring(positionErrorMeters) +
+                L" limit_m=" + std::to_wstring(kSmoothPositionToleranceM);
+            Assert::IsTrue(positionErrorMeters <= kSmoothPositionToleranceM, message.c_str());
+        }
+
+        TEST_METHOD(FinalHeadingWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float headingErrorRad = ComputeSmoothFinalHeadingErrorRad(kCode, trace);
+            const std::wstring message = BuildManeuverMessage(L"heading", kCode, trace) +
+                L" error_deg=" + std::to_wstring(headingErrorRad * RAD_TO_DEG_F) +
+                L" limit_deg=" + std::to_wstring(kHeadingToleranceRad * RAD_TO_DEG_F);
+            Assert::IsTrue(headingErrorRad <= kHeadingToleranceRad, message.c_str());
+        }
+
+    };
+
+    TEST_CLASS(DriveManeuverS45SSContractTest)
+    {
+        static constexpr ManeuverCode kCode = S45SS;
+        static constexpr bool kSmoothTurn = true;
+
+    public:
+        TEST_METHOD(Completes)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"completion", kCode, trace);
+            Assert::IsTrue(trace.completed, message.c_str());
+        }
+
+        TEST_METHOD(CommandSamplesCaptured)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"command_samples", kCode, trace);
+            Assert::IsTrue(!trace.samples.empty(), message.c_str());
+        }
+
+        TEST_METHOD(LeftReturnedCommandIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"left_returned_command", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastReturnedCommand.LeftCommand()) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.leftReturnedCommandFinite, message.c_str());
+        }
+
+        TEST_METHOD(RightReturnedCommandIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"right_returned_command", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastReturnedCommand.RightCommand()) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.rightReturnedCommandFinite, message.c_str());
+        }
+
+        TEST_METHOD(BodyProposalEvidenceIsSet)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"body_proposal_evidence", kCode, trace) +
+                L" actual_flags=" + std::to_wstring(trace.lastTelemetry.commandKindFlags) +
+                L" required_mask=" + std::to_wstring(DriveTelemetry::kCommandKindBodyProposal);
+            Assert::IsTrue(trace.bodyProposalEvidenceSet, message.c_str());
+        }
+
+        TEST_METHOD(CommandTelemetryEvidenceIsSet)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"command_telemetry_evidence", kCode, trace) +
+                L" actual_flags=" + std::to_wstring(trace.lastTelemetry.telemetryValidFlags) +
+                L" required_mask=" + std::to_wstring(DriveTelemetry::kTelemetryCommandEvidenceValid);
+            Assert::IsTrue(trace.commandTelemetryEvidenceSet, message.c_str());
+        }
+
+        TEST_METHOD(LeftDriveEvidenceMatchesCommand)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"left_drive_evidence", kCode, trace) +
+                L" expected=" + std::to_wstring(trace.lastReturnedCommand.LeftCommand()) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.leftDriveCommand) +
+                L" tolerance=1e-6";
+            Assert::IsTrue(trace.leftCommandEvidenceMatchesReturnedCommand, message.c_str());
+        }
+
+        TEST_METHOD(RightDriveEvidenceMatchesCommand)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"right_drive_evidence", kCode, trace) +
+                L" expected=" + std::to_wstring(trace.lastReturnedCommand.RightCommand()) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.rightDriveCommand) +
+                L" tolerance=1e-6";
+            Assert::IsTrue(trace.rightCommandEvidenceMatchesReturnedCommand, message.c_str());
+        }
+
+        TEST_METHOD(RequestedForwardIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_forward_mps", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedForwardMps) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedForwardMpsFinite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawRateIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_rate_radps", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawRateRadps) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawRateRadpsFinite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedForwardAccelIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_forward_accel_mps2", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedForwardAccelMps2) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedForwardAccelMps2Finite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawAccelIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_accel_radps2", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawAccelRadps2) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawAccelRadps2Finite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_rad", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawRad) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawRadFinite, message.c_str());
+        }
+
+        TEST_METHOD(TruthPositionXIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetPositionX();
+            const std::wstring message = BuildManeuverMessage(L"truth_position_x", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthPositionYIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetPositionY();
+            const std::wstring message = BuildManeuverMessage(L"truth_position_y", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthHeadingIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetHeading();
+            const std::wstring message = BuildManeuverMessage(L"truth_heading", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthForwardVelocityIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetForwardVelocity();
+            const std::wstring message = BuildManeuverMessage(L"truth_forward_velocity", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthRightwardVelocityIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetRightwardVelocity();
+            const std::wstring message = BuildManeuverMessage(L"truth_rightward_velocity", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthYawRateIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetYawRate();
+            const std::wstring message = BuildManeuverMessage(L"truth_yaw_rate", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthLeftWheelSpeedIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetWheelSpeedLeft();
+            const std::wstring message = BuildManeuverMessage(L"truth_left_wheel_speed", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthRightWheelSpeedIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetWheelSpeedRight();
+            const std::wstring message = BuildManeuverMessage(L"truth_right_wheel_speed", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthGyroBiasIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetGyroBiasZ();
+            const std::wstring message = BuildManeuverMessage(L"truth_gyro_bias", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(VelocityStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothVelocityNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"velocity", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kVelocityVariationLimit);
+            Assert::IsTrue(normalizedSpan < kVelocityVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(YawAccelerationStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothYawAccelerationNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"yaw_accel", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kYawAccelerationVariationLimit);
+            Assert::IsTrue(normalizedSpan < kYawAccelerationVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(YawRateStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothYawRateNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"yaw_rate", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kYawRateVariationLimit);
+            Assert::IsTrue(normalizedSpan < kYawRateVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(FinalPositionWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float positionErrorMeters = ComputeSmoothFinalPositionErrorMeters(kCode, trace);
+            const std::wstring message = BuildManeuverMessage(L"position", kCode, trace) +
+                L" error_m=" + std::to_wstring(positionErrorMeters) +
+                L" limit_m=" + std::to_wstring(kSmoothPositionToleranceM);
+            Assert::IsTrue(positionErrorMeters <= kSmoothPositionToleranceM, message.c_str());
+        }
+
+        TEST_METHOD(FinalHeadingWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float headingErrorRad = ComputeSmoothFinalHeadingErrorRad(kCode, trace);
+            const std::wstring message = BuildManeuverMessage(L"heading", kCode, trace) +
+                L" error_deg=" + std::to_wstring(headingErrorRad * RAD_TO_DEG_F) +
+                L" limit_deg=" + std::to_wstring(kHeadingToleranceRad * RAD_TO_DEG_F);
+            Assert::IsTrue(headingErrorRad <= kHeadingToleranceRad, message.c_str());
+        }
+
+    };
+
+    TEST_CLASS(DriveManeuverS45SDContractTest)
+    {
+        static constexpr ManeuverCode kCode = S45SD;
+        static constexpr bool kSmoothTurn = true;
+
+    public:
+        TEST_METHOD(Completes)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"completion", kCode, trace);
+            Assert::IsTrue(trace.completed, message.c_str());
+        }
+
+        TEST_METHOD(CommandSamplesCaptured)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"command_samples", kCode, trace);
+            Assert::IsTrue(!trace.samples.empty(), message.c_str());
+        }
+
+        TEST_METHOD(LeftReturnedCommandIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"left_returned_command", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastReturnedCommand.LeftCommand()) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.leftReturnedCommandFinite, message.c_str());
+        }
+
+        TEST_METHOD(RightReturnedCommandIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"right_returned_command", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastReturnedCommand.RightCommand()) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.rightReturnedCommandFinite, message.c_str());
+        }
+
+        TEST_METHOD(BodyProposalEvidenceIsSet)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"body_proposal_evidence", kCode, trace) +
+                L" actual_flags=" + std::to_wstring(trace.lastTelemetry.commandKindFlags) +
+                L" required_mask=" + std::to_wstring(DriveTelemetry::kCommandKindBodyProposal);
+            Assert::IsTrue(trace.bodyProposalEvidenceSet, message.c_str());
+        }
+
+        TEST_METHOD(CommandTelemetryEvidenceIsSet)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"command_telemetry_evidence", kCode, trace) +
+                L" actual_flags=" + std::to_wstring(trace.lastTelemetry.telemetryValidFlags) +
+                L" required_mask=" + std::to_wstring(DriveTelemetry::kTelemetryCommandEvidenceValid);
+            Assert::IsTrue(trace.commandTelemetryEvidenceSet, message.c_str());
+        }
+
+        TEST_METHOD(LeftDriveEvidenceMatchesCommand)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"left_drive_evidence", kCode, trace) +
+                L" expected=" + std::to_wstring(trace.lastReturnedCommand.LeftCommand()) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.leftDriveCommand) +
+                L" tolerance=1e-6";
+            Assert::IsTrue(trace.leftCommandEvidenceMatchesReturnedCommand, message.c_str());
+        }
+
+        TEST_METHOD(RightDriveEvidenceMatchesCommand)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"right_drive_evidence", kCode, trace) +
+                L" expected=" + std::to_wstring(trace.lastReturnedCommand.RightCommand()) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.rightDriveCommand) +
+                L" tolerance=1e-6";
+            Assert::IsTrue(trace.rightCommandEvidenceMatchesReturnedCommand, message.c_str());
+        }
+
+        TEST_METHOD(RequestedForwardIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_forward_mps", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedForwardMps) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedForwardMpsFinite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawRateIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_rate_radps", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawRateRadps) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawRateRadpsFinite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedForwardAccelIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_forward_accel_mps2", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedForwardAccelMps2) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedForwardAccelMps2Finite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawAccelIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_accel_radps2", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawAccelRadps2) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawAccelRadps2Finite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_rad", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawRad) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawRadFinite, message.c_str());
+        }
+
+        TEST_METHOD(TruthPositionXIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetPositionX();
+            const std::wstring message = BuildManeuverMessage(L"truth_position_x", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthPositionYIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetPositionY();
+            const std::wstring message = BuildManeuverMessage(L"truth_position_y", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthHeadingIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetHeading();
+            const std::wstring message = BuildManeuverMessage(L"truth_heading", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthForwardVelocityIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetForwardVelocity();
+            const std::wstring message = BuildManeuverMessage(L"truth_forward_velocity", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthRightwardVelocityIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetRightwardVelocity();
+            const std::wstring message = BuildManeuverMessage(L"truth_rightward_velocity", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthYawRateIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetYawRate();
+            const std::wstring message = BuildManeuverMessage(L"truth_yaw_rate", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthLeftWheelSpeedIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetWheelSpeedLeft();
+            const std::wstring message = BuildManeuverMessage(L"truth_left_wheel_speed", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthRightWheelSpeedIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetWheelSpeedRight();
+            const std::wstring message = BuildManeuverMessage(L"truth_right_wheel_speed", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthGyroBiasIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetGyroBiasZ();
+            const std::wstring message = BuildManeuverMessage(L"truth_gyro_bias", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(VelocityStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothVelocityNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"velocity", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kVelocityVariationLimit);
+            Assert::IsTrue(normalizedSpan < kVelocityVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(YawAccelerationStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothYawAccelerationNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"yaw_accel", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kYawAccelerationVariationLimit);
+            Assert::IsTrue(normalizedSpan < kYawAccelerationVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(YawRateStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothYawRateNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"yaw_rate", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kYawRateVariationLimit);
+            Assert::IsTrue(normalizedSpan < kYawRateVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(FinalPositionWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float positionErrorMeters = ComputeSmoothFinalPositionErrorMeters(kCode, trace);
+            const std::wstring message = BuildManeuverMessage(L"position", kCode, trace) +
+                L" error_m=" + std::to_wstring(positionErrorMeters) +
+                L" limit_m=" + std::to_wstring(kSmoothPositionToleranceM);
+            Assert::IsTrue(positionErrorMeters <= kSmoothPositionToleranceM, message.c_str());
+        }
+
+        TEST_METHOD(FinalHeadingWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float headingErrorRad = ComputeSmoothFinalHeadingErrorRad(kCode, trace);
+            const std::wstring message = BuildManeuverMessage(L"heading", kCode, trace) +
+                L" error_deg=" + std::to_wstring(headingErrorRad * RAD_TO_DEG_F) +
+                L" limit_deg=" + std::to_wstring(kHeadingToleranceRad * RAD_TO_DEG_F);
+            Assert::IsTrue(headingErrorRad <= kHeadingToleranceRad, message.c_str());
+        }
+
+    };
+
+    TEST_CLASS(DriveManeuverS90LSContractTest)
+    {
+        static constexpr ManeuverCode kCode = S90LS;
+        static constexpr bool kSmoothTurn = true;
+
+    public:
+        TEST_METHOD(Completes)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"completion", kCode, trace);
+            Assert::IsTrue(trace.completed, message.c_str());
+        }
+
+        TEST_METHOD(CommandSamplesCaptured)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"command_samples", kCode, trace);
+            Assert::IsTrue(!trace.samples.empty(), message.c_str());
+        }
+
+        TEST_METHOD(LeftReturnedCommandIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"left_returned_command", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastReturnedCommand.LeftCommand()) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.leftReturnedCommandFinite, message.c_str());
+        }
+
+        TEST_METHOD(RightReturnedCommandIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"right_returned_command", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastReturnedCommand.RightCommand()) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.rightReturnedCommandFinite, message.c_str());
+        }
+
+        TEST_METHOD(BodyProposalEvidenceIsSet)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"body_proposal_evidence", kCode, trace) +
+                L" actual_flags=" + std::to_wstring(trace.lastTelemetry.commandKindFlags) +
+                L" required_mask=" + std::to_wstring(DriveTelemetry::kCommandKindBodyProposal);
+            Assert::IsTrue(trace.bodyProposalEvidenceSet, message.c_str());
+        }
+
+        TEST_METHOD(CommandTelemetryEvidenceIsSet)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"command_telemetry_evidence", kCode, trace) +
+                L" actual_flags=" + std::to_wstring(trace.lastTelemetry.telemetryValidFlags) +
+                L" required_mask=" + std::to_wstring(DriveTelemetry::kTelemetryCommandEvidenceValid);
+            Assert::IsTrue(trace.commandTelemetryEvidenceSet, message.c_str());
+        }
+
+        TEST_METHOD(LeftDriveEvidenceMatchesCommand)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"left_drive_evidence", kCode, trace) +
+                L" expected=" + std::to_wstring(trace.lastReturnedCommand.LeftCommand()) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.leftDriveCommand) +
+                L" tolerance=1e-6";
+            Assert::IsTrue(trace.leftCommandEvidenceMatchesReturnedCommand, message.c_str());
+        }
+
+        TEST_METHOD(RightDriveEvidenceMatchesCommand)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"right_drive_evidence", kCode, trace) +
+                L" expected=" + std::to_wstring(trace.lastReturnedCommand.RightCommand()) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.rightDriveCommand) +
+                L" tolerance=1e-6";
+            Assert::IsTrue(trace.rightCommandEvidenceMatchesReturnedCommand, message.c_str());
+        }
+
+        TEST_METHOD(RequestedForwardIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_forward_mps", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedForwardMps) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedForwardMpsFinite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawRateIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_rate_radps", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawRateRadps) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawRateRadpsFinite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedForwardAccelIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_forward_accel_mps2", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedForwardAccelMps2) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedForwardAccelMps2Finite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawAccelIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_accel_radps2", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawAccelRadps2) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawAccelRadps2Finite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_rad", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawRad) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawRadFinite, message.c_str());
+        }
+
+        TEST_METHOD(TruthPositionXIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetPositionX();
+            const std::wstring message = BuildManeuverMessage(L"truth_position_x", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthPositionYIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetPositionY();
+            const std::wstring message = BuildManeuverMessage(L"truth_position_y", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthHeadingIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetHeading();
+            const std::wstring message = BuildManeuverMessage(L"truth_heading", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthForwardVelocityIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetForwardVelocity();
+            const std::wstring message = BuildManeuverMessage(L"truth_forward_velocity", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthRightwardVelocityIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetRightwardVelocity();
+            const std::wstring message = BuildManeuverMessage(L"truth_rightward_velocity", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthYawRateIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetYawRate();
+            const std::wstring message = BuildManeuverMessage(L"truth_yaw_rate", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthLeftWheelSpeedIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetWheelSpeedLeft();
+            const std::wstring message = BuildManeuverMessage(L"truth_left_wheel_speed", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthRightWheelSpeedIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetWheelSpeedRight();
+            const std::wstring message = BuildManeuverMessage(L"truth_right_wheel_speed", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthGyroBiasIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetGyroBiasZ();
+            const std::wstring message = BuildManeuverMessage(L"truth_gyro_bias", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(VelocityStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothVelocityNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"velocity", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kVelocityVariationLimit);
+            Assert::IsTrue(normalizedSpan < kVelocityVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(YawAccelerationStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothYawAccelerationNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"yaw_accel", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kYawAccelerationVariationLimit);
+            Assert::IsTrue(normalizedSpan < kYawAccelerationVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(YawRateStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothYawRateNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"yaw_rate", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kYawRateVariationLimit);
+            Assert::IsTrue(normalizedSpan < kYawRateVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(FinalPositionWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float positionErrorMeters = ComputeSmoothFinalPositionErrorMeters(kCode, trace);
+            const std::wstring message = BuildManeuverMessage(L"position", kCode, trace) +
+                L" error_m=" + std::to_wstring(positionErrorMeters) +
+                L" limit_m=" + std::to_wstring(kSmoothPositionToleranceM);
+            Assert::IsTrue(positionErrorMeters <= kSmoothPositionToleranceM, message.c_str());
+        }
+
+        TEST_METHOD(FinalHeadingWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float headingErrorRad = ComputeSmoothFinalHeadingErrorRad(kCode, trace);
+            const std::wstring message = BuildManeuverMessage(L"heading", kCode, trace) +
+                L" error_deg=" + std::to_wstring(headingErrorRad * RAD_TO_DEG_F) +
+                L" limit_deg=" + std::to_wstring(kHeadingToleranceRad * RAD_TO_DEG_F);
+            Assert::IsTrue(headingErrorRad <= kHeadingToleranceRad, message.c_str());
+        }
+
+    };
+
+    TEST_CLASS(DriveManeuverS90SSContractTest)
+    {
+        static constexpr ManeuverCode kCode = S90SS;
+        static constexpr bool kSmoothTurn = true;
+
+    public:
+        TEST_METHOD(Completes)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"completion", kCode, trace);
+            Assert::IsTrue(trace.completed, message.c_str());
+        }
+
+        TEST_METHOD(CommandSamplesCaptured)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"command_samples", kCode, trace);
+            Assert::IsTrue(!trace.samples.empty(), message.c_str());
+        }
+
+        TEST_METHOD(LeftReturnedCommandIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"left_returned_command", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastReturnedCommand.LeftCommand()) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.leftReturnedCommandFinite, message.c_str());
+        }
+
+        TEST_METHOD(RightReturnedCommandIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"right_returned_command", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastReturnedCommand.RightCommand()) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.rightReturnedCommandFinite, message.c_str());
+        }
+
+        TEST_METHOD(BodyProposalEvidenceIsSet)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"body_proposal_evidence", kCode, trace) +
+                L" actual_flags=" + std::to_wstring(trace.lastTelemetry.commandKindFlags) +
+                L" required_mask=" + std::to_wstring(DriveTelemetry::kCommandKindBodyProposal);
+            Assert::IsTrue(trace.bodyProposalEvidenceSet, message.c_str());
+        }
+
+        TEST_METHOD(CommandTelemetryEvidenceIsSet)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"command_telemetry_evidence", kCode, trace) +
+                L" actual_flags=" + std::to_wstring(trace.lastTelemetry.telemetryValidFlags) +
+                L" required_mask=" + std::to_wstring(DriveTelemetry::kTelemetryCommandEvidenceValid);
+            Assert::IsTrue(trace.commandTelemetryEvidenceSet, message.c_str());
+        }
+
+        TEST_METHOD(LeftDriveEvidenceMatchesCommand)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"left_drive_evidence", kCode, trace) +
+                L" expected=" + std::to_wstring(trace.lastReturnedCommand.LeftCommand()) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.leftDriveCommand) +
+                L" tolerance=1e-6";
+            Assert::IsTrue(trace.leftCommandEvidenceMatchesReturnedCommand, message.c_str());
+        }
+
+        TEST_METHOD(RightDriveEvidenceMatchesCommand)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"right_drive_evidence", kCode, trace) +
+                L" expected=" + std::to_wstring(trace.lastReturnedCommand.RightCommand()) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.rightDriveCommand) +
+                L" tolerance=1e-6";
+            Assert::IsTrue(trace.rightCommandEvidenceMatchesReturnedCommand, message.c_str());
+        }
+
+        TEST_METHOD(RequestedForwardIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_forward_mps", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedForwardMps) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedForwardMpsFinite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawRateIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_rate_radps", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawRateRadps) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawRateRadpsFinite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedForwardAccelIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_forward_accel_mps2", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedForwardAccelMps2) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedForwardAccelMps2Finite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawAccelIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_accel_radps2", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawAccelRadps2) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawAccelRadps2Finite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_rad", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawRad) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawRadFinite, message.c_str());
+        }
+
+        TEST_METHOD(TruthPositionXIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetPositionX();
+            const std::wstring message = BuildManeuverMessage(L"truth_position_x", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthPositionYIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetPositionY();
+            const std::wstring message = BuildManeuverMessage(L"truth_position_y", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthHeadingIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetHeading();
+            const std::wstring message = BuildManeuverMessage(L"truth_heading", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthForwardVelocityIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetForwardVelocity();
+            const std::wstring message = BuildManeuverMessage(L"truth_forward_velocity", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthRightwardVelocityIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetRightwardVelocity();
+            const std::wstring message = BuildManeuverMessage(L"truth_rightward_velocity", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthYawRateIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetYawRate();
+            const std::wstring message = BuildManeuverMessage(L"truth_yaw_rate", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthLeftWheelSpeedIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetWheelSpeedLeft();
+            const std::wstring message = BuildManeuverMessage(L"truth_left_wheel_speed", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthRightWheelSpeedIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetWheelSpeedRight();
+            const std::wstring message = BuildManeuverMessage(L"truth_right_wheel_speed", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthGyroBiasIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetGyroBiasZ();
+            const std::wstring message = BuildManeuverMessage(L"truth_gyro_bias", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(VelocityStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothVelocityNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"velocity", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kVelocityVariationLimit);
+            Assert::IsTrue(normalizedSpan < kVelocityVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(YawAccelerationStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothYawAccelerationNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"yaw_accel", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kYawAccelerationVariationLimit);
+            Assert::IsTrue(normalizedSpan < kYawAccelerationVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(YawRateStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothYawRateNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"yaw_rate", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kYawRateVariationLimit);
+            Assert::IsTrue(normalizedSpan < kYawRateVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(FinalPositionWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float positionErrorMeters = ComputeSmoothFinalPositionErrorMeters(kCode, trace);
+            const std::wstring message = BuildManeuverMessage(L"position", kCode, trace) +
+                L" error_m=" + std::to_wstring(positionErrorMeters) +
+                L" limit_m=" + std::to_wstring(kSmoothPositionToleranceM);
+            Assert::IsTrue(positionErrorMeters <= kSmoothPositionToleranceM, message.c_str());
+        }
+
+        TEST_METHOD(FinalHeadingWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float headingErrorRad = ComputeSmoothFinalHeadingErrorRad(kCode, trace);
+            const std::wstring message = BuildManeuverMessage(L"heading", kCode, trace) +
+                L" error_deg=" + std::to_wstring(headingErrorRad * RAD_TO_DEG_F) +
+                L" limit_deg=" + std::to_wstring(kHeadingToleranceRad * RAD_TO_DEG_F);
+            Assert::IsTrue(headingErrorRad <= kHeadingToleranceRad, message.c_str());
+        }
+
+    };
+
+    TEST_CLASS(DriveManeuverS90SDContractTest)
+    {
+        static constexpr ManeuverCode kCode = S90SD;
+        static constexpr bool kSmoothTurn = true;
+
+    public:
+        TEST_METHOD(Completes)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"completion", kCode, trace);
+            Assert::IsTrue(trace.completed, message.c_str());
+        }
+
+        TEST_METHOD(CommandSamplesCaptured)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"command_samples", kCode, trace);
+            Assert::IsTrue(!trace.samples.empty(), message.c_str());
+        }
+
+        TEST_METHOD(LeftReturnedCommandIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"left_returned_command", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastReturnedCommand.LeftCommand()) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.leftReturnedCommandFinite, message.c_str());
+        }
+
+        TEST_METHOD(RightReturnedCommandIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"right_returned_command", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastReturnedCommand.RightCommand()) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.rightReturnedCommandFinite, message.c_str());
+        }
+
+        TEST_METHOD(BodyProposalEvidenceIsSet)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"body_proposal_evidence", kCode, trace) +
+                L" actual_flags=" + std::to_wstring(trace.lastTelemetry.commandKindFlags) +
+                L" required_mask=" + std::to_wstring(DriveTelemetry::kCommandKindBodyProposal);
+            Assert::IsTrue(trace.bodyProposalEvidenceSet, message.c_str());
+        }
+
+        TEST_METHOD(CommandTelemetryEvidenceIsSet)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"command_telemetry_evidence", kCode, trace) +
+                L" actual_flags=" + std::to_wstring(trace.lastTelemetry.telemetryValidFlags) +
+                L" required_mask=" + std::to_wstring(DriveTelemetry::kTelemetryCommandEvidenceValid);
+            Assert::IsTrue(trace.commandTelemetryEvidenceSet, message.c_str());
+        }
+
+        TEST_METHOD(LeftDriveEvidenceMatchesCommand)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"left_drive_evidence", kCode, trace) +
+                L" expected=" + std::to_wstring(trace.lastReturnedCommand.LeftCommand()) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.leftDriveCommand) +
+                L" tolerance=1e-6";
+            Assert::IsTrue(trace.leftCommandEvidenceMatchesReturnedCommand, message.c_str());
+        }
+
+        TEST_METHOD(RightDriveEvidenceMatchesCommand)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"right_drive_evidence", kCode, trace) +
+                L" expected=" + std::to_wstring(trace.lastReturnedCommand.RightCommand()) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.rightDriveCommand) +
+                L" tolerance=1e-6";
+            Assert::IsTrue(trace.rightCommandEvidenceMatchesReturnedCommand, message.c_str());
+        }
+
+        TEST_METHOD(RequestedForwardIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_forward_mps", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedForwardMps) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedForwardMpsFinite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawRateIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_rate_radps", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawRateRadps) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawRateRadpsFinite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedForwardAccelIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_forward_accel_mps2", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedForwardAccelMps2) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedForwardAccelMps2Finite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawAccelIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_accel_radps2", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawAccelRadps2) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawAccelRadps2Finite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_rad", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawRad) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawRadFinite, message.c_str());
+        }
+
+        TEST_METHOD(TruthPositionXIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetPositionX();
+            const std::wstring message = BuildManeuverMessage(L"truth_position_x", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthPositionYIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetPositionY();
+            const std::wstring message = BuildManeuverMessage(L"truth_position_y", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthHeadingIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetHeading();
+            const std::wstring message = BuildManeuverMessage(L"truth_heading", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthForwardVelocityIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetForwardVelocity();
+            const std::wstring message = BuildManeuverMessage(L"truth_forward_velocity", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthRightwardVelocityIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetRightwardVelocity();
+            const std::wstring message = BuildManeuverMessage(L"truth_rightward_velocity", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthYawRateIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetYawRate();
+            const std::wstring message = BuildManeuverMessage(L"truth_yaw_rate", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthLeftWheelSpeedIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetWheelSpeedLeft();
+            const std::wstring message = BuildManeuverMessage(L"truth_left_wheel_speed", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthRightWheelSpeedIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetWheelSpeedRight();
+            const std::wstring message = BuildManeuverMessage(L"truth_right_wheel_speed", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthGyroBiasIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetGyroBiasZ();
+            const std::wstring message = BuildManeuverMessage(L"truth_gyro_bias", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(VelocityStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothVelocityNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"velocity", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kVelocityVariationLimit);
+            Assert::IsTrue(normalizedSpan < kVelocityVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(YawAccelerationStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothYawAccelerationNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"yaw_accel", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kYawAccelerationVariationLimit);
+            Assert::IsTrue(normalizedSpan < kYawAccelerationVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(YawRateStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothYawRateNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"yaw_rate", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kYawRateVariationLimit);
+            Assert::IsTrue(normalizedSpan < kYawRateVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(FinalPositionWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float positionErrorMeters = ComputeSmoothFinalPositionErrorMeters(kCode, trace);
+            const std::wstring message = BuildManeuverMessage(L"position", kCode, trace) +
+                L" error_m=" + std::to_wstring(positionErrorMeters) +
+                L" limit_m=" + std::to_wstring(kSmoothPositionToleranceM);
+            Assert::IsTrue(positionErrorMeters <= kSmoothPositionToleranceM, message.c_str());
+        }
+
+        TEST_METHOD(FinalHeadingWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float headingErrorRad = ComputeSmoothFinalHeadingErrorRad(kCode, trace);
+            const std::wstring message = BuildManeuverMessage(L"heading", kCode, trace) +
+                L" error_deg=" + std::to_wstring(headingErrorRad * RAD_TO_DEG_F) +
+                L" limit_deg=" + std::to_wstring(kHeadingToleranceRad * RAD_TO_DEG_F);
+            Assert::IsTrue(headingErrorRad <= kHeadingToleranceRad, message.c_str());
+        }
+
+    };
+
+    TEST_CLASS(DriveManeuverS135LSContractTest)
+    {
+        static constexpr ManeuverCode kCode = S135LS;
+        static constexpr bool kSmoothTurn = true;
+
+    public:
+        TEST_METHOD(Completes)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"completion", kCode, trace);
+            Assert::IsTrue(trace.completed, message.c_str());
+        }
+
+        TEST_METHOD(CommandSamplesCaptured)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"command_samples", kCode, trace);
+            Assert::IsTrue(!trace.samples.empty(), message.c_str());
+        }
+
+        TEST_METHOD(LeftReturnedCommandIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"left_returned_command", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastReturnedCommand.LeftCommand()) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.leftReturnedCommandFinite, message.c_str());
+        }
+
+        TEST_METHOD(RightReturnedCommandIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"right_returned_command", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastReturnedCommand.RightCommand()) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.rightReturnedCommandFinite, message.c_str());
+        }
+
+        TEST_METHOD(BodyProposalEvidenceIsSet)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"body_proposal_evidence", kCode, trace) +
+                L" actual_flags=" + std::to_wstring(trace.lastTelemetry.commandKindFlags) +
+                L" required_mask=" + std::to_wstring(DriveTelemetry::kCommandKindBodyProposal);
+            Assert::IsTrue(trace.bodyProposalEvidenceSet, message.c_str());
+        }
+
+        TEST_METHOD(CommandTelemetryEvidenceIsSet)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"command_telemetry_evidence", kCode, trace) +
+                L" actual_flags=" + std::to_wstring(trace.lastTelemetry.telemetryValidFlags) +
+                L" required_mask=" + std::to_wstring(DriveTelemetry::kTelemetryCommandEvidenceValid);
+            Assert::IsTrue(trace.commandTelemetryEvidenceSet, message.c_str());
+        }
+
+        TEST_METHOD(LeftDriveEvidenceMatchesCommand)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"left_drive_evidence", kCode, trace) +
+                L" expected=" + std::to_wstring(trace.lastReturnedCommand.LeftCommand()) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.leftDriveCommand) +
+                L" tolerance=1e-6";
+            Assert::IsTrue(trace.leftCommandEvidenceMatchesReturnedCommand, message.c_str());
+        }
+
+        TEST_METHOD(RightDriveEvidenceMatchesCommand)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"right_drive_evidence", kCode, trace) +
+                L" expected=" + std::to_wstring(trace.lastReturnedCommand.RightCommand()) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.rightDriveCommand) +
+                L" tolerance=1e-6";
+            Assert::IsTrue(trace.rightCommandEvidenceMatchesReturnedCommand, message.c_str());
+        }
+
+        TEST_METHOD(RequestedForwardIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_forward_mps", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedForwardMps) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedForwardMpsFinite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawRateIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_rate_radps", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawRateRadps) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawRateRadpsFinite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedForwardAccelIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_forward_accel_mps2", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedForwardAccelMps2) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedForwardAccelMps2Finite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawAccelIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_accel_radps2", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawAccelRadps2) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawAccelRadps2Finite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_rad", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawRad) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawRadFinite, message.c_str());
+        }
+
+        TEST_METHOD(TruthPositionXIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetPositionX();
+            const std::wstring message = BuildManeuverMessage(L"truth_position_x", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthPositionYIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetPositionY();
+            const std::wstring message = BuildManeuverMessage(L"truth_position_y", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthHeadingIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetHeading();
+            const std::wstring message = BuildManeuverMessage(L"truth_heading", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthForwardVelocityIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetForwardVelocity();
+            const std::wstring message = BuildManeuverMessage(L"truth_forward_velocity", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthRightwardVelocityIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetRightwardVelocity();
+            const std::wstring message = BuildManeuverMessage(L"truth_rightward_velocity", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthYawRateIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetYawRate();
+            const std::wstring message = BuildManeuverMessage(L"truth_yaw_rate", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthLeftWheelSpeedIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetWheelSpeedLeft();
+            const std::wstring message = BuildManeuverMessage(L"truth_left_wheel_speed", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthRightWheelSpeedIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetWheelSpeedRight();
+            const std::wstring message = BuildManeuverMessage(L"truth_right_wheel_speed", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthGyroBiasIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetGyroBiasZ();
+            const std::wstring message = BuildManeuverMessage(L"truth_gyro_bias", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(VelocityStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothVelocityNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"velocity", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kVelocityVariationLimit);
+            Assert::IsTrue(normalizedSpan < kVelocityVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(YawAccelerationStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothYawAccelerationNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"yaw_accel", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kYawAccelerationVariationLimit);
+            Assert::IsTrue(normalizedSpan < kYawAccelerationVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(YawRateStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothYawRateNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"yaw_rate", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kYawRateVariationLimit);
+            Assert::IsTrue(normalizedSpan < kYawRateVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(FinalPositionWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float positionErrorMeters = ComputeSmoothFinalPositionErrorMeters(kCode, trace);
+            const std::wstring message = BuildManeuverMessage(L"position", kCode, trace) +
+                L" error_m=" + std::to_wstring(positionErrorMeters) +
+                L" limit_m=" + std::to_wstring(kSmoothPositionToleranceM);
+            Assert::IsTrue(positionErrorMeters <= kSmoothPositionToleranceM, message.c_str());
+        }
+
+        TEST_METHOD(FinalHeadingWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float headingErrorRad = ComputeSmoothFinalHeadingErrorRad(kCode, trace);
+            const std::wstring message = BuildManeuverMessage(L"heading", kCode, trace) +
+                L" error_deg=" + std::to_wstring(headingErrorRad * RAD_TO_DEG_F) +
+                L" limit_deg=" + std::to_wstring(kHeadingToleranceRad * RAD_TO_DEG_F);
+            Assert::IsTrue(headingErrorRad <= kHeadingToleranceRad, message.c_str());
+        }
+
+    };
+
+    TEST_CLASS(DriveManeuverS135LDContractTest)
+    {
+        static constexpr ManeuverCode kCode = S135LD;
+        static constexpr bool kSmoothTurn = true;
+
+    public:
+        TEST_METHOD(Completes)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"completion", kCode, trace);
+            Assert::IsTrue(trace.completed, message.c_str());
+        }
+
+        TEST_METHOD(CommandSamplesCaptured)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"command_samples", kCode, trace);
+            Assert::IsTrue(!trace.samples.empty(), message.c_str());
+        }
+
+        TEST_METHOD(LeftReturnedCommandIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"left_returned_command", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastReturnedCommand.LeftCommand()) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.leftReturnedCommandFinite, message.c_str());
+        }
+
+        TEST_METHOD(RightReturnedCommandIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"right_returned_command", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastReturnedCommand.RightCommand()) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.rightReturnedCommandFinite, message.c_str());
+        }
+
+        TEST_METHOD(BodyProposalEvidenceIsSet)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"body_proposal_evidence", kCode, trace) +
+                L" actual_flags=" + std::to_wstring(trace.lastTelemetry.commandKindFlags) +
+                L" required_mask=" + std::to_wstring(DriveTelemetry::kCommandKindBodyProposal);
+            Assert::IsTrue(trace.bodyProposalEvidenceSet, message.c_str());
+        }
+
+        TEST_METHOD(CommandTelemetryEvidenceIsSet)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"command_telemetry_evidence", kCode, trace) +
+                L" actual_flags=" + std::to_wstring(trace.lastTelemetry.telemetryValidFlags) +
+                L" required_mask=" + std::to_wstring(DriveTelemetry::kTelemetryCommandEvidenceValid);
+            Assert::IsTrue(trace.commandTelemetryEvidenceSet, message.c_str());
+        }
+
+        TEST_METHOD(LeftDriveEvidenceMatchesCommand)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"left_drive_evidence", kCode, trace) +
+                L" expected=" + std::to_wstring(trace.lastReturnedCommand.LeftCommand()) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.leftDriveCommand) +
+                L" tolerance=1e-6";
+            Assert::IsTrue(trace.leftCommandEvidenceMatchesReturnedCommand, message.c_str());
+        }
+
+        TEST_METHOD(RightDriveEvidenceMatchesCommand)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"right_drive_evidence", kCode, trace) +
+                L" expected=" + std::to_wstring(trace.lastReturnedCommand.RightCommand()) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.rightDriveCommand) +
+                L" tolerance=1e-6";
+            Assert::IsTrue(trace.rightCommandEvidenceMatchesReturnedCommand, message.c_str());
+        }
+
+        TEST_METHOD(RequestedForwardIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_forward_mps", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedForwardMps) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedForwardMpsFinite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawRateIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_rate_radps", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawRateRadps) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawRateRadpsFinite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedForwardAccelIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_forward_accel_mps2", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedForwardAccelMps2) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedForwardAccelMps2Finite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawAccelIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_accel_radps2", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawAccelRadps2) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawAccelRadps2Finite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_rad", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawRad) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawRadFinite, message.c_str());
+        }
+
+        TEST_METHOD(TruthPositionXIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetPositionX();
+            const std::wstring message = BuildManeuverMessage(L"truth_position_x", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthPositionYIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetPositionY();
+            const std::wstring message = BuildManeuverMessage(L"truth_position_y", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthHeadingIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetHeading();
+            const std::wstring message = BuildManeuverMessage(L"truth_heading", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthForwardVelocityIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetForwardVelocity();
+            const std::wstring message = BuildManeuverMessage(L"truth_forward_velocity", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthRightwardVelocityIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetRightwardVelocity();
+            const std::wstring message = BuildManeuverMessage(L"truth_rightward_velocity", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthYawRateIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetYawRate();
+            const std::wstring message = BuildManeuverMessage(L"truth_yaw_rate", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthLeftWheelSpeedIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetWheelSpeedLeft();
+            const std::wstring message = BuildManeuverMessage(L"truth_left_wheel_speed", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthRightWheelSpeedIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetWheelSpeedRight();
+            const std::wstring message = BuildManeuverMessage(L"truth_right_wheel_speed", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthGyroBiasIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetGyroBiasZ();
+            const std::wstring message = BuildManeuverMessage(L"truth_gyro_bias", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(VelocityStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothVelocityNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"velocity", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kVelocityVariationLimit);
+            Assert::IsTrue(normalizedSpan < kVelocityVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(YawAccelerationStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothYawAccelerationNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"yaw_accel", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kYawAccelerationVariationLimit);
+            Assert::IsTrue(normalizedSpan < kYawAccelerationVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(YawRateStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothYawRateNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"yaw_rate", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kYawRateVariationLimit);
+            Assert::IsTrue(normalizedSpan < kYawRateVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(FinalPositionWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float positionErrorMeters = ComputeSmoothFinalPositionErrorMeters(kCode, trace);
+            const std::wstring message = BuildManeuverMessage(L"position", kCode, trace) +
+                L" error_m=" + std::to_wstring(positionErrorMeters) +
+                L" limit_m=" + std::to_wstring(kSmoothPositionToleranceM);
+            Assert::IsTrue(positionErrorMeters <= kSmoothPositionToleranceM, message.c_str());
+        }
+
+        TEST_METHOD(FinalHeadingWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float headingErrorRad = ComputeSmoothFinalHeadingErrorRad(kCode, trace);
+            const std::wstring message = BuildManeuverMessage(L"heading", kCode, trace) +
+                L" error_deg=" + std::to_wstring(headingErrorRad * RAD_TO_DEG_F) +
+                L" limit_deg=" + std::to_wstring(kHeadingToleranceRad * RAD_TO_DEG_F);
+            Assert::IsTrue(headingErrorRad <= kHeadingToleranceRad, message.c_str());
+        }
+
+    };
+
+    TEST_CLASS(DriveManeuverS135SSContractTest)
+    {
+        static constexpr ManeuverCode kCode = S135SS;
+        static constexpr bool kSmoothTurn = true;
+
+    public:
+        TEST_METHOD(Completes)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"completion", kCode, trace);
+            Assert::IsTrue(trace.completed, message.c_str());
+        }
+
+        TEST_METHOD(CommandSamplesCaptured)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"command_samples", kCode, trace);
+            Assert::IsTrue(!trace.samples.empty(), message.c_str());
+        }
+
+        TEST_METHOD(LeftReturnedCommandIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"left_returned_command", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastReturnedCommand.LeftCommand()) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.leftReturnedCommandFinite, message.c_str());
+        }
+
+        TEST_METHOD(RightReturnedCommandIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"right_returned_command", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastReturnedCommand.RightCommand()) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.rightReturnedCommandFinite, message.c_str());
+        }
+
+        TEST_METHOD(BodyProposalEvidenceIsSet)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"body_proposal_evidence", kCode, trace) +
+                L" actual_flags=" + std::to_wstring(trace.lastTelemetry.commandKindFlags) +
+                L" required_mask=" + std::to_wstring(DriveTelemetry::kCommandKindBodyProposal);
+            Assert::IsTrue(trace.bodyProposalEvidenceSet, message.c_str());
+        }
+
+        TEST_METHOD(CommandTelemetryEvidenceIsSet)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"command_telemetry_evidence", kCode, trace) +
+                L" actual_flags=" + std::to_wstring(trace.lastTelemetry.telemetryValidFlags) +
+                L" required_mask=" + std::to_wstring(DriveTelemetry::kTelemetryCommandEvidenceValid);
+            Assert::IsTrue(trace.commandTelemetryEvidenceSet, message.c_str());
+        }
+
+        TEST_METHOD(LeftDriveEvidenceMatchesCommand)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"left_drive_evidence", kCode, trace) +
+                L" expected=" + std::to_wstring(trace.lastReturnedCommand.LeftCommand()) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.leftDriveCommand) +
+                L" tolerance=1e-6";
+            Assert::IsTrue(trace.leftCommandEvidenceMatchesReturnedCommand, message.c_str());
+        }
+
+        TEST_METHOD(RightDriveEvidenceMatchesCommand)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"right_drive_evidence", kCode, trace) +
+                L" expected=" + std::to_wstring(trace.lastReturnedCommand.RightCommand()) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.rightDriveCommand) +
+                L" tolerance=1e-6";
+            Assert::IsTrue(trace.rightCommandEvidenceMatchesReturnedCommand, message.c_str());
+        }
+
+        TEST_METHOD(RequestedForwardIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_forward_mps", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedForwardMps) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedForwardMpsFinite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawRateIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_rate_radps", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawRateRadps) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawRateRadpsFinite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedForwardAccelIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_forward_accel_mps2", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedForwardAccelMps2) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedForwardAccelMps2Finite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawAccelIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_accel_radps2", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawAccelRadps2) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawAccelRadps2Finite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_rad", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawRad) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawRadFinite, message.c_str());
+        }
+
+        TEST_METHOD(TruthPositionXIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetPositionX();
+            const std::wstring message = BuildManeuverMessage(L"truth_position_x", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthPositionYIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetPositionY();
+            const std::wstring message = BuildManeuverMessage(L"truth_position_y", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthHeadingIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetHeading();
+            const std::wstring message = BuildManeuverMessage(L"truth_heading", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthForwardVelocityIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetForwardVelocity();
+            const std::wstring message = BuildManeuverMessage(L"truth_forward_velocity", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthRightwardVelocityIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetRightwardVelocity();
+            const std::wstring message = BuildManeuverMessage(L"truth_rightward_velocity", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthYawRateIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetYawRate();
+            const std::wstring message = BuildManeuverMessage(L"truth_yaw_rate", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthLeftWheelSpeedIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetWheelSpeedLeft();
+            const std::wstring message = BuildManeuverMessage(L"truth_left_wheel_speed", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthRightWheelSpeedIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetWheelSpeedRight();
+            const std::wstring message = BuildManeuverMessage(L"truth_right_wheel_speed", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthGyroBiasIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetGyroBiasZ();
+            const std::wstring message = BuildManeuverMessage(L"truth_gyro_bias", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(VelocityStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothVelocityNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"velocity", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kVelocityVariationLimit);
+            Assert::IsTrue(normalizedSpan < kVelocityVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(YawAccelerationStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothYawAccelerationNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"yaw_accel", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kYawAccelerationVariationLimit);
+            Assert::IsTrue(normalizedSpan < kYawAccelerationVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(YawRateStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothYawRateNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"yaw_rate", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kYawRateVariationLimit);
+            Assert::IsTrue(normalizedSpan < kYawRateVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(FinalPositionWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float positionErrorMeters = ComputeSmoothFinalPositionErrorMeters(kCode, trace);
+            const std::wstring message = BuildManeuverMessage(L"position", kCode, trace) +
+                L" error_m=" + std::to_wstring(positionErrorMeters) +
+                L" limit_m=" + std::to_wstring(kSmoothPositionToleranceM);
+            Assert::IsTrue(positionErrorMeters <= kSmoothPositionToleranceM, message.c_str());
+        }
+
+        TEST_METHOD(FinalHeadingWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float headingErrorRad = ComputeSmoothFinalHeadingErrorRad(kCode, trace);
+            const std::wstring message = BuildManeuverMessage(L"heading", kCode, trace) +
+                L" error_deg=" + std::to_wstring(headingErrorRad * RAD_TO_DEG_F) +
+                L" limit_deg=" + std::to_wstring(kHeadingToleranceRad * RAD_TO_DEG_F);
+            Assert::IsTrue(headingErrorRad <= kHeadingToleranceRad, message.c_str());
+        }
+
+    };
+
+    TEST_CLASS(DriveManeuverS135SDContractTest)
+    {
+        static constexpr ManeuverCode kCode = S135SD;
+        static constexpr bool kSmoothTurn = true;
+
+    public:
+        TEST_METHOD(Completes)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"completion", kCode, trace);
+            Assert::IsTrue(trace.completed, message.c_str());
+        }
+
+        TEST_METHOD(CommandSamplesCaptured)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"command_samples", kCode, trace);
+            Assert::IsTrue(!trace.samples.empty(), message.c_str());
+        }
+
+        TEST_METHOD(LeftReturnedCommandIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"left_returned_command", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastReturnedCommand.LeftCommand()) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.leftReturnedCommandFinite, message.c_str());
+        }
+
+        TEST_METHOD(RightReturnedCommandIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"right_returned_command", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastReturnedCommand.RightCommand()) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.rightReturnedCommandFinite, message.c_str());
+        }
+
+        TEST_METHOD(BodyProposalEvidenceIsSet)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"body_proposal_evidence", kCode, trace) +
+                L" actual_flags=" + std::to_wstring(trace.lastTelemetry.commandKindFlags) +
+                L" required_mask=" + std::to_wstring(DriveTelemetry::kCommandKindBodyProposal);
+            Assert::IsTrue(trace.bodyProposalEvidenceSet, message.c_str());
+        }
+
+        TEST_METHOD(CommandTelemetryEvidenceIsSet)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"command_telemetry_evidence", kCode, trace) +
+                L" actual_flags=" + std::to_wstring(trace.lastTelemetry.telemetryValidFlags) +
+                L" required_mask=" + std::to_wstring(DriveTelemetry::kTelemetryCommandEvidenceValid);
+            Assert::IsTrue(trace.commandTelemetryEvidenceSet, message.c_str());
+        }
+
+        TEST_METHOD(LeftDriveEvidenceMatchesCommand)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"left_drive_evidence", kCode, trace) +
+                L" expected=" + std::to_wstring(trace.lastReturnedCommand.LeftCommand()) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.leftDriveCommand) +
+                L" tolerance=1e-6";
+            Assert::IsTrue(trace.leftCommandEvidenceMatchesReturnedCommand, message.c_str());
+        }
+
+        TEST_METHOD(RightDriveEvidenceMatchesCommand)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"right_drive_evidence", kCode, trace) +
+                L" expected=" + std::to_wstring(trace.lastReturnedCommand.RightCommand()) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.rightDriveCommand) +
+                L" tolerance=1e-6";
+            Assert::IsTrue(trace.rightCommandEvidenceMatchesReturnedCommand, message.c_str());
+        }
+
+        TEST_METHOD(RequestedForwardIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_forward_mps", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedForwardMps) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedForwardMpsFinite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawRateIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_rate_radps", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawRateRadps) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawRateRadpsFinite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedForwardAccelIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_forward_accel_mps2", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedForwardAccelMps2) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedForwardAccelMps2Finite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawAccelIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_accel_radps2", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawAccelRadps2) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawAccelRadps2Finite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_rad", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawRad) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawRadFinite, message.c_str());
+        }
+
+        TEST_METHOD(TruthPositionXIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetPositionX();
+            const std::wstring message = BuildManeuverMessage(L"truth_position_x", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthPositionYIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetPositionY();
+            const std::wstring message = BuildManeuverMessage(L"truth_position_y", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthHeadingIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetHeading();
+            const std::wstring message = BuildManeuverMessage(L"truth_heading", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthForwardVelocityIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetForwardVelocity();
+            const std::wstring message = BuildManeuverMessage(L"truth_forward_velocity", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthRightwardVelocityIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetRightwardVelocity();
+            const std::wstring message = BuildManeuverMessage(L"truth_rightward_velocity", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthYawRateIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetYawRate();
+            const std::wstring message = BuildManeuverMessage(L"truth_yaw_rate", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthLeftWheelSpeedIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetWheelSpeedLeft();
+            const std::wstring message = BuildManeuverMessage(L"truth_left_wheel_speed", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthRightWheelSpeedIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetWheelSpeedRight();
+            const std::wstring message = BuildManeuverMessage(L"truth_right_wheel_speed", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthGyroBiasIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetGyroBiasZ();
+            const std::wstring message = BuildManeuverMessage(L"truth_gyro_bias", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(VelocityStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothVelocityNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"velocity", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kVelocityVariationLimit);
+            Assert::IsTrue(normalizedSpan < kVelocityVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(YawAccelerationStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothYawAccelerationNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"yaw_accel", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kYawAccelerationVariationLimit);
+            Assert::IsTrue(normalizedSpan < kYawAccelerationVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(YawRateStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothYawRateNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"yaw_rate", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kYawRateVariationLimit);
+            Assert::IsTrue(normalizedSpan < kYawRateVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(FinalPositionWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float positionErrorMeters = ComputeSmoothFinalPositionErrorMeters(kCode, trace);
+            const std::wstring message = BuildManeuverMessage(L"position", kCode, trace) +
+                L" error_m=" + std::to_wstring(positionErrorMeters) +
+                L" limit_m=" + std::to_wstring(kSmoothPositionToleranceM);
+            Assert::IsTrue(positionErrorMeters <= kSmoothPositionToleranceM, message.c_str());
+        }
+
+        TEST_METHOD(FinalHeadingWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float headingErrorRad = ComputeSmoothFinalHeadingErrorRad(kCode, trace);
+            const std::wstring message = BuildManeuverMessage(L"heading", kCode, trace) +
+                L" error_deg=" + std::to_wstring(headingErrorRad * RAD_TO_DEG_F) +
+                L" limit_deg=" + std::to_wstring(kHeadingToleranceRad * RAD_TO_DEG_F);
+            Assert::IsTrue(headingErrorRad <= kHeadingToleranceRad, message.c_str());
+        }
+
+    };
+
+    TEST_CLASS(DriveManeuverS180LSContractTest)
+    {
+        static constexpr ManeuverCode kCode = S180LS;
+        static constexpr bool kSmoothTurn = true;
+
+    public:
+        TEST_METHOD(Completes)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"completion", kCode, trace);
+            Assert::IsTrue(trace.completed, message.c_str());
+        }
+
+        TEST_METHOD(CommandSamplesCaptured)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"command_samples", kCode, trace);
+            Assert::IsTrue(!trace.samples.empty(), message.c_str());
+        }
+
+        TEST_METHOD(LeftReturnedCommandIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"left_returned_command", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastReturnedCommand.LeftCommand()) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.leftReturnedCommandFinite, message.c_str());
+        }
+
+        TEST_METHOD(RightReturnedCommandIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"right_returned_command", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastReturnedCommand.RightCommand()) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.rightReturnedCommandFinite, message.c_str());
+        }
+
+        TEST_METHOD(BodyProposalEvidenceIsSet)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"body_proposal_evidence", kCode, trace) +
+                L" actual_flags=" + std::to_wstring(trace.lastTelemetry.commandKindFlags) +
+                L" required_mask=" + std::to_wstring(DriveTelemetry::kCommandKindBodyProposal);
+            Assert::IsTrue(trace.bodyProposalEvidenceSet, message.c_str());
+        }
+
+        TEST_METHOD(CommandTelemetryEvidenceIsSet)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"command_telemetry_evidence", kCode, trace) +
+                L" actual_flags=" + std::to_wstring(trace.lastTelemetry.telemetryValidFlags) +
+                L" required_mask=" + std::to_wstring(DriveTelemetry::kTelemetryCommandEvidenceValid);
+            Assert::IsTrue(trace.commandTelemetryEvidenceSet, message.c_str());
+        }
+
+        TEST_METHOD(LeftDriveEvidenceMatchesCommand)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"left_drive_evidence", kCode, trace) +
+                L" expected=" + std::to_wstring(trace.lastReturnedCommand.LeftCommand()) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.leftDriveCommand) +
+                L" tolerance=1e-6";
+            Assert::IsTrue(trace.leftCommandEvidenceMatchesReturnedCommand, message.c_str());
+        }
+
+        TEST_METHOD(RightDriveEvidenceMatchesCommand)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"right_drive_evidence", kCode, trace) +
+                L" expected=" + std::to_wstring(trace.lastReturnedCommand.RightCommand()) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.rightDriveCommand) +
+                L" tolerance=1e-6";
+            Assert::IsTrue(trace.rightCommandEvidenceMatchesReturnedCommand, message.c_str());
+        }
+
+        TEST_METHOD(RequestedForwardIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_forward_mps", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedForwardMps) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedForwardMpsFinite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawRateIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_rate_radps", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawRateRadps) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawRateRadpsFinite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedForwardAccelIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_forward_accel_mps2", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedForwardAccelMps2) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedForwardAccelMps2Finite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawAccelIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_accel_radps2", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawAccelRadps2) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawAccelRadps2Finite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_rad", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawRad) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawRadFinite, message.c_str());
+        }
+
+        TEST_METHOD(TruthPositionXIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetPositionX();
+            const std::wstring message = BuildManeuverMessage(L"truth_position_x", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthPositionYIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetPositionY();
+            const std::wstring message = BuildManeuverMessage(L"truth_position_y", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthHeadingIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetHeading();
+            const std::wstring message = BuildManeuverMessage(L"truth_heading", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthForwardVelocityIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetForwardVelocity();
+            const std::wstring message = BuildManeuverMessage(L"truth_forward_velocity", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthRightwardVelocityIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetRightwardVelocity();
+            const std::wstring message = BuildManeuverMessage(L"truth_rightward_velocity", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthYawRateIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetYawRate();
+            const std::wstring message = BuildManeuverMessage(L"truth_yaw_rate", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthLeftWheelSpeedIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetWheelSpeedLeft();
+            const std::wstring message = BuildManeuverMessage(L"truth_left_wheel_speed", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthRightWheelSpeedIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetWheelSpeedRight();
+            const std::wstring message = BuildManeuverMessage(L"truth_right_wheel_speed", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthGyroBiasIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetGyroBiasZ();
+            const std::wstring message = BuildManeuverMessage(L"truth_gyro_bias", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(VelocityStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothVelocityNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"velocity", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kVelocityVariationLimit);
+            Assert::IsTrue(normalizedSpan < kVelocityVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(YawAccelerationStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothYawAccelerationNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"yaw_accel", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kYawAccelerationVariationLimit);
+            Assert::IsTrue(normalizedSpan < kYawAccelerationVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(YawRateStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothYawRateNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"yaw_rate", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kYawRateVariationLimit);
+            Assert::IsTrue(normalizedSpan < kYawRateVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(FinalPositionWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float positionErrorMeters = ComputeSmoothFinalPositionErrorMeters(kCode, trace);
+            const std::wstring message = BuildManeuverMessage(L"position", kCode, trace) +
+                L" error_m=" + std::to_wstring(positionErrorMeters) +
+                L" limit_m=" + std::to_wstring(kSmoothPositionToleranceM);
+            Assert::IsTrue(positionErrorMeters <= kSmoothPositionToleranceM, message.c_str());
+        }
+
+        TEST_METHOD(FinalHeadingWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float headingErrorRad = ComputeSmoothFinalHeadingErrorRad(kCode, trace);
+            const std::wstring message = BuildManeuverMessage(L"heading", kCode, trace) +
+                L" error_deg=" + std::to_wstring(headingErrorRad * RAD_TO_DEG_F) +
+                L" limit_deg=" + std::to_wstring(kHeadingToleranceRad * RAD_TO_DEG_F);
+            Assert::IsTrue(headingErrorRad <= kHeadingToleranceRad, message.c_str());
+        }
+
+    };
+
+    TEST_CLASS(DriveManeuverS180SSContractTest)
+    {
+        static constexpr ManeuverCode kCode = S180SS;
+        static constexpr bool kSmoothTurn = true;
+
+    public:
+        TEST_METHOD(Completes)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"completion", kCode, trace);
+            Assert::IsTrue(trace.completed, message.c_str());
+        }
+
+        TEST_METHOD(CommandSamplesCaptured)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"command_samples", kCode, trace);
+            Assert::IsTrue(!trace.samples.empty(), message.c_str());
+        }
+
+        TEST_METHOD(LeftReturnedCommandIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"left_returned_command", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastReturnedCommand.LeftCommand()) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.leftReturnedCommandFinite, message.c_str());
+        }
+
+        TEST_METHOD(RightReturnedCommandIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"right_returned_command", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastReturnedCommand.RightCommand()) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.rightReturnedCommandFinite, message.c_str());
+        }
+
+        TEST_METHOD(BodyProposalEvidenceIsSet)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"body_proposal_evidence", kCode, trace) +
+                L" actual_flags=" + std::to_wstring(trace.lastTelemetry.commandKindFlags) +
+                L" required_mask=" + std::to_wstring(DriveTelemetry::kCommandKindBodyProposal);
+            Assert::IsTrue(trace.bodyProposalEvidenceSet, message.c_str());
+        }
+
+        TEST_METHOD(CommandTelemetryEvidenceIsSet)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"command_telemetry_evidence", kCode, trace) +
+                L" actual_flags=" + std::to_wstring(trace.lastTelemetry.telemetryValidFlags) +
+                L" required_mask=" + std::to_wstring(DriveTelemetry::kTelemetryCommandEvidenceValid);
+            Assert::IsTrue(trace.commandTelemetryEvidenceSet, message.c_str());
+        }
+
+        TEST_METHOD(LeftDriveEvidenceMatchesCommand)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"left_drive_evidence", kCode, trace) +
+                L" expected=" + std::to_wstring(trace.lastReturnedCommand.LeftCommand()) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.leftDriveCommand) +
+                L" tolerance=1e-6";
+            Assert::IsTrue(trace.leftCommandEvidenceMatchesReturnedCommand, message.c_str());
+        }
+
+        TEST_METHOD(RightDriveEvidenceMatchesCommand)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"right_drive_evidence", kCode, trace) +
+                L" expected=" + std::to_wstring(trace.lastReturnedCommand.RightCommand()) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.rightDriveCommand) +
+                L" tolerance=1e-6";
+            Assert::IsTrue(trace.rightCommandEvidenceMatchesReturnedCommand, message.c_str());
+        }
+
+        TEST_METHOD(RequestedForwardIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_forward_mps", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedForwardMps) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedForwardMpsFinite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawRateIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_rate_radps", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawRateRadps) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawRateRadpsFinite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedForwardAccelIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_forward_accel_mps2", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedForwardAccelMps2) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedForwardAccelMps2Finite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawAccelIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_accel_radps2", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawAccelRadps2) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawAccelRadps2Finite, message.c_str());
+        }
+
+        TEST_METHOD(RequestedYawIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const std::wstring message = BuildManeuverMessage(L"requested_yaw_rad", kCode, trace) +
+                L" actual=" + std::to_wstring(trace.lastTelemetry.requestedYawRad) +
+                L" criterion=isfinite(actual)";
+            Assert::IsTrue(trace.requestedYawRadFinite, message.c_str());
+        }
+
+        TEST_METHOD(TruthPositionXIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetPositionX();
+            const std::wstring message = BuildManeuverMessage(L"truth_position_x", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthPositionYIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetPositionY();
+            const std::wstring message = BuildManeuverMessage(L"truth_position_y", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthHeadingIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetHeading();
+            const std::wstring message = BuildManeuverMessage(L"truth_heading", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthForwardVelocityIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetForwardVelocity();
+            const std::wstring message = BuildManeuverMessage(L"truth_forward_velocity", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthRightwardVelocityIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetRightwardVelocity();
+            const std::wstring message = BuildManeuverMessage(L"truth_rightward_velocity", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthYawRateIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetYawRate();
+            const std::wstring message = BuildManeuverMessage(L"truth_yaw_rate", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthLeftWheelSpeedIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetWheelSpeedLeft();
+            const std::wstring message = BuildManeuverMessage(L"truth_left_wheel_speed", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthRightWheelSpeedIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetWheelSpeedRight();
+            const std::wstring message = BuildManeuverMessage(L"truth_right_wheel_speed", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(TruthGyroBiasIsFinite)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float actual = trace.truthState.GetGyroBiasZ();
+            const std::wstring message = BuildManeuverMessage(L"truth_gyro_bias", kCode, trace) +
+                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
+            Assert::IsTrue(std::isfinite(actual), message.c_str());
+        }
+
+        TEST_METHOD(VelocityStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothVelocityNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"velocity", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kVelocityVariationLimit);
+            Assert::IsTrue(normalizedSpan < kVelocityVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(YawAccelerationStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothYawAccelerationNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"yaw_accel", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kYawAccelerationVariationLimit);
+            Assert::IsTrue(normalizedSpan < kYawAccelerationVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(YawRateStable)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float normalizedSpan = ComputeSmoothYawRateNormalizedSpan(trace);
+            const std::wstring message = BuildManeuverMessage(L"yaw_rate", kCode, trace) +
+                L" span=" + std::to_wstring(normalizedSpan) +
+                L" limit=" + std::to_wstring(kYawRateVariationLimit);
+            Assert::IsTrue(normalizedSpan < kYawRateVariationLimit, message.c_str());
+        }
+
+        TEST_METHOD(FinalPositionWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float positionErrorMeters = ComputeSmoothFinalPositionErrorMeters(kCode, trace);
+            const std::wstring message = BuildManeuverMessage(L"position", kCode, trace) +
+                L" error_m=" + std::to_wstring(positionErrorMeters) +
+                L" limit_m=" + std::to_wstring(kSmoothPositionToleranceM);
+            Assert::IsTrue(positionErrorMeters <= kSmoothPositionToleranceM, message.c_str());
+        }
+
+        TEST_METHOD(FinalHeadingWithinTolerance)
+        {
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
+            const float headingErrorRad = ComputeSmoothFinalHeadingErrorRad(kCode, trace);
+            const std::wstring message = BuildManeuverMessage(L"heading", kCode, trace) +
+                L" error_deg=" + std::to_wstring(headingErrorRad * RAD_TO_DEG_F) +
+                L" limit_deg=" + std::to_wstring(kHeadingToleranceRad * RAD_TO_DEG_F);
+            Assert::IsTrue(headingErrorRad <= kHeadingToleranceRad, message.c_str());
+        }
+
+    };
 }
-
-
-
 

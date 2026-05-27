@@ -1,0 +1,41 @@
+{
+  "inputs": {
+    "primary": "codex_analysis\\contact_continuum_yaw_identification\\ablation\\phase_classified_feature_sample.csv",
+    "secondary": "codex_analysis\\contact_continuum_yaw_identification\\features\\contact_continuum_feature_sample.csv",
+    "constants": "codex_analysis\\contact_continuum_yaw_identification\\features\\plant_mirror_constants.csv"
+  },
+  "metadata": {
+    "nominal_total_load_n": 1.932931008,
+    "mu_ref": 1.3566434596717898,
+    "nominal_longitudinal_yield_nm": 0.11096910450167499,
+    "rows": 118580,
+    "runs": 49
+  },
+  "production_code_edited": false,
+  "build_metadata_edited": false,
+  "tests_edited": false,
+  "selected": {
+    "role": "selected",
+    "form": "partition_low_ref_same_window",
+    "smoothstep": "cubic",
+    "transition_variable": "speed_hypot",
+    "v0_mps": 0.0,
+    "v1_mps": 0.08,
+    "rel_weight": 1.0,
+    "util_k": 0.55,
+    "launch_activation": "cubic",
+    "k_launch_nm": 0.05771872812904492,
+    "k_unconstrained_nm": 0.05736224124965836,
+    "k_gate_min_nm": 0.05771872812904492,
+    "primary_rmse_nm": 0.018340962145958675,
+    "validation_non_authoritative_rmse_nm": 0.028488509193164188,
+    "open_floor_validation_rmse_nm": 0.010491392588553741,
+    "high_transition_rmse_nm": 0.0454022990381,
+    "low_speed_yaw_rmse_nm": 0.03461490963209472,
+    "straightish_rmse_nm": 0.0139787688086555,
+    "in_place_left_command": 0.6,
+    "in_place_right_command": -0.6,
+    "in_place_extra_opposing_nm": 0.05771872812904492,
+    "score": 0.043071257644571787
+  }
+}

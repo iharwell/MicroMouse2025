@@ -39,6 +39,24 @@
     <ClInclude Include="TimeStepPropagationTestSupport.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="EstimatorMotionUpdateAccess.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="EstimatorEncoderMotionUpdateTestSupport.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="EstimatorControlMotionUpdateTestSupport.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="EstimatorYawMotionUpdateTestSupport.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="EstimatorWallMotionUpdateTestSupport.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="EstimatorRuntimeMotionUpdateTestSupport.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="CellTest.cpp">
@@ -152,7 +170,73 @@
     <ClCompile Include="EstimatorModeAndDiagnosticsTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="EstimatorMotionUpdateTest.cpp">
+    <ClCompile Include="EstimatorActiveCommandStorageTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorBiasedYawRateUpdateTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorControlDirectionTrackingTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorDirectEncoderUpdateTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorFeedforwardRuntimeTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorLatestEncoderUpdateTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorLaunchEncoderYawUpdateTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorMovingEncoderUpdateTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorMovingPredictGyroBiasTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorOpposedControlUpdateTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorRejectedEncoderUpdateTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorSplitCommandPredictTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorSplitDrivePredictTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorTorqueRefreshTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorUnopposedControlPredictTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorWallUpdateTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorYawResidualCrossCovarianceTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorZeroVelocityEncoderUpdateTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorEncoderMotionUpdateTestSupport.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorControlMotionUpdateTestSupport.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorYawMotionUpdateTestSupport.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorWallMotionUpdateTestSupport.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorRuntimeMotionUpdateTestSupport.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="EstimatorReplayRegressionTest.cpp">
