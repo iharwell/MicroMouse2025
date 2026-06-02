@@ -39,7 +39,7 @@ namespace MazeMap
         UKF() noexcept
             : _ownedState(Eigen::Matrix<float, NState, 1>::Zero())
             , _ownedSqrtCovariance(Eigen::Matrix<float, NState, NState>::Identity() * 1.0e-3f)
-            , _weightAlpha(0.3f)
+            , _weightAlpha(0.01f)
             , _weightBeta(2.0f)
             , _weightKappa(0.0f)
             , _state(_ownedState)

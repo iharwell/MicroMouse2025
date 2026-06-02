@@ -87,44 +87,52 @@ namespace MazeMap
         return MazeMap::Math::Sqrtf((std::max)(0.0f, weightedSpeed2 / normalSum));
     }
 
-    float PlantModel::yawResidualOpposingMomentNm(
+    float PlantModel::aggregateContactYawMomentCorrectionAlongYawNm(
         const float forwardVelocityMps,
         const float contactRelativeSpeedMps,
         const float projectedYawMomentAlongYawNm,
         const float yawMomentYieldNm,
-        const float variantCOpposingMomentNm) const noexcept
+        const float variantCContactYawMomentCorrectionAlongYawNm) const noexcept
     {
         const float relWeight = PositiveFiniteOrDefault(
-            _yawResidualForceRelWeight,
-            kDefaultYawResidualForceRelWeight);
+            _aggregateContactYawMomentCorrectionForceRelWeight,
+            kDefaultAggregateContactYawMomentCorrectionForceRelWeight);
         const float speedV2 =
             (forwardVelocityMps * forwardVelocityMps) +
             ((relWeight * contactRelativeSpeedMps) * (relWeight * contactRelativeSpeedMps));
         const float speedKnee = PositiveFiniteOrDefault(
-            _yawResidualBlendSpeedKneeMps,
-            kDefaultYawResidualBlendSpeedKneeMps);
+            _aggregateContactYawMomentCorrectionBlendSpeedKneeMps,
+            kDefaultAggregateContactYawMomentCorrectionBlendSpeedKneeMps);
         const float speedKnee2 = speedKnee * speedKnee;
         const float speedLow =
             (speedKnee2 > 0.0f) ? (speedKnee2 / (speedKnee2 + (std::max)(0.0f, speedV2))) : 0.0f;
         const float resolvedYieldNm = PositiveFiniteOrDefault(yawMomentYieldNm, kForceEpsilonN);
         const float utilization = PositivePart(projectedYawMomentAlongYawNm) / resolvedYieldNm;
-        const float forceGate = RationalSquareGate(utilization, _yawResidualBlendForceKnee);
+        const float forceGate =
+            RationalSquareGate(utilization, _aggregateContactYawMomentCorrectionBlendForceKnee);
         const float speedFade = PositiveFiniteOrDefault(
-            _yawResidualForceSpeedFadeMps,
-            kDefaultYawResidualForceSpeedFadeMps);
+            _aggregateContactYawMomentCorrectionForceSpeedFadeMps,
+            kDefaultAggregateContactYawMomentCorrectionForceSpeedFadeMps);
         const float speedFade2 = speedFade * speedFade;
         const float speedRelief =
             (speedFade2 > 0.0f) ? (speedFade2 / (speedFade2 + (std::max)(0.0f, speedV2))) : 0.0f;
-        const float forceBranchOpposingMomentNm =
+        const float forceBranchContactYawMomentCorrectionAlongYawNm =
             speedRelief *
-            PositiveFiniteOrDefault(_yawResidualForceSlidingMomentNm, kDefaultYawResidualForceSlidingMomentNm);
+            PositiveFiniteOrDefault(
+                _aggregateContactYawMomentCorrectionForceSlidingMomentNm,
+                kDefaultAggregateContactYawMomentCorrectionForceSlidingMomentNm);
         const float blend = (std::clamp)(speedLow * forceGate, 0.0f, 1.0f);
-        const float residualOpposingMomentNm =
-            variantCOpposingMomentNm + (blend * (forceBranchOpposingMomentNm - variantCOpposingMomentNm));
-        return std::isfinite(residualOpposingMomentNm) ? residualOpposingMomentNm : 0.0f;
+        const float contactYawMomentCorrectionAlongYawNm =
+            variantCContactYawMomentCorrectionAlongYawNm +
+            (blend *
+                (forceBranchContactYawMomentCorrectionAlongYawNm -
+                    variantCContactYawMomentCorrectionAlongYawNm));
+        return std::isfinite(contactYawMomentCorrectionAlongYawNm) ?
+            contactYawMomentCorrectionAlongYawNm :
+            0.0f;
     }
 
-    float PlantModel::variantCYawResidualOpposingMomentNm(
+    float PlantModel::variantCAggregateContactYawMomentCorrectionAlongYawNm(
         const float yawDirection,
         const float forwardVelocityMps,
         const WheelKinematics& kinematics,
@@ -186,11 +194,11 @@ namespace MazeMap
                 contactNormalLoadN,
                 totalNormalLoadN);
         const float relKnee = PositiveFiniteOrDefault(
-            _yawResidualVariantCRelativeSpeedKneeMps,
-            kDefaultYawResidualVariantCRelativeSpeedKneeMps);
+            _aggregateContactYawMomentCorrectionVariantCRelativeSpeedKneeMps,
+            kDefaultAggregateContactYawMomentCorrectionVariantCRelativeSpeedKneeMps);
         const float forwardKnee = PositiveFiniteOrDefault(
-            _yawResidualVariantCForwardSpeedKneeMps,
-            kDefaultYawResidualVariantCForwardSpeedKneeMps);
+            _aggregateContactYawMomentCorrectionVariantCForwardSpeedKneeMps,
+            kDefaultAggregateContactYawMomentCorrectionVariantCForwardSpeedKneeMps);
         const float lowRel =
             1.0f /
             (1.0f + ((contactRelativeSpeedMps * contactRelativeSpeedMps) / (relKnee * relKnee)));
@@ -204,19 +212,30 @@ namespace MazeMap
                 0.0f,
                 5.0f);
         const float utilSmooth = utilization / (1.0f + utilization);
-        const float projectedMomentOpposesYawNm = -yawDirection * projectedMomentNm;
+        const float projectedYawMomentAlongCorrectionDirectionNm = -yawDirection * projectedMomentNm;
 
-        const float residualOpposingMomentNm =
-            (kYawResidualVariantCLongLowRelCoeff * lowRel * (gainLeftLongBasis + gainRightLongBasis)) +
-            (kYawResidualVariantCRightBaseCoeff * (gainFrontRightBasis + gainRearRightBasis)) +
-            (kYawResidualVariantCForceMomentHighForwardCoeff * projectedMomentOpposesYawNm * highForward) +
-            (kYawResidualVariantCRightUtilCoeff * utilSmooth * (gainFrontRightBasis + gainRearRightBasis)) +
-            (kYawResidualVariantCLongBaseCoeff * (gainLeftLongBasis + gainRightLongBasis)) +
-            (kYawResidualVariantCLongUtilCoeff * utilSmooth * (gainLeftLongBasis + gainRightLongBasis)) +
-            (kYawResidualVariantCRightLowRelCoeff * lowRel * (gainFrontRightBasis + gainRearRightBasis)) +
-            (kYawResidualVariantCLongHighForwardCoeff * highForward * (gainLeftLongBasis + gainRightLongBasis)) +
-            (kYawResidualVariantCRightHighForwardCoeff * highForward * (gainFrontRightBasis + gainRearRightBasis));
-        return std::isfinite(residualOpposingMomentNm) ? residualOpposingMomentNm : 0.0f;
+        const float contactYawMomentCorrectionAlongYawNm =
+            (kAggregateContactYawMomentCorrectionVariantCLongLowRelCoeff *
+                lowRel * (gainLeftLongBasis + gainRightLongBasis)) +
+            (kAggregateContactYawMomentCorrectionVariantCRightBaseCoeff *
+                (gainFrontRightBasis + gainRearRightBasis)) +
+            (kAggregateContactYawMomentCorrectionVariantCForceMomentHighForwardCoeff *
+                projectedYawMomentAlongCorrectionDirectionNm * highForward) +
+            (kAggregateContactYawMomentCorrectionVariantCRightUtilCoeff *
+                utilSmooth * (gainFrontRightBasis + gainRearRightBasis)) +
+            (kAggregateContactYawMomentCorrectionVariantCLongBaseCoeff *
+                (gainLeftLongBasis + gainRightLongBasis)) +
+            (kAggregateContactYawMomentCorrectionVariantCLongUtilCoeff *
+                utilSmooth * (gainLeftLongBasis + gainRightLongBasis)) +
+            (kAggregateContactYawMomentCorrectionVariantCRightLowRelCoeff *
+                lowRel * (gainFrontRightBasis + gainRearRightBasis)) +
+            (kAggregateContactYawMomentCorrectionVariantCLongHighForwardCoeff *
+                highForward * (gainLeftLongBasis + gainRightLongBasis)) +
+            (kAggregateContactYawMomentCorrectionVariantCRightHighForwardCoeff *
+                highForward * (gainFrontRightBasis + gainRearRightBasis));
+        return std::isfinite(contactYawMomentCorrectionAlongYawNm) ?
+            contactYawMomentCorrectionAlongYawNm :
+            0.0f;
     }
 
     float PlantModel::residualDecayAlpha(const float dtS, const float tauS) noexcept
@@ -338,15 +357,15 @@ namespace MazeMap
             !WriteDebugTextLine(
                 context,
                 sink,
-                "plant_dump_params_yaw_residual",
+                "plant_dump_params_aggregate_contact_yaw_correction",
                 "blend_speed_knee_mps=%.9g;blend_force_knee=%.9g;force_rel_weight=%.9g;force_speed_fade_mps=%.9g;force_sliding_nm=%.9g;variant_c_rel_knee_mps=%.9g;variant_c_fwd_knee_mps=%.9g",
-                static_cast<double>(_yawResidualBlendSpeedKneeMps),
-                static_cast<double>(_yawResidualBlendForceKnee),
-                static_cast<double>(_yawResidualForceRelWeight),
-                static_cast<double>(_yawResidualForceSpeedFadeMps),
-                static_cast<double>(_yawResidualForceSlidingMomentNm),
-                static_cast<double>(_yawResidualVariantCRelativeSpeedKneeMps),
-                static_cast<double>(_yawResidualVariantCForwardSpeedKneeMps)))
+                static_cast<double>(_aggregateContactYawMomentCorrectionBlendSpeedKneeMps),
+                static_cast<double>(_aggregateContactYawMomentCorrectionBlendForceKnee),
+                static_cast<double>(_aggregateContactYawMomentCorrectionForceRelWeight),
+                static_cast<double>(_aggregateContactYawMomentCorrectionForceSpeedFadeMps),
+                static_cast<double>(_aggregateContactYawMomentCorrectionForceSlidingMomentNm),
+                static_cast<double>(_aggregateContactYawMomentCorrectionVariantCRelativeSpeedKneeMps),
+                static_cast<double>(_aggregateContactYawMomentCorrectionVariantCForwardSpeedKneeMps)))
         {
             return false;
         }
@@ -984,8 +1003,8 @@ namespace MazeMap
             (contactYawHalfTrackWidthM * (leftBankForwardForceN - rightBankForwardForceN)) +
             (contactYawLongitudinalOffsetM * (frontRightForceN - rearRightForceN));
         const float yawDirection = SignedDirection(yawRateRadps, projectedYawMomentNm);
-        const float variantCOpposingMomentNm =
-            variantCYawResidualOpposingMomentNm(
+        const float variantCContactYawMomentCorrectionAlongYawNm =
+            variantCAggregateContactYawMomentCorrectionAlongYawNm(
                 yawDirection,
                 forwardVelocityMps,
                 derivatives._wheelKinematics,
@@ -1003,16 +1022,16 @@ namespace MazeMap
                 totalNormalLoadN);
         const float yawMomentYieldNm =
             (std::max)(0.0f, sustainedContactMu * contactYawHalfTrackWidthM * totalNormalLoadN);
-        const float residualOpposingMomentNm =
-            yawResidualOpposingMomentNm(
+        const float contactYawMomentCorrectionAlongYawNm =
+            aggregateContactYawMomentCorrectionAlongYawNm(
                 forwardVelocityMps,
                 contactRelativeSpeedMps,
                 PositivePart(yawDirection * projectedYawMomentNm),
                 yawMomentYieldNm,
-                variantCOpposingMomentNm);
+                variantCContactYawMomentCorrectionAlongYawNm);
         const float yawMomentNm =
             projectedYawMomentNm -
-            (yawDirection * residualOpposingMomentNm);
+            (yawDirection * contactYawMomentCorrectionAlongYawNm);
 
         float sineHeading = 0.0f;
         float cosineHeading = 0.0f;
@@ -1546,7 +1565,7 @@ namespace MazeMap
                         magnitudeN / (std::max)(maxForceN, kForceEpsilonN));
             }
 
-            return variantCYawResidualOpposingMomentNm(
+            return variantCAggregateContactYawMomentCorrectionAlongYawNm(
                 yawDirection,
                 forwardVelocityMps,
                 currentKinematics,
@@ -1558,9 +1577,9 @@ namespace MazeMap
                 totalNormalLoadN,
                 maxUtilization);
         };
-        const auto residualAtProjectedMoment = [&](const float projectedMomentAlongYawNm) noexcept -> float
+        const auto correctionAtProjectedMoment = [&](const float projectedMomentAlongYawNm) noexcept -> float
         {
-            return yawResidualOpposingMomentNm(
+            return aggregateContactYawMomentCorrectionAlongYawNm(
                 forwardVelocityMps,
                 contactRelativeSpeedMps,
                 PositivePart(projectedMomentAlongYawNm),
@@ -1572,43 +1591,49 @@ namespace MazeMap
         if (yawDirection != 0.0f)
         {
             const float desiredMomentAlongYawNm = yawDirection * desiredYawMomentNm;
-            const float residualAtZeroNm = residualAtProjectedMoment(0.0f);
+            const float correctionAtZeroNm = correctionAtProjectedMoment(0.0f);
             const float relWeight = PositiveFiniteOrDefault(
-                _yawResidualForceRelWeight,
-                kDefaultYawResidualForceRelWeight);
+                _aggregateContactYawMomentCorrectionForceRelWeight,
+                kDefaultAggregateContactYawMomentCorrectionForceRelWeight);
             const float speedV2 =
                 (forwardVelocityMps * forwardVelocityMps) +
                 ((relWeight * contactRelativeSpeedMps) * (relWeight * contactRelativeSpeedMps));
             const float speedKnee = PositiveFiniteOrDefault(
-                _yawResidualBlendSpeedKneeMps,
-                kDefaultYawResidualBlendSpeedKneeMps);
+                _aggregateContactYawMomentCorrectionBlendSpeedKneeMps,
+                kDefaultAggregateContactYawMomentCorrectionBlendSpeedKneeMps);
             const float speedKnee2 = speedKnee * speedKnee;
             const float speedLow =
                 (speedKnee2 > 0.0f) ? (speedKnee2 / (speedKnee2 + (std::max)(0.0f, speedV2))) : 0.0f;
             if (!(yawMomentYieldNm > kForceEpsilonN) || !(speedLow > kForceEpsilonN))
             {
-                requestedYawMomentNm = yawDirection * (desiredMomentAlongYawNm + residualAtZeroNm);
+                requestedYawMomentNm = yawDirection * (desiredMomentAlongYawNm + correctionAtZeroNm);
             }
-            else if (desiredMomentAlongYawNm <= -residualAtZeroNm)
+            else if (desiredMomentAlongYawNm <= -correctionAtZeroNm)
             {
-                requestedYawMomentNm = yawDirection * (desiredMomentAlongYawNm + residualAtZeroNm);
+                requestedYawMomentNm = yawDirection * (desiredMomentAlongYawNm + correctionAtZeroNm);
             }
             else
             {
                 const float speedFade = PositiveFiniteOrDefault(
-                    _yawResidualForceSpeedFadeMps,
-                    kDefaultYawResidualForceSpeedFadeMps);
+                    _aggregateContactYawMomentCorrectionForceSpeedFadeMps,
+                    kDefaultAggregateContactYawMomentCorrectionForceSpeedFadeMps);
                 const float speedFade2 = speedFade * speedFade;
-                const float forceBranchOpposingMomentNm =
+                const float forceBranchContactYawMomentCorrectionAlongYawNm =
                     ((speedFade2 > 0.0f) ? (speedFade2 / (speedFade2 + (std::max)(0.0f, speedV2))) : 0.0f) *
                     PositiveFiniteOrDefault(
-                        _yawResidualForceSlidingMomentNm,
-                        kDefaultYawResidualForceSlidingMomentNm);
+                        _aggregateContactYawMomentCorrectionForceSlidingMomentNm,
+                        kDefaultAggregateContactYawMomentCorrectionForceSlidingMomentNm);
                 float lo = (std::max)(0.0f, desiredMomentAlongYawNm);
                 float hi =
                     lo +
-                    (std::max)((std::max)(forceBranchOpposingMomentNm, residualAtZeroNm), 0.0f) +
-                    (4.0f * PositiveFiniteOrDefault(_yawResidualBlendForceKnee, kDefaultYawResidualBlendForceKnee) * yawMomentYieldNm);
+                    (std::max)(
+                        (std::max)(forceBranchContactYawMomentCorrectionAlongYawNm, correctionAtZeroNm),
+                        0.0f) +
+                    (4.0f *
+                        PositiveFiniteOrDefault(
+                            _aggregateContactYawMomentCorrectionBlendForceKnee,
+                            kDefaultAggregateContactYawMomentCorrectionBlendForceKnee) *
+                        yawMomentYieldNm);
                 if (!(hi > lo))
                 {
                     hi = lo + yawMomentYieldNm;
@@ -1616,7 +1641,7 @@ namespace MazeMap
 
                 for (uint8_t grow = 0U; grow < 8U; ++grow)
                 {
-                    if ((hi - residualAtProjectedMoment(hi)) >= desiredMomentAlongYawNm)
+                    if ((hi - correctionAtProjectedMoment(hi)) >= desiredMomentAlongYawNm)
                     {
                         break;
                     }
@@ -1626,7 +1651,7 @@ namespace MazeMap
                 for (uint8_t iteration = 0U; iteration < 16U; ++iteration)
                 {
                     const float mid = 0.5f * (lo + hi);
-                    if ((mid - residualAtProjectedMoment(mid)) < desiredMomentAlongYawNm)
+                    if ((mid - correctionAtProjectedMoment(mid)) < desiredMomentAlongYawNm)
                     {
                         lo = mid;
                     }
@@ -2107,81 +2132,102 @@ namespace MazeMap
         return _rightDrive.getLongitudinalTireStiffnessN();
     }
 
-    float PlantModel::yawResidualBlendSpeedKneeMps() const noexcept
+    float PlantModel::aggregateContactYawMomentCorrectionBlendSpeedKneeMps() const noexcept
     {
-        return _yawResidualBlendSpeedKneeMps;
+        return _aggregateContactYawMomentCorrectionBlendSpeedKneeMps;
     }
 
-    void PlantModel::setYawResidualBlendSpeedKneeMps(const float speedKneeMps) noexcept
+    void PlantModel::setAggregateContactYawMomentCorrectionBlendSpeedKneeMps(
+        const float speedKneeMps) noexcept
     {
-        _yawResidualBlendSpeedKneeMps =
-            PositiveFiniteOrDefault(speedKneeMps, kDefaultYawResidualBlendSpeedKneeMps);
+        _aggregateContactYawMomentCorrectionBlendSpeedKneeMps =
+            PositiveFiniteOrDefault(
+                speedKneeMps,
+                kDefaultAggregateContactYawMomentCorrectionBlendSpeedKneeMps);
     }
 
-    float PlantModel::yawResidualBlendForceKnee() const noexcept
+    float PlantModel::aggregateContactYawMomentCorrectionBlendForceKnee() const noexcept
     {
-        return _yawResidualBlendForceKnee;
+        return _aggregateContactYawMomentCorrectionBlendForceKnee;
     }
 
-    void PlantModel::setYawResidualBlendForceKnee(const float forceKnee) noexcept
+    void PlantModel::setAggregateContactYawMomentCorrectionBlendForceKnee(
+        const float forceKnee) noexcept
     {
-        _yawResidualBlendForceKnee =
-            PositiveFiniteOrDefault(forceKnee, kDefaultYawResidualBlendForceKnee);
+        _aggregateContactYawMomentCorrectionBlendForceKnee =
+            PositiveFiniteOrDefault(
+                forceKnee,
+                kDefaultAggregateContactYawMomentCorrectionBlendForceKnee);
     }
 
-    float PlantModel::yawResidualForceRelWeight() const noexcept
+    float PlantModel::aggregateContactYawMomentCorrectionForceRelWeight() const noexcept
     {
-        return _yawResidualForceRelWeight;
+        return _aggregateContactYawMomentCorrectionForceRelWeight;
     }
 
-    void PlantModel::setYawResidualForceRelWeight(const float relWeight) noexcept
+    void PlantModel::setAggregateContactYawMomentCorrectionForceRelWeight(
+        const float relWeight) noexcept
     {
-        _yawResidualForceRelWeight =
-            PositiveFiniteOrDefault(relWeight, kDefaultYawResidualForceRelWeight);
+        _aggregateContactYawMomentCorrectionForceRelWeight =
+            PositiveFiniteOrDefault(
+                relWeight,
+                kDefaultAggregateContactYawMomentCorrectionForceRelWeight);
     }
 
-    float PlantModel::yawResidualForceSpeedFadeMps() const noexcept
+    float PlantModel::aggregateContactYawMomentCorrectionForceSpeedFadeMps() const noexcept
     {
-        return _yawResidualForceSpeedFadeMps;
+        return _aggregateContactYawMomentCorrectionForceSpeedFadeMps;
     }
 
-    void PlantModel::setYawResidualForceSpeedFadeMps(const float speedFadeMps) noexcept
+    void PlantModel::setAggregateContactYawMomentCorrectionForceSpeedFadeMps(
+        const float speedFadeMps) noexcept
     {
-        _yawResidualForceSpeedFadeMps =
-            PositiveFiniteOrDefault(speedFadeMps, kDefaultYawResidualForceSpeedFadeMps);
+        _aggregateContactYawMomentCorrectionForceSpeedFadeMps =
+            PositiveFiniteOrDefault(
+                speedFadeMps,
+                kDefaultAggregateContactYawMomentCorrectionForceSpeedFadeMps);
     }
 
-    float PlantModel::yawResidualForceSlidingMomentNm() const noexcept
+    float PlantModel::aggregateContactYawMomentCorrectionForceSlidingMomentNm() const noexcept
     {
-        return _yawResidualForceSlidingMomentNm;
+        return _aggregateContactYawMomentCorrectionForceSlidingMomentNm;
     }
 
-    void PlantModel::setYawResidualForceSlidingMomentNm(const float slidingMomentNm) noexcept
+    void PlantModel::setAggregateContactYawMomentCorrectionForceSlidingMomentNm(
+        const float slidingMomentNm) noexcept
     {
-        _yawResidualForceSlidingMomentNm =
-            PositiveFiniteOrDefault(slidingMomentNm, kDefaultYawResidualForceSlidingMomentNm);
+        _aggregateContactYawMomentCorrectionForceSlidingMomentNm =
+            PositiveFiniteOrDefault(
+                slidingMomentNm,
+                kDefaultAggregateContactYawMomentCorrectionForceSlidingMomentNm);
     }
 
-    float PlantModel::yawResidualVariantCRelativeSpeedKneeMps() const noexcept
+    float PlantModel::aggregateContactYawMomentCorrectionVariantCRelativeSpeedKneeMps() const noexcept
     {
-        return _yawResidualVariantCRelativeSpeedKneeMps;
+        return _aggregateContactYawMomentCorrectionVariantCRelativeSpeedKneeMps;
     }
 
-    void PlantModel::setYawResidualVariantCRelativeSpeedKneeMps(const float relativeSpeedKneeMps) noexcept
+    void PlantModel::setAggregateContactYawMomentCorrectionVariantCRelativeSpeedKneeMps(
+        const float relativeSpeedKneeMps) noexcept
     {
-        _yawResidualVariantCRelativeSpeedKneeMps =
-            PositiveFiniteOrDefault(relativeSpeedKneeMps, kDefaultYawResidualVariantCRelativeSpeedKneeMps);
+        _aggregateContactYawMomentCorrectionVariantCRelativeSpeedKneeMps =
+            PositiveFiniteOrDefault(
+                relativeSpeedKneeMps,
+                kDefaultAggregateContactYawMomentCorrectionVariantCRelativeSpeedKneeMps);
     }
 
-    float PlantModel::yawResidualVariantCForwardSpeedKneeMps() const noexcept
+    float PlantModel::aggregateContactYawMomentCorrectionVariantCForwardSpeedKneeMps() const noexcept
     {
-        return _yawResidualVariantCForwardSpeedKneeMps;
+        return _aggregateContactYawMomentCorrectionVariantCForwardSpeedKneeMps;
     }
 
-    void PlantModel::setYawResidualVariantCForwardSpeedKneeMps(const float forwardSpeedKneeMps) noexcept
+    void PlantModel::setAggregateContactYawMomentCorrectionVariantCForwardSpeedKneeMps(
+        const float forwardSpeedKneeMps) noexcept
     {
-        _yawResidualVariantCForwardSpeedKneeMps =
-            PositiveFiniteOrDefault(forwardSpeedKneeMps, kDefaultYawResidualVariantCForwardSpeedKneeMps);
+        _aggregateContactYawMomentCorrectionVariantCForwardSpeedKneeMps =
+            PositiveFiniteOrDefault(
+                forwardSpeedKneeMps,
+                kDefaultAggregateContactYawMomentCorrectionVariantCForwardSpeedKneeMps);
     }
 }
 

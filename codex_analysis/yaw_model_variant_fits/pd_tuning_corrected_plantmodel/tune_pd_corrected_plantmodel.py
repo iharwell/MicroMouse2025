@@ -106,7 +106,7 @@ def load_current_gains() -> Gains:
 def plant_source_flags() -> dict[str, bool]:
     text = (ROOT / "MazeMap" / "MazeMap" / "PlantModel.cpp").read_text(encoding="utf-8", errors="replace")
     return {
-        "has_variant_c_symbols": "variantCYawResidualOpposingMomentNm" in text,
+        "has_variant_c_symbols": "variantCAggregateContactYawMomentCorrectionAlongYawNm" in text,
         "has_request_conditioned_feedforward_branch": "variantCAtProjectedMoment" in text,
         "has_projected_force_utilization": "projectedYawMomentNm" in text,
         "has_rational_gate": "RationalSquareGate" in text,
@@ -468,7 +468,7 @@ def make_report(
         "",
         "- Current local `MazeMap/MazeMap/PlantModel.cpp`, `PlantModel.h`, and `CoreConfig.h`.",
         "- Existing rational speed/force partition evidence in `codex_analysis/yaw_model_variant_fits/transition_options/rational_speed_force_blend/`.",
-        "- Existing projected-force-domain yaw residual evidence in `codex_analysis/yaw_model_variant_fits/round2_force_domain_stribeck/` as supporting context.",
+        "- Existing projected-force-domain contact yaw correction evidence in `codex_analysis/yaw_model_variant_fits/round2_force_domain_stribeck/` as supporting context.",
         "- Existing yaw-launch step evidence in `codex_analysis/yaw_launch_step_response/`.",
         "",
         "Not used: UKF state-vector fields as tuning targets, command/request values as traction selectors, unit tests, or project builds.",
@@ -480,7 +480,7 @@ def make_report(
         "| Evidence | Value |",
         "| --- | ---: |",
         f"| Rational partition +1 rad/s in-place max command | {float(evidence['blend_in_place_command_abs']):.6f} |",
-        f"| Rational partition +1 rad/s extra opposing moment Nm | {float(evidence['blend_in_place_extra_nm']):.6f} |",
+        f"| Rational partition +1 rad/s extra contact yaw correction Nm | {float(evidence['blend_in_place_extra_nm']):.6f} |",
         f"| Projected-force-only reference +1 rad/s max command | {float(evidence['force_in_place_command_abs']):.6f} |",
         f"| Primary RMSE baseline -> rational corrected Nm | {float(evidence['blend_primary_baseline_rmse_nm']):.6f} -> {float(evidence['blend_primary_corrected_rmse_nm']):.6f} |",
         f"| Validation RMSE baseline -> rational corrected Nm | {float(evidence['blend_validation_baseline_rmse_nm']):.6f} -> {float(evidence['blend_validation_corrected_rmse_nm']):.6f} |",
