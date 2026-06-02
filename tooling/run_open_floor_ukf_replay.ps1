@@ -39,7 +39,8 @@ $estimatorFreshnessInputs = @(
     (Join-Path $repoRoot "MazeMap\MazeMap\PlantModel.cpp"),
     (Join-Path $repoRoot "MazeMap\MazeMap\Vehicle.h"),
     (Join-Path $repoRoot "MazeMap\MazeMap\Vehicle.cpp"),
-    (Join-Path $repoRoot "MazeMap\MazeMap\LSM6DSV16X_IMU.h")
+    (Join-Path $repoRoot "MazeMap\MazeMap\Imu.h"),
+    (Join-Path $repoRoot "MazeMap\MazeMap\Imu.cpp")
 )
 
 $msbuild = (Get-Command msbuild.exe -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -First 1)

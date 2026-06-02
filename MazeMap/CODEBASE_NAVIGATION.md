@@ -37,12 +37,11 @@ This document is a navigation index for the first-party source tree under `MazeM
 - `FrontWallCharacterizationStorage.h`: storage records and match helpers for captured front-wall characterization data.
 - `HardwareConfig.h`: hardware timing, PWM, ADC, and SD bring-up constants used by board support and runtime code.
 - `HalfStepPath.h`: path container with half-cell resolution for fine-grained maneuver generation.
-- `ImuCalibrationPolicy.h`: IMU calibration helpers and encoder-count support types.
-- `ImuSamplingProfile.h`: UI-facing IMU sampling profile selection.
+- `Imu.h` / `Imu.cpp`: public IMU hardware/domain owner for runtime configuration, calibration sampling, runtime bias, and `SensorSnapshot` inertial capture.
 - `InPlaceTurnProfile.h`: parameter bundle for in-place turn behavior.
 - `Kinematics.h` / `Kinematics.cpp`: linear and rotational kinematics primitives.
 - `LedCalibrationConfig.h`: LED and wall-sensor calibration constants.
-- `LSV6DSV16X_IMU.h`: IMU driver, register abstractions, and status helpers for the LSV6DSV16X device.
+- `LSM6DSV16X_IMU.h` / `LSM6DSV16X_IMU.cpp`: low-level LSM6DSV16X register driver, raw reads, range/ODR/self-test controls, and axis/sign conversion primitives.
 - `Maneuver.h` / `Maneuver.cpp`: maneuver catalogue and maneuver-owned execution geometry/target helpers; do not re-express maneuver execution through parallel smooth-turn profile structs.
 - `ManeuverInstance.h`: one realized maneuver segment and the canonical execution vocabulary for maneuver-driven motion.
 - `ManeuverPath.h` / `ManeuverPath.cpp`: path container expressed as maneuver instances instead of raw cells.

@@ -1,5 +1,6 @@
 #pragma once
 #include "Defines.h"
+#include "Imu.h"
 #include "Maze.h"
 #include "PDCluster.h"
 #include "Vehicle.h"
@@ -219,7 +220,7 @@ namespace MazeMap::Config
     // [Low] Base maximum travel allowed while searching for a wall during touch-off. Nearby one-cell touches clamp to
     // this clear-span budget, while longer known-wall moves expand from the geometry-predicted travel plus slack.
     const float kWallTouchBaseMaxApproachDistanceM = kCellClearSpanM;
-    constexpr auto kMissionRuntimeAccelFilterFreq = MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::ACCEL_FILTER_FREQ::FRAC_1_020;
+    constexpr auto kMissionRuntimeAccelFilterFreq = MazeMap::Imu::AccelFilterFreq::Frac1Over020;
     // [Low] Minimum south-wall clearance required before the startup routine may rotate back to the mission heading.
     // Increase only if chassis geometry changes and the rear still clips the wall during that recovery turn.
     constexpr float kMissionStartTurnClearanceM = 0.026f;

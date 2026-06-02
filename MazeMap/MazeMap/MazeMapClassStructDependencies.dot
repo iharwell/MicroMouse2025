@@ -1,8 +1,8 @@
 digraph MazeMapClassStructDependencies {
   // Generated from MazeMap/MazeMap/x64/Release/MazeMap.tlog
   // Compiler items: 68 existing sources; CL.read blocks: 68; matched blocks: 68
-  // Active local dependency files: 190
-  // Nodes: 184 classes, 55 structs, 492 unowned functions; edges: 1682
+  // Active local dependency files: 187
+  // Nodes: 182 classes, 48 structs, 474 unowned functions; edges: 1573
   // Edge weights: class->class 0.2; class->function/struct 1; function/struct->class 0.1; struct->struct and function->function 0.2; function->struct 0.5; unspecified struct->function 1.
   // Edges mean the source node's declaration or implementation references the target node name.
   graph [rankdir=LR, overlap=false, splines=true, fontname="Consolas"];
@@ -24,8 +24,8 @@ digraph MazeMapClassStructDependencies {
   class_MazeMap__App__Application [label="MazeMap::App::Application", tooltip="Application.h", shape="box", fillcolor="black", color="black", fontcolor="white"];
   class_MazeMap__App__BootModeId [label="MazeMap::App::BootModeId", tooltip="BootModeDescriptor.h", shape="box", fillcolor="black", color="black", fontcolor="white"];
   class_MazeMap__App__BootModeSelectorKind [label="MazeMap::App::BootModeSelectorKind", tooltip="BootModeRegistry.h", shape="box", fillcolor="black", color="black", fontcolor="white"];
-  class_MazeMap__App__Internal__BootFramework [label="MazeMap::App::Internal::BootFramework", tooltip="BootFramework.h", shape="box", fillcolor="black", color="black", fontcolor="white"];
   class_MazeMap__App__Internal__ArcPrimitive [label="MazeMap::App::Internal::ArcPrimitive", tooltip="Drive.cpp", shape="box", fillcolor="black", color="black", fontcolor="white"];
+  class_MazeMap__App__Internal__BootFramework [label="MazeMap::App::Internal::BootFramework", tooltip="BootFramework.h", shape="box", fillcolor="black", color="black", fontcolor="white"];
   class_MazeMap__App__Internal__CommandVector [label="MazeMap::App::Internal::CommandVector", tooltip="CommandVector.h", shape="box", fillcolor="black", color="black", fontcolor="white"];
   class_MazeMap__App__Internal__CorridorRepeatabilityMode [label="MazeMap::App::Internal::CorridorRepeatabilityMode", tooltip="CorridorRepeatabilityMode.cpp", shape="box", fillcolor="black", color="black", fontcolor="white"];
   class_MazeMap__App__Internal__CorridorRepeatabilityMode__Phase [label="MazeMap::App::Internal::CorridorRepeatabilityMode::Phase", tooltip="CorridorRepeatabilityMode.cpp", shape="box", fillcolor="black", color="black", fontcolor="white"];
@@ -94,6 +94,8 @@ digraph MazeMapClassStructDependencies {
   class_MazeMap__FrontWallCharacterizationController__Phase [label="MazeMap::FrontWallCharacterizationController::Phase", tooltip="FrontWallCharacterizationController.cpp", shape="box", fillcolor="black", color="black", fontcolor="white"];
   class_MazeMap__GeometryHitType [label="MazeMap::GeometryHitType", tooltip="WallGeometryModel.h", shape="box", fillcolor="black", color="black", fontcolor="white"];
   class_MazeMap__HalfStepPath [label="MazeMap::HalfStepPath", tooltip="HalfStepPath.h", shape="box", fillcolor="black", color="black", fontcolor="white"];
+  class_MazeMap__Imu [label="MazeMap::Imu", tooltip="Imu.h", shape="box", fillcolor="black", color="black", fontcolor="white"];
+  class_MazeMap__Imu__AccelFilterFreq [label="MazeMap::Imu::AccelFilterFreq", tooltip="Imu.h", shape="box", fillcolor="black", color="black", fontcolor="white"];
   class_MazeMap__ImuAccelObs [label="MazeMap::ImuAccelObs", tooltip="ImuAccelObs.h", shape="box", fillcolor="black", color="black", fontcolor="white"];
   class_MazeMap__LinearKinematics [label="MazeMap::LinearKinematics", tooltip="Kinematics.h", shape="box", fillcolor="black", color="black", fontcolor="white"];
   class_MazeMap__LSM6DSV16X_IMU [label="MazeMap::LSM6DSV16X_IMU", tooltip="LSM6DSV16X_IMU.h", shape="box", fillcolor="black", color="black", fontcolor="white"];
@@ -175,7 +177,6 @@ digraph MazeMapClassStructDependencies {
   class_MazeMap__TurnInPlace180 [label="MazeMap::TurnInPlace180", tooltip="Maneuver.h", shape="box", fillcolor="black", color="black", fontcolor="white"];
   class_MazeMap__TurnInPlace45 [label="MazeMap::TurnInPlace45", tooltip="Maneuver.h", shape="box", fillcolor="black", color="black", fontcolor="white"];
   class_MazeMap__TurnInPlace90 [label="MazeMap::TurnInPlace90", tooltip="Maneuver.h", shape="box", fillcolor="black", color="black", fontcolor="white"];
-  class_MazeMap__UiImuSamplingProfile [label="MazeMap::UiImuSamplingProfile", tooltip="ImuSamplingProfile.h", shape="box", fillcolor="black", color="black", fontcolor="white"];
   class_MazeMap__UKF [label="MazeMap::UKF", tooltip="UKF.h", shape="box", fillcolor="black", color="black", fontcolor="white"];
   class_MazeMap__UKF__SigmaPointStrategy [label="MazeMap::UKF::SigmaPointStrategy", tooltip="UKF.h", shape="box", fillcolor="black", color="black", fontcolor="white"];
   class_MazeMap__Vehicle [label="MazeMap::Vehicle", tooltip="Vehicle.h", shape="box", fillcolor="black", color="black", fontcolor="white"];
@@ -252,6 +253,7 @@ digraph MazeMapClassStructDependencies {
   fn_anonymous__Drive_cpp__TryResolveSensorSideOpeningQuarterTurnAngleRad [label="Drive_cpp::TryResolveSensorSideOpeningQuarterTurnAngleRad", tooltip="Drive.cpp", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_anonymous__Drive_cpp__TryResolveStraightTargetDistanceM [label="Drive_cpp::TryResolveStraightTargetDistanceM", tooltip="Drive.cpp", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_anonymous__FrontWallCharacterizationController_cpp__AverageEncoderDistanceM [label="FrontWallCharacterizationController_cpp::AverageEncoderDistanceM", tooltip="FrontWallCharacterizationController.cpp", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
+  fn_anonymous__LSM6DSV16X_IMU_cpp__BuildLsm6Dsv16xSpiSettings [label="LSM6DSV16X_IMU_cpp::BuildLsm6Dsv16xSpiSettings", tooltip="LSM6DSV16X_IMU.cpp", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_anonymous__ManeuverFileTestMode_cpp__LoadManeuverQueueFromSd [label="ManeuverFileTestMode_cpp::LoadManeuverQueueFromSd", tooltip="ManeuverFileTestMode.cpp", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_anonymous__ManeuverFileTestMode_cpp__ManeuverFileTestStartLocation [label="ManeuverFileTestMode_cpp::ManeuverFileTestStartLocation", tooltip="ManeuverFileTestMode.cpp", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_anonymous__ManeuverPath_cpp__BuildManeuverPathFromHalfStepRecursive [label="ManeuverPath_cpp::BuildManeuverPathFromHalfStepRecursive", tooltip="ManeuverPath.cpp", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
@@ -349,6 +351,7 @@ digraph MazeMapClassStructDependencies {
   fn_MazeMap__App__GetBootModeRegistryEntries [label="MazeMap::App::GetBootModeRegistryEntries", tooltip="BootModeRegistry.cpp", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__App__GetBootModeRegistryEntry [label="MazeMap::App::GetBootModeRegistryEntry", tooltip="BootModeRegistry.cpp", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__App__GetBootModeRegistryEntryCount [label="MazeMap::App::GetBootModeRegistryEntryCount", tooltip="BootModeRegistry.cpp", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
+  fn_MazeMap__App__Internal__AuxMeasurementModeSupport__AuxMeasurementManeuverDistanceMeters [label="MazeMap::App::Internal::AuxMeasurementModeSupport::AuxMeasurementManeuverDistanceMeters", tooltip="AuxMeasurementModeSupport.cpp", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__App__Internal__AuxMeasurementModeSupport__BuildPositionAuditFixtureGeometry [label="MazeMap::App::Internal::AuxMeasurementModeSupport::BuildPositionAuditFixtureGeometry", tooltip="AuxMeasurementModeSupport.cpp", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__App__Internal__AuxMeasurementModeSupport__CorridorRepeatabilityLimits [label="MazeMap::App::Internal::AuxMeasurementModeSupport::CorridorRepeatabilityLimits", tooltip="AuxMeasurementModeSupport.cpp", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__App__Internal__AuxMeasurementModeSupport__LogCorridorRepeatabilityMetadata [label="MazeMap::App::Internal::AuxMeasurementModeSupport::LogCorridorRepeatabilityMetadata", tooltip="AuxMeasurementModeSupport.cpp", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
@@ -358,7 +361,6 @@ digraph MazeMapClassStructDependencies {
   fn_MazeMap__App__Internal__AuxMeasurementModeSupport__PositionAccuracyAuditTurnLimits [label="MazeMap::App::Internal::AuxMeasurementModeSupport::PositionAccuracyAuditTurnLimits", tooltip="AuxMeasurementModeSupport.cpp", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__App__Internal__AuxMeasurementModeSupport__TryBuildPositionAuditSmoothTurnPaths [label="MazeMap::App::Internal::AuxMeasurementModeSupport::TryBuildPositionAuditSmoothTurnPaths", tooltip="AuxMeasurementModeSupport.cpp", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__App__Internal__AuxMeasurementModeSupport__TryValidatePositionAuditPath [label="MazeMap::App::Internal::AuxMeasurementModeSupport::TryValidatePositionAuditPath", tooltip="AuxMeasurementModeSupport.cpp", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
-  fn_MazeMap__App__Internal__AuxMeasurementModeSupport__UtilityModeManeuverDistanceMeters [label="MazeMap::App::Internal::AuxMeasurementModeSupport::UtilityModeManeuverDistanceMeters", tooltip="AuxMeasurementModeSupport.cpp", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__App__Internal__AuxMeasurementModeSupport__WriteCorridorRepeatabilityResult [label="MazeMap::App::Internal::AuxMeasurementModeSupport::WriteCorridorRepeatabilityResult", tooltip="AuxMeasurementModeSupport.cpp", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__App__Internal__AuxMeasurementModeSupport__WritePositionInPlaceTurnAuditResult [label="MazeMap::App::Internal::AuxMeasurementModeSupport::WritePositionInPlaceTurnAuditResult", tooltip="AuxMeasurementModeSupport.cpp", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__App__Internal__AuxMeasurementModeSupport__WritePositionSmoothTurnAuditResult [label="MazeMap::App::Internal::AuxMeasurementModeSupport::WritePositionSmoothTurnAuditResult", tooltip="AuxMeasurementModeSupport.cpp", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
@@ -447,8 +449,6 @@ digraph MazeMapClassStructDependencies {
   fn_MazeMap__ComputeDiagnosticCharacterizationTravelLimitM [label="MazeMap::ComputeDiagnosticCharacterizationTravelLimitM", tooltip="DiagnosticMotionPlan.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__ComputeFanRampDutyCycle [label="MazeMap::ComputeFanRampDutyCycle", tooltip="FanRampProfile.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__ComputeFrontWallCharacterizationStorageChecksum [label="MazeMap::ComputeFrontWallCharacterizationStorageChecksum", tooltip="FrontWallCharacterizationStorage.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
-  fn_MazeMap__ComputeGyroBiasSampleCount [label="MazeMap::ComputeGyroBiasSampleCount", tooltip="ImuCalibrationPolicy.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
-  fn_MazeMap__ComputeMinimumSampleCountForDurationMs [label="MazeMap::ComputeMinimumSampleCountForDurationMs", tooltip="ImuCalibrationPolicy.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__ComputeMissionStartCenterAdvanceM [label="MazeMap::ComputeMissionStartCenterAdvanceM", tooltip="MissionStartPolicy.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__ComputeMissionStartTurnClearanceM [label="MazeMap::ComputeMissionStartTurnClearanceM", tooltip="MissionStartPolicy.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__ComputeMotorSpeedConstantRadpsPerVolt [label="MazeMap::ComputeMotorSpeedConstantRadpsPerVolt", tooltip="MotorModelUnits.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
@@ -487,17 +487,10 @@ digraph MazeMapClassStructDependencies {
   fn_MazeMap__GetHeading [label="MazeMap::GetHeading", tooltip="Direction.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__GetSideLeftSensorMount [label="MazeMap::GetSideLeftSensorMount", tooltip="Vehicle.cpp", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__GetSideRightSensorMount [label="MazeMap::GetSideRightSensorMount", tooltip="Vehicle.cpp", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
-  fn_MazeMap__GetUiAccelLpf2CutoffHzForControlPeriodUs [label="MazeMap::GetUiAccelLpf2CutoffHzForControlPeriodUs", tooltip="ImuSamplingProfile.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
-  fn_MazeMap__GetUiGyroCut213DatasheetReferenceHzForControlPeriodUs [label="MazeMap::GetUiGyroCut213DatasheetReferenceHzForControlPeriodUs", tooltip="ImuSamplingProfile.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
-  fn_MazeMap__GetUiImuSampleRateHz [label="MazeMap::GetUiImuSampleRateHz", tooltip="ImuSamplingProfile.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
-  fn_MazeMap__GetUiImuSampleRateHzForControlPeriodUs [label="MazeMap::GetUiImuSampleRateHzForControlPeriodUs", tooltip="ImuSamplingProfile.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__HasOpenFloorSelectorRemovalFaultDelayElapsed [label="MazeMap::HasOpenFloorSelectorRemovalFaultDelayElapsed", tooltip="OpenFloorMeasurementSpec.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
-  fn_MazeMap__HaveEncoderCountsChanged [label="MazeMap::HaveEncoderCountsChanged", tooltip="ImuCalibrationPolicy.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__HysteresisSignalHigh [label="MazeMap::HysteresisSignalHigh", tooltip="WallDetectionThresholds.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
-  fn_MazeMap__IsAccelSelfTestDeltaValidMg [label="MazeMap::IsAccelSelfTestDeltaValidMg", tooltip="ImuCalibrationPolicy.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__IsDiagonal [label="MazeMap::IsDiagonal", tooltip="Direction.cpp", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__IsEncoderProgressWatchdogArmed [label="MazeMap::IsEncoderProgressWatchdogArmed", tooltip="EncoderStallPolicy.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
-  fn_MazeMap__IsGyroSelfTestDeltaValidDps [label="MazeMap::IsGyroSelfTestDeltaValidDps", tooltip="ImuCalibrationPolicy.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__IsMissionStartupStationaryFromEncoderWindow [label="MazeMap::IsMissionStartupStationaryFromEncoderWindow", tooltip="MissionStartPolicy.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__IsMissionStartupStationaryFromSensors [label="MazeMap::IsMissionStartupStationaryFromSensors", tooltip="MissionStartPolicy.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__IsMissionStartupStationarySample [label="MazeMap::IsMissionStartupStationarySample", tooltip="MissionStartPolicy.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
@@ -595,7 +588,6 @@ digraph MazeMapClassStructDependencies {
   fn_MazeMap__RpmPerVoltToRadPerSecondPerVolt [label="MazeMap::RpmPerVoltToRadPerSecondPerVolt", tooltip="MotorModelUnits.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__RpmToRadPerSecond [label="MazeMap::RpmToRadPerSecond", tooltip="MotorModelUnits.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__SelectDiagnosticReturnDistanceM [label="MazeMap::SelectDiagnosticReturnDistanceM", tooltip="DiagnosticMotionPlan.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
-  fn_MazeMap__SelectUiImuSamplingProfile [label="MazeMap::SelectUiImuSamplingProfile", tooltip="ImuSamplingProfile.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__Set [label="MazeMap::Set", tooltip="VehicleState.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__StableLogExpm1 [label="MazeMap::StableLogExpm1", tooltip="WallDetectionThresholds.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
   fn_MazeMap__StableSoftplus [label="MazeMap::StableSoftplus", tooltip="WallDetectionThresholds.h", shape="diamond", fillcolor="blue", color="blue", fontcolor="white"];
@@ -703,7 +695,6 @@ digraph MazeMapClassStructDependencies {
   struct_MazeMap__arduino_stub_detail__HostDigitalPinState [label="MazeMap::arduino_stub_detail::HostDigitalPinState", tooltip="Defines.h", shape="oval", fillcolor="red", color="red", fontcolor="white"];
   struct_MazeMap__CandidateMatch [label="MazeMap::CandidateMatch", tooltip="ManeuverPath.cpp", shape="oval", fillcolor="red", color="red", fontcolor="white"];
   struct_MazeMap__DiagnosticSummaryInstruction [label="MazeMap::DiagnosticSummaryInstruction", tooltip="DiagnosticCoverage.h", shape="oval", fillcolor="red", color="red", fontcolor="white"];
-  struct_MazeMap__EncoderCountPair [label="MazeMap::EncoderCountPair", tooltip="ImuCalibrationPolicy.h", shape="oval", fillcolor="red", color="red", fontcolor="white"];
   struct_MazeMap__FrontWallCharacterizationLogRow [label="MazeMap::FrontWallCharacterizationLogRow", tooltip="FrontWallCharacterizationController.cpp", shape="oval", fillcolor="red", color="red", fontcolor="white"];
   struct_MazeMap__FrontWallCharacterizationMatch [label="MazeMap::FrontWallCharacterizationMatch", tooltip="FrontWallCharacterizationStorage.h", shape="oval", fillcolor="red", color="red", fontcolor="white"];
   struct_MazeMap__FrontWallCharacterizationStorage [label="MazeMap::FrontWallCharacterizationStorage", tooltip="FrontWallCharacterizationStorage.h", shape="oval", fillcolor="red", color="red", fontcolor="white"];
@@ -852,6 +843,7 @@ digraph MazeMapClassStructDependencies {
   fn_anonymous__Drive_cpp__TryResolveStraightTargetDistanceM -> fn_HeadingUnitFromYawRad [weight=0.2];
   fn_anonymous__Drive_cpp__TryResolveStraightTargetDistanceM -> class_MazeMap__VehicleState [weight=0.1];
   fn_anonymous__FrontWallCharacterizationController_cpp__AverageEncoderDistanceM -> class_SensorSnapshot [weight=0.1];
+  fn_anonymous__LSM6DSV16X_IMU_cpp__BuildLsm6Dsv16xSpiSettings -> class_MazeMap__LSM6DSV16X_IMU [weight=0.1];
   fn_anonymous__ManeuverFileTestMode_cpp__LoadManeuverQueueFromSd -> fn_anonymous__ManeuverFileTestMode_cpp__ManeuverFileTestStartLocation [weight=0.2];
   fn_anonymous__ManeuverFileTestMode_cpp__LoadManeuverQueueFromSd -> class_MazeMap__App__Internal__SharedRobotRuntime [weight=0.1];
   fn_anonymous__ManeuverFileTestMode_cpp__LoadManeuverQueueFromSd -> class_MazeMap__DirectionalLocation [weight=0.1];
@@ -953,8 +945,8 @@ digraph MazeMapClassStructDependencies {
   fn_IsPinPairStrapped -> fn_digitalWrite [weight=0.2];
   fn_IsPinPairStrapped -> fn_pinMode [weight=0.2];
   class_MazeMap__App__Application -> fn_delay [weight=1];
-  class_MazeMap__App__Application -> fn_MazeMap__App__Internal__GetSharedRobotRuntime [weight=1];
   class_MazeMap__App__Application -> class_MazeMap__App__Internal__BootFramework [weight=0.2];
+  class_MazeMap__App__Application -> fn_MazeMap__App__Internal__GetSharedRobotRuntime [weight=1];
   class_MazeMap__App__Application -> class_MazeMap__App__Internal__SharedRobotRuntime [weight=0.2];
   struct_MazeMap__App__BootModeDescriptor -> class_MazeMap__App__BootModeId [weight=0.1];
   fn_MazeMap__App__BootModeIdName -> class_MazeMap__App__BootModeId [weight=0.1];
@@ -990,6 +982,7 @@ digraph MazeMapClassStructDependencies {
   fn_MazeMap__App__GetBootModeRegistryEntries -> fn_MazeMap__App__Internal__GetWallSensorLedCalibrationBootModeDescriptor [weight=0.2];
   fn_MazeMap__App__GetBootModeRegistryEntry -> struct_MazeMap__App__BootModeRegistryEntry [weight=0.5];
   fn_MazeMap__App__GetBootModeRegistryEntry -> fn_MazeMap__App__GetBootModeRegistryEntries [weight=0.2];
+  fn_MazeMap__App__Internal__AuxMeasurementModeSupport__AuxMeasurementManeuverDistanceMeters -> class_MazeMap__ManeuverSet [weight=0.1];
   fn_MazeMap__App__Internal__AuxMeasurementModeSupport__BuildPositionAuditFixtureGeometry -> fn_anonymous__AuxMeasurementModeSupport_cpp__BuildPositionAuditMazeFixture [weight=0.2];
   fn_MazeMap__App__Internal__AuxMeasurementModeSupport__BuildPositionAuditFixtureGeometry -> struct_MazeMap__App__Internal__AuxMeasurementModeSupport__PositionAuditFixtureGeometry [weight=0.5];
   fn_MazeMap__App__Internal__AuxMeasurementModeSupport__BuildPositionAuditFixtureGeometry -> fn_MazeMap__ComputeWallTouchPoseFromEastWallM [weight=0.2];
@@ -1000,8 +993,8 @@ digraph MazeMapClassStructDependencies {
   fn_MazeMap__App__Internal__AuxMeasurementModeSupport__LogPositionAccuracyAuditMetadata -> fn_anonymous__AuxMeasurementModeSupport_cpp__ReportFailure [weight=0.2];
   fn_MazeMap__App__Internal__AuxMeasurementModeSupport__LogPositionAccuracyAuditMetadata -> fn_anonymous__AuxMeasurementModeSupport_cpp__WriteEvent [weight=0.2];
   fn_MazeMap__App__Internal__AuxMeasurementModeSupport__LogPositionAccuracyAuditMetadata -> fn_FormatManeuverCodeName [weight=0.2];
+  fn_MazeMap__App__Internal__AuxMeasurementModeSupport__LogPositionAccuracyAuditMetadata -> fn_MazeMap__App__Internal__AuxMeasurementModeSupport__AuxMeasurementManeuverDistanceMeters [weight=0.2];
   fn_MazeMap__App__Internal__AuxMeasurementModeSupport__LogPositionAccuracyAuditMetadata -> struct_MazeMap__App__Internal__AuxMeasurementModeSupport__PositionAuditFixtureGeometry [weight=0.5];
-  fn_MazeMap__App__Internal__AuxMeasurementModeSupport__LogPositionAccuracyAuditMetadata -> fn_MazeMap__App__Internal__AuxMeasurementModeSupport__UtilityModeManeuverDistanceMeters [weight=0.2];
   fn_MazeMap__App__Internal__AuxMeasurementModeSupport__LogPositionAccuracyAuditMetadata -> class_MazeMap__ManeuverSet [weight=0.1];
   fn_MazeMap__App__Internal__AuxMeasurementModeSupport__PositionAccuracyAuditCornerLimits -> fn_MazeMap__App__Internal__AuxMeasurementModeSupport__PositionAccuracyAuditStraightLimits [weight=0.2];
   fn_MazeMap__App__Internal__AuxMeasurementModeSupport__PositionAccuracyAuditCornerLimits -> class_MotionLimits [weight=0.1];
@@ -1016,7 +1009,6 @@ digraph MazeMapClassStructDependencies {
   fn_MazeMap__App__Internal__AuxMeasurementModeSupport__TryValidatePositionAuditPath -> class_MazeMap__ManeuverPath [weight=0.1];
   fn_MazeMap__App__Internal__AuxMeasurementModeSupport__TryValidatePositionAuditPath -> class_MazeMap__ManeuverSet [weight=0.1];
   fn_MazeMap__App__Internal__AuxMeasurementModeSupport__TryValidatePositionAuditPath -> class_MazeMap__Maze [weight=0.1];
-  fn_MazeMap__App__Internal__AuxMeasurementModeSupport__UtilityModeManeuverDistanceMeters -> class_MazeMap__ManeuverSet [weight=0.1];
   fn_MazeMap__App__Internal__AuxMeasurementModeSupport__WriteCorridorRepeatabilityResult -> fn_AngleErrorRad [weight=0.2];
   fn_MazeMap__App__Internal__AuxMeasurementModeSupport__WriteCorridorRepeatabilityResult -> fn_anonymous__AuxMeasurementModeSupport_cpp__ReportFailure [weight=0.2];
   fn_MazeMap__App__Internal__AuxMeasurementModeSupport__WriteCorridorRepeatabilityResult -> fn_anonymous__AuxMeasurementModeSupport_cpp__WriteEvent [weight=0.2];
@@ -1039,8 +1031,18 @@ digraph MazeMapClassStructDependencies {
   fn_MazeMap__App__Internal__AuxMeasurementModeSupport__WritePositionStraightAuditResult -> fn_anonymous__AuxMeasurementModeSupport_cpp__WriteEvent [weight=0.2];
   fn_MazeMap__App__Internal__AuxMeasurementModeSupport__WritePositionStraightAuditResult -> fn_MazeMap__GetHeading [weight=0.2];
   fn_MazeMap__App__Internal__AuxMeasurementModeSupport__WritePositionStraightAuditResult -> class_MazeMap__VehicleState [weight=0.1];
+  class_MazeMap__App__Internal__BootFramework -> fn_digitalRead [weight=1];
+  class_MazeMap__App__Internal__BootFramework -> fn_digitalWrite [weight=1];
+  class_MazeMap__App__Internal__BootFramework -> struct_MazeMap__App__BootModeDescriptor [weight=1];
+  class_MazeMap__App__Internal__BootFramework -> struct_MazeMap__App__BootModeRegistryEntry [weight=1];
+  class_MazeMap__App__Internal__BootFramework -> class_MazeMap__App__BootModeSelectorKind [weight=0.2];
+  class_MazeMap__App__Internal__BootFramework -> class_MazeMap__App__Internal__IApplicationMode [weight=0.2];
+  class_MazeMap__App__Internal__BootFramework -> class_MazeMap__App__Internal__SharedRobotRuntime [weight=0.2];
+  class_MazeMap__App__Internal__BootFramework -> fn_micros [weight=1];
+  class_MazeMap__App__Internal__BootFramework -> fn_pinMode [weight=1];
   class_MazeMap__App__Internal__CorridorRepeatabilityMode -> fn_anonymous__CorridorRepeatabilityMode_cpp__BuildCorridorMotionLimits [weight=1];
   class_MazeMap__App__Internal__CorridorRepeatabilityMode -> fn_DirectionToUnitVector [weight=1];
+  class_MazeMap__App__Internal__CorridorRepeatabilityMode -> class_MazeMap__App__Internal__BootFramework [weight=0.2];
   class_MazeMap__App__Internal__CorridorRepeatabilityMode -> class_MazeMap__App__Internal__CommandVector [weight=0.2];
   class_MazeMap__App__Internal__CorridorRepeatabilityMode -> class_MazeMap__App__Internal__Drive [weight=0.2];
   class_MazeMap__App__Internal__CorridorRepeatabilityMode -> class_MazeMap__App__Internal__Drive__OperationMode [weight=0.2];
@@ -1054,7 +1056,6 @@ digraph MazeMapClassStructDependencies {
   class_MazeMap__App__Internal__CorridorRepeatabilityMode -> class_MazeMap__Maze [weight=0.2];
   class_MazeMap__App__Internal__CorridorRepeatabilityMode -> class_MazeMap__Vehicle [weight=0.2];
   class_MazeMap__App__Internal__CorridorRepeatabilityMode -> class_MazeMap__VehicleState [weight=0.2];
-  class_MazeMap__App__Internal__CorridorRepeatabilityMode -> fn_SetupHardware [weight=1];
   fn_MazeMap__App__Internal__DirectionToYawRad -> class_MazeMap__Estimator [weight=0.1];
   class_MazeMap__App__Internal__Drive -> fn_anonymous__Drive_cpp__IsLinearMotionCompleteAtExit [weight=1];
   class_MazeMap__App__Internal__Drive -> fn_anonymous__Drive_cpp__IsMotionSettled [weight=1];
@@ -1166,6 +1167,7 @@ digraph MazeMapClassStructDependencies {
   fn_MazeMap__App__Internal__GetWallSensorLedCalibrationMode -> fn_MazeMap__App__Internal__GetSharedRobotRuntime [weight=0.2];
   fn_MazeMap__App__Internal__GetWallSensorLedCalibrationMode -> class_MazeMap__App__Internal__IApplicationMode [weight=0.1];
   fn_MazeMap__App__Internal__GetWallSensorLedCalibrationMode -> class_MazeMap__App__Internal__WallSensorLedCalibrationController [weight=0.1];
+  class_MazeMap__App__Internal__IApplicationMode -> class_MazeMap__App__Internal__BootFramework [weight=0.2];
   class_MazeMap__App__Internal__IApplicationMode -> class_MazeMap__App__Internal__CommandVector [weight=0.2];
   class_MazeMap__App__Internal__IApplicationMode -> class_MazeMap__App__Internal__LoopController [weight=0.2];
   class_MazeMap__App__Internal__IApplicationMode -> class_MazeMap__VehicleState [weight=0.2];
@@ -1173,9 +1175,9 @@ digraph MazeMapClassStructDependencies {
   fn_MazeMap__App__Internal__LogWallSensorAdcRegisterWrite -> class_MazeMap__App__Internal__SharedRobotRuntime [weight=0.1];
   class_MazeMap__App__Internal__LoopController -> fn_delayMicroseconds [weight=1];
   class_MazeMap__App__Internal__LoopController -> class_MazeMap__App__Application [weight=0.2];
+  class_MazeMap__App__Internal__LoopController -> class_MazeMap__App__Internal__BootFramework [weight=0.2];
   class_MazeMap__App__Internal__LoopController -> class_MazeMap__App__Internal__CommandVector [weight=0.2];
   class_MazeMap__App__Internal__LoopController -> class_MazeMap__App__Internal__IApplicationMode [weight=0.2];
-  class_MazeMap__App__Internal__LoopController -> fn_MazeMap__App__Internal__LogWallSensorAdcRegisterWrite [weight=1];
   class_MazeMap__App__Internal__LoopController -> class_MazeMap__App__Internal__LoopController__TimingBuffer [weight=0.2];
   class_MazeMap__App__Internal__LoopController -> class_MazeMap__App__Internal__LoopController__WallMask [weight=0.2];
   class_MazeMap__App__Internal__LoopController -> class_MazeMap__App__Internal__SharedRobotRuntime [weight=0.2];
@@ -1184,12 +1186,6 @@ digraph MazeMapClassStructDependencies {
   class_MazeMap__App__Internal__LoopController -> class_MazeMap__ImuAccelObs [weight=0.2];
   class_MazeMap__App__Internal__LoopController -> class_MazeMap__Maze [weight=0.2];
   class_MazeMap__App__Internal__LoopController -> class_MazeMap__ObsClass [weight=0.2];
-  class_MazeMap__App__Internal__LoopController -> fn_MazeMap__Platform__GetWallSensorAdcCurrentCfg [weight=1];
-  class_MazeMap__App__Internal__LoopController -> fn_MazeMap__Platform__GetWallSensorAdcCurrentGc [weight=1];
-  class_MazeMap__App__Internal__LoopController -> fn_MazeMap__Platform__GetWallSensorAdcRuntimeMode [weight=1];
-  class_MazeMap__App__Internal__LoopController -> fn_MazeMap__Platform__PrepareWallSensorAdcForRead [weight=1];
-  class_MazeMap__App__Internal__LoopController -> fn_MazeMap__Platform__ReadSingleWallSensorAdcCodeFromConfiguredChannel [weight=1];
-  class_MazeMap__App__Internal__LoopController -> fn_MazeMap__Platform__ResolveWallSensorAdc1Channel [weight=1];
   class_MazeMap__App__Internal__LoopController -> class_MazeMap__RuntimeSensorSuite [weight=0.2];
   class_MazeMap__App__Internal__LoopController -> class_MazeMap__Vehicle [weight=0.2];
   class_MazeMap__App__Internal__LoopController -> class_MazeMap__VehicleState [weight=0.2];
@@ -1220,6 +1216,7 @@ digraph MazeMapClassStructDependencies {
   class_MazeMap__App__Internal__ManeuverFileTestMode -> fn_anonymous__ManeuverFileTestMode_cpp__LoadManeuverQueueFromSd [weight=1];
   class_MazeMap__App__Internal__ManeuverFileTestMode -> fn_DirectionName [weight=1];
   class_MazeMap__App__Internal__ManeuverFileTestMode -> fn_FormatManeuverCodeName [weight=1];
+  class_MazeMap__App__Internal__ManeuverFileTestMode -> class_MazeMap__App__Internal__BootFramework [weight=0.2];
   class_MazeMap__App__Internal__ManeuverFileTestMode -> class_MazeMap__App__Internal__CommandVector [weight=0.2];
   class_MazeMap__App__Internal__ManeuverFileTestMode -> class_MazeMap__App__Internal__Drive [weight=0.2];
   class_MazeMap__App__Internal__ManeuverFileTestMode -> class_MazeMap__App__Internal__Drive__OperationMode [weight=0.2];
@@ -1234,10 +1231,10 @@ digraph MazeMapClassStructDependencies {
   class_MazeMap__App__Internal__ManeuverFileTestMode -> class_MazeMap__Maze [weight=0.2];
   class_MazeMap__App__Internal__ManeuverFileTestMode -> class_MazeMap__Vehicle [weight=0.2];
   class_MazeMap__App__Internal__ManeuverFileTestMode -> class_MazeMap__VehicleState [weight=0.2];
-  class_MazeMap__App__Internal__ManeuverFileTestMode -> fn_SetupHardware [weight=1];
   class_MazeMap__App__Internal__ManeuverPrimitive -> class_MazeMap__Maneuver [weight=0.2];
   class_MazeMap__App__Internal__ManeuverPrimitive -> class_MazeMap__ManeuverInstance [weight=0.2];
   class_MazeMap__App__Internal__ManeuverPrimitive -> class_MazeMap__ManeuverPoint [weight=0.2];
+  class_MazeMap__App__Internal__MissionRunMode -> class_MazeMap__App__Internal__BootFramework [weight=0.2];
   class_MazeMap__App__Internal__MissionRunMode -> class_MazeMap__App__Internal__CommandVector [weight=0.2];
   class_MazeMap__App__Internal__MissionRunMode -> class_MazeMap__App__Internal__Drive [weight=0.2];
   class_MazeMap__App__Internal__MissionRunMode -> class_MazeMap__App__Internal__Drive__OperationMode [weight=0.2];
@@ -1247,15 +1244,11 @@ digraph MazeMapClassStructDependencies {
   class_MazeMap__App__Internal__MissionRunMode -> class_MazeMap__App__Internal__StartupCalibration [weight=0.2];
   class_MazeMap__App__Internal__MissionRunMode -> class_MazeMap__DriveBase [weight=0.2];
   class_MazeMap__App__Internal__MissionRunMode -> class_MazeMap__VehicleState [weight=0.2];
-  class_MazeMap__App__Internal__MissionRunMode -> fn_SetupHardware [weight=1];
   struct_MazeMap__App__Internal__OpenFloorMainRow -> fn_MazeMap__App__Internal__Runtime__SetVehicleState [weight=1];
   struct_MazeMap__App__Internal__OpenFloorMainRow -> fn_MazeMap__Set [weight=1];
   struct_MazeMap__App__Internal__OpenFloorMainRow -> class_MazeMap__VehicleState [weight=0.1];
   class_MazeMap__App__Internal__OpenFloorMeasurementController -> struct_DriveTelemetry [weight=1];
-  class_MazeMap__App__Internal__OpenFloorMeasurementController -> class_MazeMap__App__BootModeId [weight=0.2];
-  class_MazeMap__App__Internal__OpenFloorMeasurementController -> struct_MazeMap__App__BootModeRegistryEntry [weight=1];
-  class_MazeMap__App__Internal__OpenFloorMeasurementController -> class_MazeMap__App__BootModeSelectorKind [weight=0.2];
-  class_MazeMap__App__Internal__OpenFloorMeasurementController -> fn_MazeMap__App__FindBootModeRegistryEntry [weight=1];
+  class_MazeMap__App__Internal__OpenFloorMeasurementController -> class_MazeMap__App__Internal__BootFramework [weight=0.2];
   class_MazeMap__App__Internal__OpenFloorMeasurementController -> class_MazeMap__App__Internal__CommandVector [weight=0.2];
   class_MazeMap__App__Internal__OpenFloorMeasurementController -> class_MazeMap__App__Internal__Drive [weight=0.2];
   class_MazeMap__App__Internal__OpenFloorMeasurementController -> class_MazeMap__App__Internal__Drive__OperationMode [weight=0.2];
@@ -1286,7 +1279,6 @@ digraph MazeMapClassStructDependencies {
   class_MazeMap__App__Internal__OpenFloorMeasurementController -> class_MazeMap__Vehicle [weight=0.2];
   class_MazeMap__App__Internal__OpenFloorMeasurementController -> class_MazeMap__VehicleState [weight=0.2];
   class_MazeMap__App__Internal__OpenFloorMeasurementController -> class_SensorSnapshot [weight=0.2];
-  class_MazeMap__App__Internal__OpenFloorMeasurementController -> fn_SetupHardware [weight=1];
   class_MazeMap__App__Internal__OpenFloorMeasurementController__LaunchMeasurementRegime -> class_MazeMap__App__Internal__CommandVector [weight=0.2];
   class_MazeMap__App__Internal__OpenFloorMeasurementController__LaunchMeasurementRegime -> class_MazeMap__App__Internal__Drive [weight=0.2];
   class_MazeMap__App__Internal__OpenFloorMeasurementController__LaunchMeasurementRegime -> class_MazeMap__App__Internal__OpenFloorMeasurementController [weight=0.2];
@@ -1369,6 +1361,7 @@ digraph MazeMapClassStructDependencies {
   class_MazeMap__App__Internal__PositionAccuracyAuditMode -> fn_MazeMap__App__Internal__AuxMeasurementModeSupport__PositionAccuracyAuditStraightLimits [weight=1];
   class_MazeMap__App__Internal__PositionAccuracyAuditMode -> fn_MazeMap__App__Internal__AuxMeasurementModeSupport__PositionAccuracyAuditTurnLimits [weight=1];
   class_MazeMap__App__Internal__PositionAccuracyAuditMode -> struct_MazeMap__App__Internal__AuxMeasurementModeSupport__PositionAuditFixtureGeometry [weight=1];
+  class_MazeMap__App__Internal__PositionAccuracyAuditMode -> class_MazeMap__App__Internal__BootFramework [weight=0.2];
   class_MazeMap__App__Internal__PositionAccuracyAuditMode -> class_MazeMap__App__Internal__CommandVector [weight=0.2];
   class_MazeMap__App__Internal__PositionAccuracyAuditMode -> class_MazeMap__App__Internal__Drive [weight=0.2];
   class_MazeMap__App__Internal__PositionAccuracyAuditMode -> class_MazeMap__App__Internal__Drive__OperationMode [weight=0.2];
@@ -1382,14 +1375,11 @@ digraph MazeMapClassStructDependencies {
   class_MazeMap__App__Internal__PositionAccuracyAuditMode -> class_MazeMap__Maze [weight=0.2];
   class_MazeMap__App__Internal__PositionAccuracyAuditMode -> class_MazeMap__Vehicle [weight=0.2];
   class_MazeMap__App__Internal__PositionAccuracyAuditMode -> class_MazeMap__VehicleState [weight=0.2];
-  class_MazeMap__App__Internal__PositionAccuracyAuditMode -> fn_SetupHardware [weight=1];
   fn_MazeMap__App__Internal__Runtime__BeginDiagnosticUtilityTelemetryLog -> struct_MazeMap__App__Internal__Runtime__DiagnosticLogRow [weight=0.5];
   fn_MazeMap__App__Internal__Runtime__BeginDiagnosticUtilityTelemetryLog -> fn_MazeMap__App__Internal__Runtime__WriteDiagnosticSummaryInstructions [weight=0.2];
   fn_MazeMap__App__Internal__Runtime__BeginDiagnosticUtilityTelemetryLog -> fn_MazeMap__App__Internal__Runtime__WriteDiagnosticTuningEvents [weight=0.2];
   fn_MazeMap__App__Internal__Runtime__BeginDiagnosticUtilityTelemetryLog -> class_MazeMap__App__Internal__SharedRobotRuntime [weight=0.1];
-  fn_MazeMap__App__Internal__Runtime__BeginDiagnosticUtilityTelemetryLog -> fn_MazeMap__GetUiAccelLpf2CutoffHzForControlPeriodUs [weight=0.2];
-  fn_MazeMap__App__Internal__Runtime__BeginDiagnosticUtilityTelemetryLog -> fn_MazeMap__GetUiGyroCut213DatasheetReferenceHzForControlPeriodUs [weight=0.2];
-  fn_MazeMap__App__Internal__Runtime__BeginDiagnosticUtilityTelemetryLog -> fn_MazeMap__GetUiImuSampleRateHzForControlPeriodUs [weight=0.2];
+  fn_MazeMap__App__Internal__Runtime__BeginDiagnosticUtilityTelemetryLog -> class_MazeMap__Imu [weight=0.1];
   fn_MazeMap__App__Internal__Runtime__BeginDiagnosticUtilityTelemetryLog -> class_MazeMap__RuntimeSensorSuite [weight=0.1];
   fn_MazeMap__App__Internal__Runtime__BeginDiagnosticUtilityTelemetryLog -> fn_micros [weight=0.2];
   fn_MazeMap__App__Internal__Runtime__CaptureMmLogFailure -> class_MazeMap__mmlog__MmLogLogger [weight=0.1];
@@ -1438,6 +1428,7 @@ digraph MazeMapClassStructDependencies {
   class_MazeMap__App__Internal__SharedRobotRuntime -> fn_anonymous__SharedRobotRuntime_cpp__SetRuntimeLogErrorText [weight=1];
   class_MazeMap__App__Internal__SharedRobotRuntime -> fn_anonymous__SharedRobotRuntime_cpp__TextLogFileIsOpen [weight=1];
   class_MazeMap__App__Internal__SharedRobotRuntime -> fn_anonymous__SharedRobotRuntime_cpp__TextLogTransferBusy [weight=1];
+  class_MazeMap__App__Internal__SharedRobotRuntime -> class_MazeMap__App__Internal__BootFramework [weight=0.2];
   class_MazeMap__App__Internal__SharedRobotRuntime -> class_MazeMap__App__Internal__Drive [weight=0.2];
   class_MazeMap__App__Internal__SharedRobotRuntime -> class_MazeMap__App__Internal__LoopController [weight=0.2];
   class_MazeMap__App__Internal__SharedRobotRuntime -> class_MazeMap__App__Internal__ManeuverExecutor [weight=0.2];
@@ -1462,10 +1453,7 @@ digraph MazeMapClassStructDependencies {
   class_MazeMap__App__Internal__SharedRobotRuntime -> class_MazeMap__WallBeliefMap [weight=0.2];
   class_MazeMap__App__Internal__SharedRobotRuntime -> fn_micros [weight=1];
   class_MazeMap__App__Internal__ShowcasingDonutController -> struct_DriveTelemetry [weight=1];
-  class_MazeMap__App__Internal__ShowcasingDonutController -> class_MazeMap__App__BootModeId [weight=0.2];
-  class_MazeMap__App__Internal__ShowcasingDonutController -> struct_MazeMap__App__BootModeRegistryEntry [weight=1];
-  class_MazeMap__App__Internal__ShowcasingDonutController -> class_MazeMap__App__BootModeSelectorKind [weight=0.2];
-  class_MazeMap__App__Internal__ShowcasingDonutController -> fn_MazeMap__App__FindBootModeRegistryEntry [weight=1];
+  class_MazeMap__App__Internal__ShowcasingDonutController -> class_MazeMap__App__Internal__BootFramework [weight=0.2];
   class_MazeMap__App__Internal__ShowcasingDonutController -> class_MazeMap__App__Internal__CommandVector [weight=0.2];
   class_MazeMap__App__Internal__ShowcasingDonutController -> class_MazeMap__App__Internal__Drive [weight=0.2];
   class_MazeMap__App__Internal__ShowcasingDonutController -> class_MazeMap__App__Internal__Drive__OperationMode [weight=0.2];
@@ -1492,7 +1480,6 @@ digraph MazeMapClassStructDependencies {
   class_MazeMap__App__Internal__ShowcasingDonutController -> class_MazeMap__VehicleState [weight=0.2];
   class_MazeMap__App__Internal__ShowcasingDonutController -> class_MazeMap__WallObs [weight=0.2];
   class_MazeMap__App__Internal__ShowcasingDonutController -> class_SensorSnapshot [weight=0.2];
-  class_MazeMap__App__Internal__ShowcasingDonutController -> fn_SetupHardware [weight=1];
   class_MazeMap__App__Internal__StartupCalibration -> fn_AngleErrorRad [weight=1];
   class_MazeMap__App__Internal__StartupCalibration -> fn_DirectionToUnitVector [weight=1];
   class_MazeMap__App__Internal__StartupCalibration -> class_MazeMap__App__Internal__CommandVector [weight=0.2];
@@ -1508,6 +1495,7 @@ digraph MazeMapClassStructDependencies {
   class_MazeMap__App__Internal__StartupCalibration -> fn_MazeMap__ComputeCellInnerMinCoordinateM [weight=1];
   class_MazeMap__App__Internal__StartupCalibration -> class_MazeMap__Estimator [weight=0.2];
   class_MazeMap__App__Internal__StartupCalibration -> fn_MazeMap__GetHeading [weight=1];
+  class_MazeMap__App__Internal__StartupCalibration -> class_MazeMap__Imu [weight=0.2];
   class_MazeMap__App__Internal__StartupCalibration -> class_MazeMap__RuntimeSensorSuite [weight=0.2];
   class_MazeMap__App__Internal__StartupCalibration -> fn_MazeMap__TryComputeRobustSignalBandFromSamples [weight=1];
   class_MazeMap__App__Internal__StartupCalibration -> class_MazeMap__Vehicle [weight=0.2];
@@ -1515,11 +1503,9 @@ digraph MazeMapClassStructDependencies {
   class_MazeMap__App__Internal__StartupCalibration -> class_MazeMap__WallSensor [weight=0.2];
   class_MazeMap__App__Internal__StartupCalibration -> fn_micros [weight=1];
   class_MazeMap__App__Internal__StartupCalibration -> class_MotionLimits [weight=0.2];
+  class_MazeMap__App__Internal__StartupCalibration__SensorCalibration -> class_MazeMap__Imu [weight=0.2];
   class_MazeMap__App__Internal__TopSpeedMeasurementMode -> fn_anonymous__TopSpeedMeasurementMode_cpp__BuildTopSpeedLimits [weight=1];
-  class_MazeMap__App__Internal__TopSpeedMeasurementMode -> class_MazeMap__App__BootModeId [weight=0.2];
-  class_MazeMap__App__Internal__TopSpeedMeasurementMode -> struct_MazeMap__App__BootModeRegistryEntry [weight=1];
-  class_MazeMap__App__Internal__TopSpeedMeasurementMode -> class_MazeMap__App__BootModeSelectorKind [weight=0.2];
-  class_MazeMap__App__Internal__TopSpeedMeasurementMode -> fn_MazeMap__App__FindBootModeRegistryEntry [weight=1];
+  class_MazeMap__App__Internal__TopSpeedMeasurementMode -> class_MazeMap__App__Internal__BootFramework [weight=0.2];
   class_MazeMap__App__Internal__TopSpeedMeasurementMode -> class_MazeMap__App__Internal__CommandVector [weight=0.2];
   class_MazeMap__App__Internal__TopSpeedMeasurementMode -> class_MazeMap__App__Internal__Drive [weight=0.2];
   class_MazeMap__App__Internal__TopSpeedMeasurementMode -> class_MazeMap__App__Internal__Drive__OperationMode [weight=0.2];
@@ -1531,15 +1517,12 @@ digraph MazeMapClassStructDependencies {
   class_MazeMap__App__Internal__TopSpeedMeasurementMode -> class_MazeMap__DriveBase [weight=0.2];
   class_MazeMap__App__Internal__TopSpeedMeasurementMode -> class_MazeMap__Vehicle [weight=0.2];
   class_MazeMap__App__Internal__TopSpeedMeasurementMode -> class_MazeMap__VehicleState [weight=0.2];
-  class_MazeMap__App__Internal__TopSpeedMeasurementMode -> fn_SetupHardware [weight=1];
   class_MazeMap__App__Internal__TurnPrimitive -> fn_MazeMap__ObserveTurnWallStates [weight=1];
   class_MazeMap__App__Internal__TurnPrimitive -> struct_MazeMap__TurnWallEdgeTracker [weight=1];
   class_MazeMap__App__Internal__TurnPrimitive -> class_SensorSnapshot [weight=0.2];
   class_MazeMap__App__Internal__WallSensorLedCalibrationController -> fn_delayMicroseconds [weight=1];
   class_MazeMap__App__Internal__WallSensorLedCalibrationController -> fn_digitalWriteFast [weight=1];
-  class_MazeMap__App__Internal__WallSensorLedCalibrationController -> class_MazeMap__App__BootModeId [weight=0.2];
-  class_MazeMap__App__Internal__WallSensorLedCalibrationController -> struct_MazeMap__App__BootModeRegistryEntry [weight=1];
-  class_MazeMap__App__Internal__WallSensorLedCalibrationController -> class_MazeMap__App__BootModeSelectorKind [weight=0.2];
+  class_MazeMap__App__Internal__WallSensorLedCalibrationController -> class_MazeMap__App__Internal__BootFramework [weight=0.2];
   class_MazeMap__App__Internal__WallSensorLedCalibrationController -> class_MazeMap__App__Internal__CommandVector [weight=0.2];
   class_MazeMap__App__Internal__WallSensorLedCalibrationController -> fn_MazeMap__App__Internal__GetSharedRobotRuntime [weight=1];
   class_MazeMap__App__Internal__WallSensorLedCalibrationController -> class_MazeMap__App__Internal__IApplicationMode [weight=0.2];
@@ -1550,7 +1533,6 @@ digraph MazeMapClassStructDependencies {
   class_MazeMap__App__Internal__WallSensorLedCalibrationController -> class_MazeMap__VehicleState [weight=0.2];
   class_MazeMap__App__Internal__WallSensorLedCalibrationController -> fn_micros [weight=1];
   class_MazeMap__App__Internal__WallSensorLedCalibrationController -> fn_pinMode [weight=1];
-  class_MazeMap__App__Internal__WallSensorLedCalibrationController -> fn_SetupHardware [weight=1];
   class_MazeMap__App__Internal__WallTouch -> fn_AngleErrorRad [weight=1];
   class_MazeMap__App__Internal__WallTouch -> class_CalibrationWall [weight=0.2];
   class_MazeMap__App__Internal__WallTouch -> fn_DirectionToUnitVector [weight=1];
@@ -1601,6 +1583,7 @@ digraph MazeMapClassStructDependencies {
   class_MazeMap__AuxMeasurementController -> fn_anonymous__AuxMeasurementModeSupport_cpp__WriteEvent [weight=1];
   class_MazeMap__AuxMeasurementController -> struct_AuxMeasurementLogRow [weight=1];
   class_MazeMap__AuxMeasurementController -> fn_AuxMeasurementRoutineName [weight=1];
+  class_MazeMap__AuxMeasurementController -> class_MazeMap__App__Internal__BootFramework [weight=0.2];
   class_MazeMap__AuxMeasurementController -> class_MazeMap__App__Internal__CommandVector [weight=0.2];
   class_MazeMap__AuxMeasurementController -> class_MazeMap__App__Internal__Drive [weight=0.2];
   class_MazeMap__AuxMeasurementController -> class_MazeMap__App__Internal__Drive__OperationMode [weight=0.2];
@@ -1620,7 +1603,6 @@ digraph MazeMapClassStructDependencies {
   class_MazeMap__AuxMeasurementController -> class_MazeMap__VehicleState [weight=0.2];
   class_MazeMap__AuxMeasurementController -> fn_micros [weight=1];
   class_MazeMap__AuxMeasurementController -> fn_millis [weight=1];
-  class_MazeMap__AuxMeasurementController -> fn_SetupHardware [weight=1];
   fn_MazeMap__BuildAuxiliaryDriveLimits -> class_MazeMap__Vehicle [weight=0.1];
   fn_MazeMap__BuildAuxiliaryDriveLimits -> class_MotionLimits [weight=0.1];
   fn_MazeMap__BuildOpenFloorMeasurementFlags -> struct_MazeMap__App__Internal__ShowcasingDonutMainRow [weight=0.5];
@@ -1654,7 +1636,6 @@ digraph MazeMapClassStructDependencies {
   fn_MazeMap__ComputeCellInnerSpanM -> fn_MazeMap__ComputeCellInnerMaxCoordinateM [weight=0.2];
   fn_MazeMap__ComputeCellInnerSpanM -> fn_MazeMap__ComputeCellInnerMinCoordinateM [weight=0.2];
   fn_MazeMap__ComputeFrontWallCharacterizationStorageChecksum -> struct_MazeMap__FrontWallCharacterizationStorage [weight=0.5];
-  fn_MazeMap__ComputeGyroBiasSampleCount -> fn_MazeMap__ComputeMinimumSampleCountForDurationMs [weight=0.2];
   fn_MazeMap__ComputeMissionStartTurnClearanceM -> fn_MazeMap__ComputeMissionStartCenterAdvanceM [weight=0.2];
   fn_MazeMap__ComputeMotorSpeedConstantRadpsPerVolt -> fn_MazeMap__RpmToRadPerSecond [weight=0.2];
   fn_MazeMap__ComputeSmoothTurnYawRatePdCorrection -> struct_MazeMap__SmoothTurnYawRateControllerState [weight=0.5];
@@ -1745,6 +1726,7 @@ digraph MazeMapClassStructDependencies {
   fn_MazeMap__fresnel_sin -> fn_MazeMap__fresnel [weight=0.2];
   fn_MazeMap__fresnel_sinf -> fn_MazeMap__fresnelf [weight=0.2];
   class_MazeMap__FrontWallCharacterizationController -> fn_delay [weight=1];
+  class_MazeMap__FrontWallCharacterizationController -> class_MazeMap__App__Internal__BootFramework [weight=0.2];
   class_MazeMap__FrontWallCharacterizationController -> class_MazeMap__App__Internal__CommandVector [weight=0.2];
   class_MazeMap__FrontWallCharacterizationController -> class_MazeMap__App__Internal__Drive [weight=0.2];
   class_MazeMap__FrontWallCharacterizationController -> class_MazeMap__App__Internal__Drive__OperationMode [weight=0.2];
@@ -1764,7 +1746,6 @@ digraph MazeMapClassStructDependencies {
   class_MazeMap__FrontWallCharacterizationController -> class_MazeMap__VehicleState [weight=0.2];
   class_MazeMap__FrontWallCharacterizationController -> fn_millis [weight=1];
   class_MazeMap__FrontWallCharacterizationController -> class_SensorSnapshot [weight=0.2];
-  class_MazeMap__FrontWallCharacterizationController -> fn_SetupHardware [weight=1];
   class_MazeMap__FrontWallCharacterizationController -> fn_TryReadPersistedFrontWallCharacterization [weight=1];
   class_MazeMap__FrontWallCharacterizationController -> fn_WritePersistedFrontWallCharacterization [weight=1];
   struct_MazeMap__GeometryPrediction -> class_MazeMap__CellCoordinates [weight=0.1];
@@ -1776,30 +1757,36 @@ digraph MazeMapClassStructDependencies {
   fn_MazeMap__GetFrontRightSensorMount -> fn_MazeMap__GetSideLeftSensorMount [weight=0.2];
   fn_MazeMap__GetFrontRightSensorMount -> fn_MazeMap__GetSideRightSensorMount [weight=0.2];
   fn_MazeMap__GetSideLeftSensorMount -> fn_MazeMap__GetSideRightSensorMount [weight=0.2];
-  fn_MazeMap__GetUiAccelLpf2CutoffHzForControlPeriodUs -> fn_MazeMap__GetUiImuSampleRateHzForControlPeriodUs [weight=0.2];
-  fn_MazeMap__GetUiGyroCut213DatasheetReferenceHzForControlPeriodUs -> fn_MazeMap__SelectUiImuSamplingProfile [weight=0.2];
-  fn_MazeMap__GetUiGyroCut213DatasheetReferenceHzForControlPeriodUs -> class_MazeMap__UiImuSamplingProfile [weight=0.1];
-  fn_MazeMap__GetUiImuSampleRateHz -> class_MazeMap__UiImuSamplingProfile [weight=0.1];
-  fn_MazeMap__GetUiImuSampleRateHzForControlPeriodUs -> fn_MazeMap__GetUiImuSampleRateHz [weight=0.2];
-  fn_MazeMap__GetUiImuSampleRateHzForControlPeriodUs -> fn_MazeMap__SelectUiImuSamplingProfile [weight=0.2];
   class_MazeMap__HalfStepPath -> class_MazeMap__CellCoordinates [weight=0.2];
   class_MazeMap__HalfStepPath -> class_MazeMap__MazeLocation [weight=0.2];
   class_MazeMap__HalfStepPath -> class_MazeMap__Path [weight=0.2];
-  fn_MazeMap__HaveEncoderCountsChanged -> struct_MazeMap__EncoderCountPair [weight=0.5];
+  class_MazeMap__Imu -> struct_ImuObservationTiming [weight=1];
+  class_MazeMap__Imu -> struct_ImuTelemetry [weight=1];
+  class_MazeMap__Imu -> class_MazeMap__Imu__AccelFilterFreq [weight=0.2];
+  class_MazeMap__Imu -> class_MazeMap__LSM6DSV16X_IMU [weight=0.2];
+  class_MazeMap__Imu -> class_MazeMap__LSM6DSV16X_IMU__ACCEL_FILTER_FREQ [weight=0.2];
+  class_MazeMap__Imu -> class_MazeMap__LSM6DSV16X_IMU__ACCEL_FULLSCALE [weight=0.2];
+  class_MazeMap__Imu -> class_MazeMap__LSM6DSV16X_IMU__GYRO_FULLSCALE_RANGE [weight=0.2];
+  class_MazeMap__Imu -> class_MazeMap__LSM6DSV16X_IMU__GYRO_LPF1_MODE [weight=0.2];
+  class_MazeMap__Imu -> class_MazeMap__LSM6DSV16X_IMU__HAODR_SELECTION [weight=0.2];
+  class_MazeMap__Imu -> class_MazeMap__LSM6DSV16X_IMU__ODR_SETTING [weight=0.2];
+  class_MazeMap__Imu -> class_MazeMap__LSM6DSV16X_IMU__SELF_TEST_MODE [weight=0.2];
+  class_MazeMap__Imu -> fn_MazeMap__Math__Sqrtf [weight=1];
+  class_MazeMap__Imu -> class_MazeMap__SensorMount [weight=0.2];
+  class_MazeMap__Imu -> class_SensorSnapshot [weight=0.2];
   fn_MazeMap__IsMissionStartupStationaryFromEncoderWindow -> fn_MazeMap__IsMissionStartupStationarySample [weight=0.2];
   fn_MazeMap__IsMissionStartupStationaryFromSensors -> fn_MazeMap__IsMissionStartupStationarySample [weight=0.2];
   fn_MazeMap__IsTurningTractionLossDetected -> struct_MazeMap__TurningTractionMetrics [weight=0.5];
   fn_MazeMap__IsValidFrontWallCharacterizationStorage -> fn_MazeMap__ComputeFrontWallCharacterizationStorageChecksum [weight=0.2];
   fn_MazeMap__IsValidFrontWallCharacterizationStorage -> struct_MazeMap__FrontWallCharacterizationStorage [weight=0.5];
   fn_MazeMap__IsWithinWallSegmentCenterWindowM -> fn_MazeMap__TryComputeWallSegmentCenterWindowM [weight=0.2];
+  class_MazeMap__LSM6DSV16X_IMU -> fn_anonymous__LSM6DSV16X_IMU_cpp__BuildLsm6Dsv16xSpiSettings [weight=1];
   class_MazeMap__LSM6DSV16X_IMU -> fn_delay [weight=1];
   class_MazeMap__LSM6DSV16X_IMU -> fn_delayMicroseconds [weight=1];
   class_MazeMap__LSM6DSV16X_IMU -> fn_digitalRead [weight=1];
   class_MazeMap__LSM6DSV16X_IMU -> fn_digitalWrite [weight=1];
   class_MazeMap__LSM6DSV16X_IMU -> struct_ImuObservationTiming [weight=1];
   class_MazeMap__LSM6DSV16X_IMU -> struct_ImuTelemetry [weight=1];
-  class_MazeMap__LSM6DSV16X_IMU -> fn_MazeMap__IsAccelSelfTestDeltaValidMg [weight=1];
-  class_MazeMap__LSM6DSV16X_IMU -> fn_MazeMap__IsGyroSelfTestDeltaValidDps [weight=1];
   class_MazeMap__LSM6DSV16X_IMU -> class_MazeMap__LSM6DSV16X_IMU__ACCEL_FILTER_FREQ [weight=0.2];
   class_MazeMap__LSM6DSV16X_IMU -> class_MazeMap__LSM6DSV16X_IMU__ACCEL_FULLSCALE [weight=0.2];
   class_MazeMap__LSM6DSV16X_IMU -> class_MazeMap__LSM6DSV16X_IMU__ACCEL_MODE [weight=0.2];
@@ -1811,14 +1798,10 @@ digraph MazeMapClassStructDependencies {
   class_MazeMap__LSM6DSV16X_IMU -> class_MazeMap__LSM6DSV16X_IMU__ODR_SETTING [weight=0.2];
   class_MazeMap__LSM6DSV16X_IMU -> class_MazeMap__LSM6DSV16X_IMU__SELF_TEST_MODE [weight=0.2];
   class_MazeMap__LSM6DSV16X_IMU -> class_MazeMap__LSM6DSV16X_IMU__StatusReg [weight=0.2];
-  class_MazeMap__LSM6DSV16X_IMU -> fn_MazeMap__Math__Sqrtf [weight=1];
-  class_MazeMap__LSM6DSV16X_IMU -> fn_MazeMap__SelectUiImuSamplingProfile [weight=1];
   class_MazeMap__LSM6DSV16X_IMU -> class_MazeMap__SensorMount [weight=0.2];
-  class_MazeMap__LSM6DSV16X_IMU -> class_MazeMap__UiImuSamplingProfile [weight=0.2];
   class_MazeMap__LSM6DSV16X_IMU -> fn_micros [weight=1];
   class_MazeMap__LSM6DSV16X_IMU -> fn_millis [weight=1];
   class_MazeMap__LSM6DSV16X_IMU -> fn_pinMode [weight=1];
-  class_MazeMap__LSM6DSV16X_IMU -> class_SensorSnapshot [weight=0.2];
   class_MazeMap__Maneuver -> class_MazeMap__DirectionalLocation [weight=0.2];
   class_MazeMap__Maneuver -> fn_MazeMap__IsDiagonal [weight=1];
   class_MazeMap__Maneuver -> class_MazeMap__ManeuverPoint [weight=0.2];
@@ -2030,7 +2013,6 @@ digraph MazeMapClassStructDependencies {
   fn_MazeMap__Platform__StartBuiltinLedBlink -> fn_pinMode [weight=0.2];
   fn_MazeMap__Platform__StartRuntimeFaultIndicatorBlink -> fn_MazeMap__Platform__StartBuiltinLedBlink [weight=0.2];
   fn_MazeMap__Platform__StartStartupWaitIndicatorBlink -> fn_MazeMap__Platform__StartBuiltinLedBlink [weight=0.2];
-  fn_MazeMap__Platform__StopBuiltinLedBlink -> fn_digitalWriteFast [weight=0.2];
   fn_MazeMap__Platform__TryMountPreferredSdVolume -> fn_MazeMap__Platform__TryMountSdioVolume [weight=0.2];
   fn_MazeMap__Platform__UpdateBuiltinLedBlink -> fn_digitalWriteFast [weight=0.2];
   fn_MazeMap__Platform__WaitForWallSensorAdcIdle -> fn_MazeMap__Platform__ReadWallSensorMmio32 [weight=0.2];
@@ -2073,7 +2055,6 @@ digraph MazeMapClassStructDependencies {
   class_MazeMap__RuntimeSensorSuite__WallTelemetryAverager -> class_MazeMap__RollingAverageWindow [weight=0.2];
   class_MazeMap__RuntimeSensorSuite__WallTelemetryAverager -> class_MazeMap__RuntimeSensorSuite [weight=0.2];
   class_MazeMap__RuntimeSensorSuite__WallTelemetryAverager -> class_MazeMap__WallSensor [weight=0.2];
-  fn_MazeMap__SelectUiImuSamplingProfile -> class_MazeMap__UiImuSamplingProfile [weight=0.1];
   class_MazeMap__SensorMount -> fn_anonymous__SensorMount_cpp__BuildBodyFromSensor [weight=1];
   class_MazeMap__SensorMount -> fn_anonymous__SensorMount_cpp__DefaultForwardBody [weight=1];
   fn_MazeMap__Set -> fn_MazeMap__GetHeading [weight=0.2];
@@ -2166,7 +2147,7 @@ digraph MazeMapClassStructDependencies {
   class_MazeMap__Vehicle -> fn_MazeMap__GetFrontRightSensorMount [weight=1];
   class_MazeMap__Vehicle -> fn_MazeMap__GetSideLeftSensorMount [weight=1];
   class_MazeMap__Vehicle -> fn_MazeMap__GetSideRightSensorMount [weight=1];
-  class_MazeMap__Vehicle -> class_MazeMap__LSM6DSV16X_IMU [weight=0.2];
+  class_MazeMap__Vehicle -> class_MazeMap__Imu [weight=0.2];
   class_MazeMap__Vehicle -> fn_MazeMap__MilliAmpsToAmps [weight=1];
   class_MazeMap__Vehicle -> fn_MazeMap__MilliNewtonMetersToNewtonMeters [weight=1];
   class_MazeMap__Vehicle -> class_MazeMap__MotorEncoderDrive [weight=0.2];

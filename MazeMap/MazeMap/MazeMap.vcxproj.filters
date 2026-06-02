@@ -180,10 +180,7 @@
     <ClInclude Include="HalfStepPath.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="ImuCalibrationPolicy.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="ImuSamplingProfile.h">
+    <ClInclude Include="Imu.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Kinematics.h">
@@ -485,7 +482,13 @@
     <ClCompile Include="Fresnel.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Imu.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="Kinematics.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="LSM6DSV16X_IMU.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="LoopController.cpp">

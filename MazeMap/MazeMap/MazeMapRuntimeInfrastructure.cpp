@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "MazeMapRuntimeInfrastructure.h"
 
+#include "Imu.h"
 #include "SharedRobotRuntime.h"
 #include "RuntimeSensorSuite.h"
 
@@ -49,14 +50,15 @@ namespace MazeMap::App::Internal::Runtime
             return fail();
         }
         {
-            const unsigned long imuSampleRateHz = MazeMap::GetUiImuSampleRateHzForControlPeriodUs(Config::kControlPeriodUs);
+            const unsigned long imuSampleRateHz =
+                MazeMap::Imu::GetUiImuSampleRateHzForControlPeriodUs(Config::kControlPeriodUs);
             if (imuSampleRateHz > 0UL && !runtime.WriteUtilityDataLogMetadataUnsigned("imu_sample_rate_hz", imuSampleRateHz))
             {
                 return fail();
             }
         }
         {
-            const float imuAccelLpf2CutoffHz = MazeMap::GetUiAccelLpf2CutoffHzForControlPeriodUs(
+            const float imuAccelLpf2CutoffHz = MazeMap::Imu::GetUiAccelLpf2CutoffHzForControlPeriodUs(
                 Config::kControlPeriodUs,
                 Config::kMissionRuntimeAccelFilterFreq);
             if (imuAccelLpf2CutoffHz > 0.0f &&
@@ -67,7 +69,7 @@ namespace MazeMap::App::Internal::Runtime
         }
         {
             const float imuGyroLpf1ReferenceHz =
-                MazeMap::GetUiGyroCut213DatasheetReferenceHzForControlPeriodUs(Config::kControlPeriodUs);
+                MazeMap::Imu::GetUiGyroCut213DatasheetReferenceHzForControlPeriodUs(Config::kControlPeriodUs);
             if (imuGyroLpf1ReferenceHz > 0.0f &&
                 !runtime.WriteUtilityDataLogMetadataFloat("imu_gyro_lpf1_cut213_datasheet_ref_hz", imuGyroLpf1ReferenceHz, 3))
             {

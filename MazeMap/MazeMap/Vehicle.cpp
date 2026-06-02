@@ -116,8 +116,8 @@ namespace MazeMap
             0.30f,
             HardwareConfig::kSideWallSensorSwitchSettleTime_us,
             HardwareConfig::kSideWallSensorSwitchSettleTime_us)
-        , _frontRightImu()
-        , _backLeftImu(GetBackLeftImuMount())
+        , _frontRightImu(36U, 32U, 11U, 12U, 13U)
+        , _backLeftImu(37U, 33U, 11U, 12U, 13U, GetBackLeftImuMount())
         , _fanDuty(0.0f)
         , _peakForwardAcceleration(kVehiclePeakForwardAccelerationMps2)
         , _peakLateralAcceleration(GetSustainedLateralAccelerationReferenceMps2())

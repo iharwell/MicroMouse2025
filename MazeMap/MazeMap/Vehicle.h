@@ -4,9 +4,9 @@
 #include "Direction.h"
 #include "CircularBuffer.h"
 #include "EncoderObs.h"
+#include "Imu.h"
 #include "SensorMount.h"
 #include "WallSensor.h"
-#include "LSM6DSV16X_IMU.h"
 #include "MotorEncoderDrive.h"
 #include "MotorModelUnits.h"
 #include <cmath>
@@ -105,8 +105,8 @@ namespace MazeMap
         WallSensor _frontRightWallSensor;
         WallSensor _sideLeftWallSensor;
         WallSensor _sideRightWallSensor;
-        LSM6DSV16X_IMU<36, 32, 11, 12, 13> _frontRightImu;
-        LSM6DSV16X_IMU<37, 33, 11, 12, 13> _backLeftImu;
+        Imu _frontRightImu;
+        Imu _backLeftImu;
 
         float _fanDuty;
         float _peakForwardAcceleration;
@@ -224,10 +224,10 @@ namespace MazeMap
         const WallSensor& SideLeftWallSensor() const noexcept { return _sideLeftWallSensor; }
         WallSensor& SideRightWallSensor() noexcept { return _sideRightWallSensor; }
         const WallSensor& SideRightWallSensor() const noexcept { return _sideRightWallSensor; }
-        LSM6DSV16X_IMU<36, 32, 11, 12, 13>& FrontRightImu() noexcept { return _frontRightImu; }
-        const LSM6DSV16X_IMU<36, 32, 11, 12, 13>& FrontRightImu() const noexcept { return _frontRightImu; }
-        LSM6DSV16X_IMU<37, 33, 11, 12, 13>& BackLeftImu() noexcept { return _backLeftImu; }
-        const LSM6DSV16X_IMU<37, 33, 11, 12, 13>& BackLeftImu() const noexcept { return _backLeftImu; }
+        Imu& FrontRightImu() noexcept { return _frontRightImu; }
+        const Imu& FrontRightImu() const noexcept { return _frontRightImu; }
+        Imu& BackLeftImu() noexcept { return _backLeftImu; }
+        const Imu& BackLeftImu() const noexcept { return _backLeftImu; }
 
         static SensorMount GetBackLeftImuMount() noexcept;
         static SensorMount GetFrontLeftSensorMount() noexcept;

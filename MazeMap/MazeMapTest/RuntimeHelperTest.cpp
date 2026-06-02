@@ -10,6 +10,7 @@
 #include "..\MazeMap\RuntimeBinaryLogSupport.h"
 #include "..\MazeMap\SensorSnapshot.h"
 #include "..\MazeMap\SigmaPointSetSimplex.h"
+#include "..\MazeMap\LSM6DSV16X_IMU.h"
 #include "..\MazeMap\UKF.h"
 
 #include <cstdio>
@@ -274,10 +275,10 @@ namespace MazeMap::App
 
         TEST_METHOD(Lsm6Dsv16xGyroProjectYawConversionFlipsSensorCounterclockwiseSign)
         {
-            MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13> imu;
+            MazeMap::LSM6DSV16X_IMU imu(37U, 33U, 11U, 12U, 13U);
             constexpr int16_t rawSample = 3200;
 
-            Assert::AreEqual(-1.0f, MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::ClockwiseYawFromSensorZSign(), 1.0e-6f);
+            Assert::AreEqual(-1.0f, MazeMap::LSM6DSV16X_IMU::ClockwiseYawFromSensorZSign(), 1.0e-6f);
             Assert::AreEqual(
                 -imu.GyroRawToDps(rawSample),
                 imu.GyroRawToClockwiseYawDps(rawSample),

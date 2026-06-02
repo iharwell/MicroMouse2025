@@ -866,7 +866,7 @@ namespace MazeMap
 
     void RuntimeSensorSuite::CaptureInertialSnapshot(SensorSnapshot& snapshot)
     {
-        _vehicle.BackLeftImu().CaptureInertialSnapshot(snapshot);
+        _vehicle.BackLeftImu().CaptureRuntimeInertialSnapshot(snapshot);
     }
 
     bool RuntimeSensorSuite::UpdateFrontWallState(

@@ -2,6 +2,7 @@
 #include "StartupCalibration.h"
 
 #include "Drive.h"
+#include "Imu.h"
 #include "MazeMapRuntimeCore.h"
 #include "RuntimeSensorSuite.h"
 #include "SharedRobotRuntime.h"
@@ -340,24 +341,12 @@ namespace MazeMap::App::Internal
         _imuPhaseTicksRemaining = 0U;
         _imuSampleCountdownTicks = 0U;
         _imuRequiredSamples = 0UL;
-        _imuCollectedSamples = 0UL;
         _imuStartLeftEncoderCounts = 0;
         _imuStartRightEncoderCounts = 0;
-        _imuAccelMgSumX = 0.0;
-        _imuAccelMgSumY = 0.0;
-        _imuAccelMgSumZ = 0.0;
-        _imuGyroDpsSumX = 0.0;
-        _imuGyroDpsSumY = 0.0;
-        _imuGyroDpsSumZ = 0.0;
-        _imuGyroBiasRadpsSum = 0.0;
-        _imuAccelBiasRightGSum = 0.0;
-        _imuAccelBiasForwardGSum = 0.0;
-        _imuBaselineAccelMgX = 0.0f;
-        _imuBaselineAccelMgY = 0.0f;
-        _imuBaselineAccelMgZ = 0.0f;
-        _imuBaselineGyroDpsX = 0.0f;
-        _imuBaselineGyroDpsY = 0.0f;
-        _imuBaselineGyroDpsZ = 0.0f;
+        if (_vehicle != nullptr)
+        {
+            _vehicle->BackLeftImu().ResetCalibrationSampling();
+        }
     }
 
     void StartupCalibration::UpdateDoneState(bool& done) noexcept
@@ -502,20 +491,11 @@ namespace MazeMap::App::Internal
         const std::uint32_t sampleIntervalTicks = ImuCalibrationSampleIntervalTicks();
         const unsigned long controlPeriodUs =
             (_controlPeriodUs == 0UL) ? Config::kControlPeriodUs : _controlPeriodUs;
-        const unsigned long sampleIntervalUs =
-            static_cast<unsigned long>(sampleIntervalTicks) * controlPeriodUs;
-        if (sampleIntervalUs == 0UL)
-        {
-            return static_cast<unsigned long>(Config::kGyroBiasSamples);
-        }
-
-        const unsigned long minimumWindowUs =
-            static_cast<unsigned long>(Config::kGyroBiasMinimumAveragingWindowMs) * 1000UL;
-        const unsigned long minimumSamples =
-            (minimumWindowUs + sampleIntervalUs - 1UL) / sampleIntervalUs;
-        return (static_cast<unsigned long>(Config::kGyroBiasSamples) >= minimumSamples) ?
-            static_cast<unsigned long>(Config::kGyroBiasSamples) :
-            minimumSamples;
+        return MazeMap::Imu::ComputeRequiredStationaryBiasSamples(
+            static_cast<unsigned long>(Config::kGyroBiasSamples),
+            controlPeriodUs,
+            sampleIntervalTicks,
+            static_cast<unsigned long>(Config::kGyroBiasMinimumAveragingWindowMs));
     }
 
     void StartupCalibration::CaptureCurrentEncoderTotalsForImuCalibration() noexcept
@@ -637,7 +617,8 @@ namespace MazeMap::App::Internal
                 AccumulateCurrentImuSelfTestSample();
             }
 
-            if (_imuCollectedSamples < _imuRequiredSamples)
+            if ((_vehicle != nullptr) &&
+                (_vehicle->BackLeftImu().CalibrationCollectedSamples() < _imuRequiredSamples))
             {
                 const std::uint32_t intervalTicks = ImuCalibrationSampleIntervalTicks();
                 _imuSampleCountdownTicks = (intervalTicks > 0U) ? (intervalTicks - 1U) : 0U;
@@ -691,17 +672,18 @@ namespace MazeMap::App::Internal
         const unsigned long requiredSamples) noexcept
     {
         _imuRequiredSamples = requiredSamples;
-        _imuCollectedSamples = 0UL;
         _imuSampleCountdownTicks = 0U;
-        _imuAccelMgSumX = 0.0;
-        _imuAccelMgSumY = 0.0;
-        _imuAccelMgSumZ = 0.0;
-        _imuGyroDpsSumX = 0.0;
-        _imuGyroDpsSumY = 0.0;
-        _imuGyroDpsSumZ = 0.0;
-        _imuGyroBiasRadpsSum = 0.0;
-        _imuAccelBiasRightGSum = 0.0;
-        _imuAccelBiasForwardGSum = 0.0;
+        if (_vehicle != nullptr)
+        {
+            if ((phase == Phase::ImuBaselineSample) || (phase == Phase::ImuStimulatedSample))
+            {
+                _vehicle->BackLeftImu().BeginSelfTestSampling();
+            }
+            else if (phase == Phase::ImuBiasSample)
+            {
+                _vehicle->BackLeftImu().BeginStationaryBiasSampling();
+            }
+        }
         _phase = phase;
     }
 
@@ -712,15 +694,7 @@ namespace MazeMap::App::Internal
             return;
         }
 
-        const float accelMgPerLsb = _vehicle->BackLeftImu().AccelSensitivityMgPerLsb();
-        const float gyroDpsPerLsb = _vehicle->BackLeftImu().GyroSensitivityMdpsPerLsb() / 1000.0f;
-        _imuAccelMgSumX += static_cast<double>(_vehicle->BackLeftImu().ReadAccelX()) * accelMgPerLsb;
-        _imuAccelMgSumY += static_cast<double>(_vehicle->BackLeftImu().ReadAccelY()) * accelMgPerLsb;
-        _imuAccelMgSumZ += static_cast<double>(_vehicle->BackLeftImu().ReadAccelZ()) * accelMgPerLsb;
-        _imuGyroDpsSumX += static_cast<double>(_vehicle->BackLeftImu().ReadGyroX()) * gyroDpsPerLsb;
-        _imuGyroDpsSumY += static_cast<double>(_vehicle->BackLeftImu().ReadGyroY()) * gyroDpsPerLsb;
-        _imuGyroDpsSumZ += static_cast<double>(_vehicle->BackLeftImu().ReadGyroZ()) * gyroDpsPerLsb;
-        ++_imuCollectedSamples;
+        _vehicle->BackLeftImu().AccumulateSelfTestSample();
     }
 
     void StartupCalibration::AccumulateCurrentImuBiasSample() noexcept
@@ -730,94 +704,54 @@ namespace MazeMap::App::Internal
             return;
         }
 
-        const Eigen::Vector2f accelBodyG = _vehicle->BackLeftImu().AccelRawToBodyPlanarG(
-            _vehicle->BackLeftImu().ReadAccelX(),
-            _vehicle->BackLeftImu().ReadAccelY());
-        _imuAccelBiasRightGSum += static_cast<double>(accelBodyG.x());
-        _imuAccelBiasForwardGSum += static_cast<double>(accelBodyG.y());
-        _imuGyroBiasRadpsSum += static_cast<double>(_vehicle->BackLeftImu().ReadBodyYawRateRadps());
-        ++_imuCollectedSamples;
+        _vehicle->BackLeftImu().AccumulateStationaryBiasSample();
     }
 
     void StartupCalibration::StoreCurrentSelfTestAverageAsBaseline() noexcept
     {
-        if (_imuCollectedSamples == 0UL)
+        if (_vehicle == nullptr)
         {
-            _imuBaselineAccelMgX = 0.0f;
-            _imuBaselineAccelMgY = 0.0f;
-            _imuBaselineAccelMgZ = 0.0f;
-            _imuBaselineGyroDpsX = 0.0f;
-            _imuBaselineGyroDpsY = 0.0f;
-            _imuBaselineGyroDpsZ = 0.0f;
             return;
         }
 
-        const double normalization = 1.0 / static_cast<double>(_imuCollectedSamples);
-        _imuBaselineAccelMgX = static_cast<float>(_imuAccelMgSumX * normalization);
-        _imuBaselineAccelMgY = static_cast<float>(_imuAccelMgSumY * normalization);
-        _imuBaselineAccelMgZ = static_cast<float>(_imuAccelMgSumZ * normalization);
-        _imuBaselineGyroDpsX = static_cast<float>(_imuGyroDpsSumX * normalization);
-        _imuBaselineGyroDpsY = static_cast<float>(_imuGyroDpsSumY * normalization);
-        _imuBaselineGyroDpsZ = static_cast<float>(_imuGyroDpsSumZ * normalization);
+        _vehicle->BackLeftImu().StoreCurrentSelfTestAverageAsBaseline();
     }
 
     bool StartupCalibration::ValidateAndStoreStimulatedSelfTestAverage() noexcept
     {
-        if ((_vehicle == nullptr) || (_imuCollectedSamples == 0UL))
+        if (_vehicle == nullptr)
         {
             return false;
         }
 
-        const double normalization = 1.0 / static_cast<double>(_imuCollectedSamples);
-        const float stimulatedAccelMgX = static_cast<float>(_imuAccelMgSumX * normalization);
-        const float stimulatedAccelMgY = static_cast<float>(_imuAccelMgSumY * normalization);
-        const float stimulatedAccelMgZ = static_cast<float>(_imuAccelMgSumZ * normalization);
-        const float stimulatedGyroDpsX = static_cast<float>(_imuGyroDpsSumX * normalization);
-        const float stimulatedGyroDpsY = static_cast<float>(_imuGyroDpsSumY * normalization);
-        const float stimulatedGyroDpsZ = static_cast<float>(_imuGyroDpsSumZ * normalization);
-        const float accelDeltaMgX = std::fabs(stimulatedAccelMgX - _imuBaselineAccelMgX);
-        const float accelDeltaMgY = std::fabs(stimulatedAccelMgY - _imuBaselineAccelMgY);
-        const float accelDeltaMgZ = std::fabs(stimulatedAccelMgZ - _imuBaselineAccelMgZ);
-        const float gyroDeltaDpsX = std::fabs(stimulatedGyroDpsX - _imuBaselineGyroDpsX);
-        const float gyroDeltaDpsY = std::fabs(stimulatedGyroDpsY - _imuBaselineGyroDpsY);
-        const float gyroDeltaDpsZ = std::fabs(stimulatedGyroDpsZ - _imuBaselineGyroDpsZ);
-        const bool ok = _vehicle->BackLeftImu().SelfTestDeltasValid(
-            accelDeltaMgX,
-            accelDeltaMgY,
-            accelDeltaMgZ,
-            gyroDeltaDpsX,
-            gyroDeltaDpsY,
-            gyroDeltaDpsZ);
+        const bool ok = _vehicle->BackLeftImu().ValidateStimulatedSelfTestAverage();
         if (!ok && (_runtime != nullptr))
         {
             (void)_runtime->AppendTextLogFormatted(
                 "IMU stationary self-test failed; accel_delta_mg=[%.1f,%.1f,%.1f], gyro_delta_dps=[%.1f,%.1f,%.1f]",
-                accelDeltaMgX,
-                accelDeltaMgY,
-                accelDeltaMgZ,
-                gyroDeltaDpsX,
-                gyroDeltaDpsY,
-                gyroDeltaDpsZ);
+                _vehicle->BackLeftImu().LastSelfTestAccelDeltaMg(0U),
+                _vehicle->BackLeftImu().LastSelfTestAccelDeltaMg(1U),
+                _vehicle->BackLeftImu().LastSelfTestAccelDeltaMg(2U),
+                _vehicle->BackLeftImu().LastSelfTestGyroDeltaDps(0U),
+                _vehicle->BackLeftImu().LastSelfTestGyroDeltaDps(1U),
+                _vehicle->BackLeftImu().LastSelfTestGyroDeltaDps(2U));
         }
         return ok;
     }
 
     bool StartupCalibration::CompleteImuBiasMeasurement() noexcept
     {
-        if ((_vehicle == nullptr) || (_imuCollectedSamples == 0UL))
+        if (_vehicle == nullptr)
         {
             return false;
         }
 
-        const double normalization = 1.0 / static_cast<double>(_imuCollectedSamples);
-        const float gyroBiasRadps = static_cast<float>(_imuGyroBiasRadpsSum * normalization);
-        const float accelBiasRightG = static_cast<float>(_imuAccelBiasRightGSum * normalization);
-        const float accelBiasForwardG = static_cast<float>(_imuAccelBiasForwardGSum * normalization);
-        _vehicle->BackLeftImu().SetRuntimeCalibration(
-            gyroBiasRadps,
-            true,
-            accelBiasRightG,
-            accelBiasForwardG);
+        if (!_vehicle->BackLeftImu().CompleteStationaryBiasSampling())
+        {
+            return false;
+        }
+
+        const float gyroBiasRadps = _vehicle->BackLeftImu().RuntimeGyroBiasRadps();
         _imuCalibrationComplete = true;
         if (_runtime != nullptr)
         {

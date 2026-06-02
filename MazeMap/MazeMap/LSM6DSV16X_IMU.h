@@ -1,16 +1,11 @@
 #pragma once
 
 #include "Defines.h"
-#include "ImuSamplingProfile.h"
-#include "SensorSnapshot.h"
 #include "SensorMount.h"
 #include "SensorTelemetryTypes.h"
 
-#include <cmath>
-
-#ifdef ARDUINO_TEENSY41
-
-#include <SPI.h>
+#include <cstddef>
+#include <cstdint>
 
 #ifdef DISABLE
 #undef DISABLE
@@ -18,8 +13,7 @@
 
 namespace MazeMap
 {
-    template <int CS_PIN, int INT_PIN, int MOSI_PIN, int MISO_PIN, int CLOCK_PIN>
-    class LSM6DSV16X_IMU
+    class EXPORT LSM6DSV16X_IMU final
     {
     public:
         static constexpr uint8_t WHO_AM_I_VALUE = 0x70;
@@ -256,538 +250,73 @@ namespace MazeMap
             constexpr bool HasAccelData() const { return (data_ & STATUS_XLDA) != 0U; }
 
         private:
+            static constexpr uint8_t STATUS_TIMESTAMP_ENDCOUNT = 0x80;
+            static constexpr uint8_t STATUS_OIS_DRDY = 0x20;
+            static constexpr uint8_t STATUS_GDA_EIS = 0x10;
+            static constexpr uint8_t STATUS_AH_QVARDA = 0x08;
+            static constexpr uint8_t STATUS_TDA = 0x04;
+            static constexpr uint8_t STATUS_GDA = 0x02;
+            static constexpr uint8_t STATUS_XLDA = 0x01;
+
             uint8_t data_;
         };
 
-        explicit LSM6DSV16X_IMU(const MazeMap::SensorMount& mount = MazeMap::SensorMount()) noexcept
-            : mount_(mount)
-        {
-        }
-
-        bool Begin()
-        {
-            last_begin_failure_reason_ = BeginFailureReason::None;
-            last_who_am_i_ = 0U;
-
-            pinMode(CS_PIN, OUTPUT);
-            digitalWrite(CS_PIN, HIGH);
-            pinMode(INT_PIN, INPUT);
-
-            SPI.setMOSI(MOSI_PIN);
-            SPI.setMISO(MISO_PIN);
-            SPI.setSCK(CLOCK_PIN);
-            SPI.begin();
-
-            if (!Reset())
-            {
-                last_begin_failure_reason_ = BeginFailureReason::ResetTimeout;
-                last_who_am_i_ = ReadWhoAmI();
-                return false;
-            }
-
-            WriteRegister(CTRL3_RW_ADR, static_cast<uint8_t>(CTRL3_BDU | CTRL3_IF_INC));
-            last_who_am_i_ = ReadWhoAmI();
-            if (last_who_am_i_ != WHO_AM_I_VALUE)
-            {
-                last_begin_failure_reason_ = BeginFailureReason::WhoAmIMismatch;
-                return false;
-            }
-
-            return true;
-        }
-
-        bool ConfigureRuntimeForControlPeriod(
-            unsigned long controlPeriodUs,
-            bool enableAccel,
-            ACCEL_FILTER_FREQ accelFilterFreq)
-        {
-            switch (MazeMap::SelectUiImuSamplingProfile(controlPeriodUs))
-            {
-            case MazeMap::UiImuSamplingProfile::Exact1000Hz:
-                ConfigureUiHighAccuracyOdr(
-                    HAODR_SELECTION::EXACT_1000_2000_4000_8000,
-                    enableAccel ? ODR_SETTING::ODR_0960HZ_HP_N_LP : ODR_SETTING::DISABLE,
-                    ODR_SETTING::ODR_0960HZ_HP_N_LP);
-                ConfigureRuntimeRanges(enableAccel, accelFilterFreq);
-                return true;
-            case MazeMap::UiImuSamplingProfile::Exact2000Hz:
-                ConfigureUiHighAccuracyOdr(
-                    HAODR_SELECTION::EXACT_1000_2000_4000_8000,
-                    enableAccel ? ODR_SETTING::ODR_1920HZ_HP_N_LP : ODR_SETTING::DISABLE,
-                    ODR_SETTING::ODR_1920HZ_HP_N_LP);
-                ConfigureRuntimeRanges(enableAccel, accelFilterFreq);
-                return true;
-            default:
-                return false;
-            }
-        }
-
-        void ConfigureRuntimeRanges(bool enableAccel, ACCEL_FILTER_FREQ accelFilterFreq)
-        {
-            SetSelfTest(SELF_TEST_MODE::DISABLED, SELF_TEST_MODE::DISABLED);
-            if (enableAccel)
-            {
-                SetAccelRange(accelFilterFreq, ACCEL_FULLSCALE::G8);
-            }
-            SetGyroRange(GYRO_LPF1_MODE::CUT_213, GYRO_FULLSCALE_RANGE::DPS2000);
-        }
-
-        void DisableSelfTest()
-        {
-            SetSelfTest(SELF_TEST_MODE::DISABLED, SELF_TEST_MODE::DISABLED);
-        }
-
-        void EnablePositiveSelfTest()
-        {
-            SetSelfTest(SELF_TEST_MODE::POSITIVE, SELF_TEST_MODE::POSITIVE);
-        }
-
-        bool SelfTestDeltasValid(
-            float accelDeltaMgX,
-            float accelDeltaMgY,
-            float accelDeltaMgZ,
-            float gyroDeltaDpsX,
-            float gyroDeltaDpsY,
-            float gyroDeltaDpsZ) const noexcept
-        {
-            return IsAccelSelfTestDeltaValidMg(accelDeltaMgX) &&
-                IsAccelSelfTestDeltaValidMg(accelDeltaMgY) &&
-                IsAccelSelfTestDeltaValidMg(accelDeltaMgZ) &&
-                IsGyroSelfTestDeltaValidDps(gyroDeltaDpsX) &&
-                IsGyroSelfTestDeltaValidDps(gyroDeltaDpsY) &&
-                IsGyroSelfTestDeltaValidDps(gyroDeltaDpsZ);
-        }
-
-        void ResetRuntimeCalibration() noexcept
-        {
-            gyro_bias_radps_ = 0.0f;
-            accel_bias_right_g_ = 0.0f;
-            accel_bias_forward_g_ = 0.0f;
-            accel_bias_initialized_ = false;
-        }
-
-        void SetRuntimeCalibration(
-            float gyroBiasRadps,
-            bool accelBiasInitialized,
-            float accelBiasRightG,
-            float accelBiasForwardG) noexcept
-        {
-            gyro_bias_radps_ = std::isfinite(gyroBiasRadps) ? gyroBiasRadps : 0.0f;
-            accel_bias_initialized_ =
-                accelBiasInitialized &&
-                std::isfinite(accelBiasRightG) &&
-                std::isfinite(accelBiasForwardG);
-            if (accel_bias_initialized_)
-            {
-                accel_bias_right_g_ = accelBiasRightG;
-                accel_bias_forward_g_ = accelBiasForwardG;
-            }
-            else
-            {
-                accel_bias_right_g_ = 0.0f;
-                accel_bias_forward_g_ = 0.0f;
-            }
-        }
-
-        float RuntimeGyroBiasRadps() const noexcept
-        {
-            return gyro_bias_radps_;
-        }
-
-        bool HasRuntimeAccelBias() const noexcept
-        {
-            return accel_bias_initialized_;
-        }
-
-        float RuntimeAccelBiasRightG() const noexcept
-        {
-            return accel_bias_right_g_;
-        }
-
-        float RuntimeAccelBiasForwardG() const noexcept
-        {
-            return accel_bias_forward_g_;
-        }
-
-        bool Reset(uint32_t timeout_ms = 50U)
-        {
-            WriteRegister(CTRL3_RW_ADR, CTRL3_SW_RESET);
-
-            const uint32_t start_ms = millis();
-            while ((ReadRegister(CTRL3_RW_ADR) & CTRL3_SW_RESET) != 0U)
-            {
-                if ((millis() - start_ms) >= timeout_ms)
-                {
-                    return false;
-                }
-
-                delay(1);
-            }
-
-            return true;
-        }
-
-        uint8_t ReadWhoAmI()
-        {
-            return ReadRegister(WHO_AM_I_R_ADR);
-        }
-
-        uint8_t ReadWhoAmIWithSettings(uint32_t clock_hz, uint8_t data_mode)
-        {
-            return ReadRegisterWithSettings(WHO_AM_I_R_ADR, clock_hz, data_mode);
-        }
-
-        bool IsConnected()
-        {
-            return ReadWhoAmI() == WHO_AM_I_VALUE;
-        }
-
-        BeginFailureReason GetLastBeginFailureReason() const
-        {
-            return last_begin_failure_reason_;
-        }
-
-        const char* GetLastBeginFailureReasonName() const
-        {
-            switch (last_begin_failure_reason_)
-            {
-            case BeginFailureReason::None:
-                return "none";
-            case BeginFailureReason::ResetTimeout:
-                return "reset-timeout";
-            case BeginFailureReason::WhoAmIMismatch:
-                return "whoami-mismatch";
-            default:
-                return "unknown";
-            }
-        }
-
-        uint8_t GetLastWhoAmI() const
-        {
-            return last_who_am_i_;
-        }
-
-        void WriteRegister(uint8_t address, uint8_t data)
-        {
-            SPI.beginTransaction(GetSpiSettings());
-            Select();
-            SPI.transfer(address & kAddressMask);
-            SPI.transfer(data);
-            Deselect();
-            SPI.endTransaction();
-        }
-
-        uint8_t ReadRegister(uint8_t address)
-        {
-            SPI.beginTransaction(GetSpiSettings());
-            Select();
-            SPI.transfer(address | kReadMask);
-            const uint8_t value = SPI.transfer(0x00);
-            Deselect();
-            SPI.endTransaction();
-            return value;
-        }
-
-        uint8_t ReadRegisterWithSettings(uint8_t address, uint32_t clock_hz, uint8_t data_mode)
-        {
-            SPI.beginTransaction(SPISettings(clock_hz, MSBFIRST, data_mode));
-            Select();
-            SPI.transfer(address | kReadMask);
-            const uint8_t value = SPI.transfer(0x00);
-            Deselect();
-            SPI.endTransaction();
-            return value;
-        }
-
-        void WriteRegisters(uint8_t start_address, const uint8_t *data, size_t length)
-        {
-            SPI.beginTransaction(GetSpiSettings());
-            Select();
-            SPI.transfer(start_address & kAddressMask);
-
-            for (size_t i = 0; i < length; ++i)
-            {
-                SPI.transfer(data[i]);
-            }
-
-            Deselect();
-            SPI.endTransaction();
-        }
-
-        void ReadRegisters(uint8_t start_address, uint8_t *data, size_t length)
-        {
-            SPI.beginTransaction(GetSpiSettings());
-            Select();
-            SPI.transfer(start_address | kReadMask);
-
-            for (size_t i = 0; i < length; ++i)
-            {
-                data[i] = SPI.transfer(0x00);
-            }
-
-            Deselect();
-            SPI.endTransaction();
-        }
-
-        void WriteLargeRegister(uint8_t address, uint16_t data)
-        {
-            const uint8_t bytes[2] =
-            {
-                static_cast<uint8_t>(data & 0xFFU),
-                static_cast<uint8_t>((data >> 8) & 0xFFU),
-            };
-
-            WriteRegisters(address, bytes, sizeof(bytes));
-        }
-
-        uint16_t ReadLargeRegister(uint8_t address)
-        {
-            uint8_t bytes[2] = {};
-            ReadRegisters(address, bytes, sizeof(bytes));
-            return static_cast<uint16_t>(bytes[0]) |
-                   static_cast<uint16_t>(static_cast<uint16_t>(bytes[1]) << 8U);
-        }
-
-        void SetAccelMode(ACCEL_MODE mode, ODR_SETTING odr)
-        {
-            WriteRegister(CTRL1_RW_ADR, ToU8(mode) | ToU8(odr));
-        }
-
-        void ConfigureUiHighAccuracyOdr(HAODR_SELECTION selection, ODR_SETTING accelOdr, ODR_SETTING gyroOdr)
-        {
-            WriteRegister(CTRL1_RW_ADR, ToU8(ACCEL_MODE::HI_ACC) | ToU8(ODR_SETTING::DISABLE));
-            WriteRegister(CTRL2_RW_ADR, ToU8(GYRO_MODE::HI_ACC) | ToU8(ODR_SETTING::DISABLE));
-            delayMicroseconds(500U);
-
-            uint8_t haodrCfg = ReadRegister(HAODR_CFG_RW_ADR);
-            haodrCfg &= static_cast<uint8_t>(~HAODR_CFG_HAODR_SEL_MASK);
-            haodrCfg |= (ToU8(selection) & HAODR_CFG_HAODR_SEL_MASK);
-            WriteRegister(HAODR_CFG_RW_ADR, haodrCfg);
-            delayMicroseconds(500U);
-
-            WriteRegister(CTRL2_RW_ADR, ToU8(GYRO_MODE::HI_ACC) | ToU8(gyroOdr));
-            WriteRegister(CTRL1_RW_ADR, ToU8(ACCEL_MODE::HI_ACC) | ToU8(accelOdr));
-        }
-
-        void SetAccelRange(ACCEL_FILTER_FREQ freq, ACCEL_FULLSCALE scale)
-        {
-            accel_scale_ = scale;
-
-            const uint8_t freq_bits = ToU8(freq) & CTRL8_HP_LPF2_XL_BW_MASK;
-            WriteRegister(CTRL8_RW_ADR, freq_bits | ToU8(scale));
-
-            uint8_t ctrl9 = ReadRegister(CTRL9_RW_ADR);
-            ctrl9 &= static_cast<uint8_t>(~(CTRL9_HP_SLOPE_XL_EN | CTRL9_LPF2_XL_EN));
-
-            if (freq != ACCEL_FILTER_FREQ::FRAC_1_002)
-            {
-                ctrl9 |= CTRL9_LPF2_XL_EN;
-            }
-
-            WriteRegister(CTRL9_RW_ADR, ctrl9);
-        }
-
-        void SetGyroMode(GYRO_MODE mode, ODR_SETTING odr)
-        {
-            WriteRegister(CTRL2_RW_ADR, ToU8(mode) | ToU8(odr));
-        }
-
-        void SetGyroRange(GYRO_LPF1_MODE lpf1, GYRO_FULLSCALE_RANGE range)
-        {
-            gyro_scale_ = range;
-            WriteRegister(CTRL6_RW_ADR, ToU8(lpf1) | ToU8(range));
-        }
-
-        void SetSelfTest(SELF_TEST_MODE gyroMode, SELF_TEST_MODE accelMode)
-        {
-            const uint8_t gyroBits = static_cast<uint8_t>((ToU8(gyroMode) & 0x03U) << 2U);
-            const uint8_t accelBits = static_cast<uint8_t>(ToU8(accelMode) & 0x03U);
-            WriteRegister(CTRL10_RW_ADR, gyroBits | accelBits);
-        }
-
-        StatusReg ReadStatus()
-        {
-            return StatusReg(ReadRegister(STATUS_REG_R_ADR));
-        }
-
-        ImuTelemetry CaptureTelemetry(ImuObservationTiming* const timing = nullptr)
-        {
-            ImuTelemetry telemetry{};
-            const std::uint32_t readStartUs = micros();
-            if (timing != nullptr)
-            {
-                timing->readStartUs = readStartUs;
-                timing->drdyUs = (digitalRead(INT_PIN) == HIGH) ? readStartUs : 0UL;
-            }
-
-            const auto status = ReadStatus();
-            telemetry.status = status.Raw();
-            telemetry.gyroX = ReadGyroX();
-            telemetry.gyroY = ReadGyroY();
-            telemetry.gyroZ = ReadGyroZ();
-            telemetry.accelX = ReadAccelX();
-            telemetry.accelY = ReadAccelY();
-            telemetry.accelZ = ReadAccelZ();
-            telemetry.temp = ReadTemp();
-            telemetry.interruptHigh = (digitalRead(INT_PIN) == HIGH);
-            if (timing != nullptr)
-            {
-                timing->readDoneUs = micros();
-            }
-            return telemetry;
-        }
-
-        void CaptureInertialSnapshot(SensorSnapshot& snapshot)
-        {
-            ImuObservationTiming timing{};
-            const ImuTelemetry telemetry = CaptureTelemetry(&timing);
-            snapshot.SetFrontRightImuTelemetry(ImuTelemetry{});
-            snapshot.SetBackLeftImuTelemetry(telemetry);
-            snapshot.SetImuTiming(timing);
-
-            const float rawYawRateRadps = GyroRawToBodyYawRadps(telemetry.gyroZ);
-            const Eigen::Vector2f accelBodyG = AccelRawToBodyPlanarG(telemetry.accelX, telemetry.accelY);
-            snapshot.SetAccelerationBiasValid(accel_bias_initialized_);
-            if (accel_bias_initialized_)
-            {
-                const float accelDeltaRightG = accelBodyG.x() - accel_bias_right_g_;
-                const float accelDeltaForwardG = accelBodyG.y() - accel_bias_forward_g_;
-                snapshot.SetBodyRightAccelerationMps2(GRAVITY_MPS2 * accelDeltaRightG);
-                snapshot.SetBodyForwardAccelerationMps2(GRAVITY_MPS2 * accelDeltaForwardG);
-                snapshot.SetPlanarAccelerationMps2(
-                    GRAVITY_MPS2 * MazeMap::Math::Sqrtf(
-                        (accelDeltaRightG * accelDeltaRightG) + (accelDeltaForwardG * accelDeltaForwardG)));
-            }
-            else
-            {
-                snapshot.SetBodyRightAccelerationMps2(0.0f);
-                snapshot.SetBodyForwardAccelerationMps2(0.0f);
-                snapshot.SetPlanarAccelerationMps2(0.0f);
-            }
-
-            snapshot.SetRawYawRateRadps(rawYawRateRadps);
-            snapshot.SetYawRateBiasRadps(gyro_bias_radps_);
-            snapshot.SetYawRateRadps(rawYawRateRadps - gyro_bias_radps_);
-        }
-
-        int16_t ReadGyroX()
-        {
-            return static_cast<int16_t>(ReadLargeRegister(OUTX_L_G_R_ADR));
-        }
-
-        int16_t ReadGyroY()
-        {
-            return static_cast<int16_t>(ReadLargeRegister(OUTY_L_G_R_ADR));
-        }
-
-        int16_t ReadGyroZ()
-        {
-            return static_cast<int16_t>(ReadLargeRegister(OUTZ_L_G_R_ADR));
-        }
-
-        int16_t ReadAccelX()
-        {
-            return static_cast<int16_t>(ReadLargeRegister(OUTX_L_A_R_ADR));
-        }
-
-        int16_t ReadAccelY()
-        {
-            return static_cast<int16_t>(ReadLargeRegister(OUTY_L_A_R_ADR));
-        }
-
-        int16_t ReadAccelZ()
-        {
-            return static_cast<int16_t>(ReadLargeRegister(OUTZ_L_A_R_ADR));
-        }
-
-        int16_t ReadTemp()
-        {
-            return static_cast<int16_t>(ReadLargeRegister(OUT_TEMP_L_R_ADR));
-        }
-
-        float ReadTempC()
-        {
-            return 25.0f + (static_cast<float>(ReadTemp()) / 256.0f);
-        }
-
-        float AccelSensitivityMgPerLsb() const
-        {
-            switch (accel_scale_)
-            {
-            case ACCEL_FULLSCALE::G2:
-                return 0.061f;
-            case ACCEL_FULLSCALE::G4:
-                return 0.122f;
-            case ACCEL_FULLSCALE::G8:
-                return 0.244f;
-            case ACCEL_FULLSCALE::G16:
-            default:
-                return 0.488f;
-            }
-        }
-
-        float GyroSensitivityMdpsPerLsb() const
-        {
-            switch (gyro_scale_)
-            {
-            case GYRO_FULLSCALE_RANGE::DPS0125:
-                return 4.375f;
-            case GYRO_FULLSCALE_RANGE::DPS0250:
-                return 8.75f;
-            case GYRO_FULLSCALE_RANGE::DPS0500:
-                return 17.5f;
-            case GYRO_FULLSCALE_RANGE::DPS1000:
-                return 35.0f;
-            case GYRO_FULLSCALE_RANGE::DPS2000:
-                return 70.0f;
-            case GYRO_FULLSCALE_RANGE::DPS4000:
-            default:
-                return 140.0f;
-            }
-        }
-
-        float AccelRawToG(int16_t raw) const
-        {
-            return (static_cast<float>(raw) * AccelSensitivityMgPerLsb()) / 1000.0f;
-        }
-
-        float GyroRawToDps(int16_t raw) const
-        {
-            return (static_cast<float>(raw) * GyroSensitivityMdpsPerLsb()) / 1000.0f;
-        }
-
-        static constexpr float ClockwiseYawFromSensorZSign() noexcept
-        {
-            return -1.0f;
-        }
-
-        float GyroRawToClockwiseYawDps(int16_t raw) const
-        {
-            return ClockwiseYawFromSensorZSign() * GyroRawToDps(raw);
-        }
-
-        float GyroRawToBodyYawRadps(int16_t raw) const
-        {
-            return mount_.TransformClockwiseYawRateToBody(GyroRawToClockwiseYawDps(raw) * DEG_TO_RAD_F);
-        }
-
-        float ReadClockwiseYawDps()
-        {
-            return GyroRawToClockwiseYawDps(ReadGyroZ());
-        }
-
-        float ReadBodyYawRateRadps()
-        {
-            return GyroRawToBodyYawRadps(ReadGyroZ());
-        }
-
-        Eigen::Vector2f AccelRawToBodyPlanarG(int16_t rawX, int16_t rawY) const
-        {
-            return mount_.TransformPlanarVectorToBody(
-                Eigen::Vector2f(
-                    AccelRawToG(rawX),
-                    AccelRawToG(rawY)));
-        }
+        LSM6DSV16X_IMU(
+            uint8_t csPin,
+            uint8_t intPin,
+            uint8_t mosiPin,
+            uint8_t misoPin,
+            uint8_t clockPin,
+            const MazeMap::SensorMount& mount = MazeMap::SensorMount()) noexcept;
+
+        bool Begin();
+        bool Reset(uint32_t timeoutMs = 50U);
+
+        uint8_t ReadWhoAmI();
+        uint8_t ReadWhoAmIWithSettings(uint32_t clockHz, uint8_t dataMode);
+        bool IsConnected();
+        BeginFailureReason GetLastBeginFailureReason() const noexcept;
+        const char* GetLastBeginFailureReasonName() const noexcept;
+        uint8_t GetLastWhoAmI() const noexcept;
+
+        void WriteRegister(uint8_t address, uint8_t data);
+        uint8_t ReadRegister(uint8_t address);
+        uint8_t ReadRegisterWithSettings(uint8_t address, uint32_t clockHz, uint8_t dataMode);
+        void WriteRegisters(uint8_t startAddress, const uint8_t* data, size_t length);
+        void ReadRegisters(uint8_t startAddress, uint8_t* data, size_t length);
+        void WriteLargeRegister(uint8_t address, uint16_t data);
+        uint16_t ReadLargeRegister(uint8_t address);
+
+        void SetAccelMode(ACCEL_MODE mode, ODR_SETTING odr);
+        void ConfigureUiHighAccuracyOdr(HAODR_SELECTION selection, ODR_SETTING accelOdr, ODR_SETTING gyroOdr);
+        void SetAccelRange(ACCEL_FILTER_FREQ freq, ACCEL_FULLSCALE scale);
+        void SetGyroMode(GYRO_MODE mode, ODR_SETTING odr);
+        void SetGyroRange(GYRO_LPF1_MODE lpf1, GYRO_FULLSCALE_RANGE range);
+        void SetSelfTest(SELF_TEST_MODE gyroMode, SELF_TEST_MODE accelMode);
+
+        StatusReg ReadStatus();
+        ImuTelemetry CaptureTelemetry(ImuObservationTiming* timing = nullptr);
+
+        int16_t ReadGyroX();
+        int16_t ReadGyroY();
+        int16_t ReadGyroZ();
+        int16_t ReadAccelX();
+        int16_t ReadAccelY();
+        int16_t ReadAccelZ();
+        int16_t ReadTemp();
+        float ReadTempC();
+
+        float AccelSensitivityMgPerLsb() const noexcept;
+        float GyroSensitivityMdpsPerLsb() const noexcept;
+        float GyroFullScaleDps() const noexcept;
+        float AccelRawToG(int16_t raw) const noexcept;
+        float GyroRawToDps(int16_t raw) const noexcept;
+        static constexpr float ClockwiseYawFromSensorZSign() noexcept { return -1.0f; }
+        float GyroRawToClockwiseYawDps(int16_t raw) const noexcept;
+        float GyroRawToBodyYawRadps(int16_t raw) const noexcept;
+        float ReadClockwiseYawDps();
+        float ReadBodyYawRateRadps();
+        Eigen::Vector2f AccelRawToBodyPlanarG(int16_t rawX, int16_t rawY) const noexcept;
 
     private:
         static constexpr uint8_t kReadMask = 0x80;
@@ -803,19 +332,6 @@ namespace MazeMap
         static constexpr uint8_t CTRL9_HP_SLOPE_XL_EN = 0x10;
         static constexpr uint8_t CTRL9_LPF2_XL_EN = 0x08;
 
-        static constexpr uint8_t STATUS_TIMESTAMP_ENDCOUNT = 0x80;
-        static constexpr uint8_t STATUS_OIS_DRDY = 0x20;
-        static constexpr uint8_t STATUS_GDA_EIS = 0x10;
-        static constexpr uint8_t STATUS_AH_QVARDA = 0x08;
-        static constexpr uint8_t STATUS_TDA = 0x04;
-        static constexpr uint8_t STATUS_GDA = 0x02;
-        static constexpr uint8_t STATUS_XLDA = 0x01;
-
-        static SPISettings GetSpiSettings()
-        {
-            return SPISettings(kMaxSpiClockHz, MSBFIRST, SPI_MODE3);
-        }
-
         static constexpr uint8_t ToU8(ACCEL_MODE value) { return static_cast<uint8_t>(value); }
         static constexpr uint8_t ToU8(ODR_SETTING value) { return static_cast<uint8_t>(value); }
         static constexpr uint8_t ToU8(HAODR_SELECTION value) { return static_cast<uint8_t>(value); }
@@ -826,438 +342,18 @@ namespace MazeMap
         static constexpr uint8_t ToU8(GYRO_FULLSCALE_RANGE value) { return static_cast<uint8_t>(value); }
         static constexpr uint8_t ToU8(SELF_TEST_MODE value) { return static_cast<uint8_t>(value); }
 
-        static bool IsAccelSelfTestDeltaValidMg(float deltaMg) noexcept
-        {
-            const float absoluteDeltaMg = std::fabs(deltaMg);
-            return std::isfinite(absoluteDeltaMg) &&
-                (absoluteDeltaMg >= 50.0f) &&
-                (absoluteDeltaMg <= 1700.0f);
-        }
+        void Select() const;
+        void Deselect() const;
 
-        bool IsGyroSelfTestDeltaValidDps(float deltaDps) const noexcept
-        {
-            const float absoluteDeltaDps = std::fabs(deltaDps);
-            if (!std::isfinite(absoluteDeltaDps))
-            {
-                return false;
-            }
-
-            if (gyro_scale_ == GYRO_FULLSCALE_RANGE::DPS0250)
-            {
-                return (absoluteDeltaDps >= 20.0f) && (absoluteDeltaDps <= 80.0f);
-            }
-
-            if (gyro_scale_ == GYRO_FULLSCALE_RANGE::DPS2000)
-            {
-                return (absoluteDeltaDps >= 150.0f) && (absoluteDeltaDps <= 700.0f);
-            }
-
-            return false;
-        }
-
-        static void Select()
-        {
-            digitalWrite(CS_PIN, LOW);
-        }
-
-        static void Deselect()
-        {
-            digitalWrite(CS_PIN, HIGH);
-        }
-
-        ACCEL_FULLSCALE accel_scale_ = ACCEL_FULLSCALE::G2;
-        GYRO_FULLSCALE_RANGE gyro_scale_ = GYRO_FULLSCALE_RANGE::DPS0125;
-        BeginFailureReason last_begin_failure_reason_ = BeginFailureReason::None;
-        uint8_t last_who_am_i_ = 0U;
-        MazeMap::SensorMount mount_;
-        float gyro_bias_radps_ = 0.0f;
-        float accel_bias_right_g_ = 0.0f;
-        float accel_bias_forward_g_ = 0.0f;
-        bool accel_bias_initialized_ = false;
+        uint8_t _csPin;
+        uint8_t _intPin;
+        uint8_t _mosiPin;
+        uint8_t _misoPin;
+        uint8_t _clockPin;
+        ACCEL_FULLSCALE _accelScale = ACCEL_FULLSCALE::G2;
+        GYRO_FULLSCALE_RANGE _gyroScale = GYRO_FULLSCALE_RANGE::DPS0125;
+        BeginFailureReason _lastBeginFailureReason = BeginFailureReason::None;
+        uint8_t _lastWhoAmI = 0U;
+        MazeMap::SensorMount _mount;
     };
-
 }
-
-#else
-
-namespace MazeMap
-{
-    template <int CS_PIN, int INT_PIN, int MOSI_PIN, int MISO_PIN, int CLOCK_PIN>
-    class LSM6DSV16X_IMU
-    {
-    public:
-        enum class BeginFailureReason : uint8_t
-        {
-            None = 0U,
-        };
-
-        enum class ODR_SETTING : uint8_t
-        {
-            DISABLE = 0x00,
-            ODR_0002HZ_LP = 0x01,
-            ODR_0007HZ_HP_N = 0x02,
-            ODR_0015HZ_HP_N_LP = 0x03,
-            ODR_0030HZ_HP_N_LP = 0x04,
-            ODR_0060HZ_HP_N_LP = 0x05,
-            ODR_0120HZ_HP_N_LP = 0x06,
-            ODR_0240HZ_HP_N_LP = 0x07,
-            ODR_0480HZ_HP_N_LP = 0x08,
-            ODR_0960HZ_HP_N_LP = 0x09,
-            ODR_1920HZ_HP_N_LP = 0x0A,
-            ODR_3840HZ_HP_N_LP = 0x0B,
-            ODR_7680HZ_HP_N_LP = 0x0C,
-        };
-
-        enum class HAODR_SELECTION : uint8_t
-        {
-            NATIVE = 0x00,
-            EXACT_1000_2000_4000_8000 = 0x01,
-            EXACT_800_1600_3200_6400 = 0x02,
-        };
-
-        enum class ACCEL_FILTER_FREQ : uint8_t
-        {
-            FRAC_1_002 = 0x00,
-            FRAC_1_004 = 0x10,
-            FRAC_1_010 = 0x30,
-            FRAC_1_020 = 0x50,
-            FRAC_1_045 = 0x70,
-            FRAC_1_100 = 0x90,
-            FRAC_1_200 = 0xB0,
-            FRAC_1_400 = 0xD0,
-            FRAC_1_800 = 0xF0,
-        };
-
-        enum class ACCEL_FULLSCALE : uint8_t
-        {
-            G2 = 0x00,
-            G4 = 0x01,
-            G8 = 0x02,
-            G16 = 0x03,
-        };
-
-        enum class GYRO_LPF1_MODE : uint8_t
-        {
-            CUT_280 = 0x00,
-            CUT_213 = 0x10,
-            CUT_156 = 0x20,
-            CUT_400 = 0x30,
-            CUT_102 = 0x40,
-            CUT_058 = 0x50,
-            CUT_029 = 0x60,
-            CUT_015 = 0x70,
-        };
-
-        enum class ACCEL_MODE : uint8_t
-        {
-            DISABLE = 0x00,
-            HI_PERF = 0x00,
-            HI_ACC = 0x10,
-            ODR_TRIG = 0x30,
-            LP_MODE = 0x50,
-        };
-
-        enum class GYRO_MODE : uint8_t
-        {
-            DISABLE = 0x00,
-            HI_PERF = 0x00,
-            HI_ACC = 0x10,
-            ODR_TRIG = 0x30,
-            SLEEP_MODE = 0x40,
-            LP_MODE = 0x50,
-        };
-
-        enum class GYRO_FULLSCALE_RANGE : uint8_t
-        {
-            DPS0125 = 0x00,
-            DPS0250 = 0x01,
-            DPS0500 = 0x02,
-            DPS1000 = 0x03,
-            DPS2000 = 0x04,
-            DPS4000 = 0x0C,
-        };
-
-        enum class SELF_TEST_MODE : uint8_t
-        {
-            DISABLED = 0x00,
-            POSITIVE = 0x01,
-            NEGATIVE = 0x02,
-        };
-
-        class StatusReg
-        {
-        public:
-            constexpr explicit StatusReg(uint8_t data = 0U) : data_(data) {}
-
-            constexpr uint8_t Raw() const { return data_; }
-            constexpr bool HasTimestampOverflow() const { return false; }
-            constexpr bool HasOisData() const { return false; }
-            constexpr bool HasEisGyroData() const { return false; }
-            constexpr bool HasAhQvarData() const { return false; }
-            constexpr bool HasTemperatureData() const { return false; }
-            constexpr bool HasGyroData() const { return false; }
-            constexpr bool HasAccelData() const { return false; }
-
-        private:
-            uint8_t data_ = 0U;
-        };
-
-        explicit LSM6DSV16X_IMU(const MazeMap::SensorMount& mount = MazeMap::SensorMount()) noexcept
-            : mount_(mount)
-        {
-        }
-
-        bool Begin() { return true; }
-        bool Reset(uint32_t timeout_ms = 50U)
-        {
-            (void)timeout_ms;
-            return true;
-        }
-
-        bool ConfigureRuntimeForControlPeriod(
-            unsigned long controlPeriodUs,
-            bool enableAccel,
-            ACCEL_FILTER_FREQ accelFilterFreq)
-        {
-            (void)controlPeriodUs;
-            ConfigureRuntimeRanges(enableAccel, accelFilterFreq);
-            return true;
-        }
-
-        void ConfigureRuntimeRanges(bool enableAccel, ACCEL_FILTER_FREQ accelFilterFreq)
-        {
-            (void)accelFilterFreq;
-            if (enableAccel)
-            {
-                accel_scale_ = ACCEL_FULLSCALE::G8;
-            }
-            gyro_scale_ = GYRO_FULLSCALE_RANGE::DPS2000;
-        }
-
-        void DisableSelfTest() const {}
-        void EnablePositiveSelfTest() const {}
-        bool SelfTestDeltasValid(
-            float accelDeltaMgX,
-            float accelDeltaMgY,
-            float accelDeltaMgZ,
-            float gyroDeltaDpsX,
-            float gyroDeltaDpsY,
-            float gyroDeltaDpsZ) const noexcept
-        {
-            (void)accelDeltaMgX;
-            (void)accelDeltaMgY;
-            (void)accelDeltaMgZ;
-            (void)gyroDeltaDpsX;
-            (void)gyroDeltaDpsY;
-            (void)gyroDeltaDpsZ;
-            return true;
-        }
-
-        void ResetRuntimeCalibration() noexcept
-        {
-            gyro_bias_radps_ = 0.0f;
-            accel_bias_right_g_ = 0.0f;
-            accel_bias_forward_g_ = 0.0f;
-            accel_bias_initialized_ = false;
-        }
-
-        void SetRuntimeCalibration(
-            float gyroBiasRadps,
-            bool accelBiasInitialized,
-            float accelBiasRightG,
-            float accelBiasForwardG) noexcept
-        {
-            gyro_bias_radps_ = std::isfinite(gyroBiasRadps) ? gyroBiasRadps : 0.0f;
-            accel_bias_initialized_ =
-                accelBiasInitialized &&
-                std::isfinite(accelBiasRightG) &&
-                std::isfinite(accelBiasForwardG);
-            accel_bias_right_g_ = accel_bias_initialized_ ? accelBiasRightG : 0.0f;
-            accel_bias_forward_g_ = accel_bias_initialized_ ? accelBiasForwardG : 0.0f;
-        }
-
-        float RuntimeGyroBiasRadps() const noexcept
-        {
-            return gyro_bias_radps_;
-        }
-
-        bool HasRuntimeAccelBias() const noexcept
-        {
-            return accel_bias_initialized_;
-        }
-
-        float RuntimeAccelBiasRightG() const noexcept
-        {
-            return accel_bias_right_g_;
-        }
-
-        float RuntimeAccelBiasForwardG() const noexcept
-        {
-            return accel_bias_forward_g_;
-        }
-
-        uint8_t ReadWhoAmI() const { return 0U; }
-        uint8_t ReadWhoAmIWithSettings(uint32_t clock_hz, uint8_t data_mode) const
-        {
-            (void)clock_hz;
-            (void)data_mode;
-            return 0U;
-        }
-
-        bool IsConnected() const { return false; }
-        BeginFailureReason GetLastBeginFailureReason() const { return BeginFailureReason::None; }
-        const char* GetLastBeginFailureReasonName() const { return "stub"; }
-        uint8_t GetLastWhoAmI() const { return 0U; }
-        void SetAccelMode(ACCEL_MODE mode, ODR_SETTING odr) const
-        {
-            (void)mode;
-            (void)odr;
-        }
-        void ConfigureUiHighAccuracyOdr(HAODR_SELECTION selection, ODR_SETTING accelOdr, ODR_SETTING gyroOdr) const
-        {
-            (void)selection;
-            (void)accelOdr;
-            (void)gyroOdr;
-        }
-        void SetAccelRange(ACCEL_FILTER_FREQ freq, ACCEL_FULLSCALE scale)
-        {
-            (void)freq;
-            accel_scale_ = scale;
-        }
-        void SetGyroMode(GYRO_MODE mode, ODR_SETTING odr) const
-        {
-            (void)mode;
-            (void)odr;
-        }
-        void SetGyroRange(GYRO_LPF1_MODE lpf1, GYRO_FULLSCALE_RANGE range)
-        {
-            (void)lpf1;
-            gyro_scale_ = range;
-        }
-        void SetSelfTest(SELF_TEST_MODE gyroMode, SELF_TEST_MODE accelMode) const
-        {
-            (void)gyroMode;
-            (void)accelMode;
-        }
-
-        StatusReg ReadStatus() const { return {}; }
-
-        ImuTelemetry CaptureTelemetry(ImuObservationTiming* const timing = nullptr) const
-        {
-            (void)timing;
-            return {};
-        }
-
-        void CaptureInertialSnapshot(SensorSnapshot& snapshot)
-        {
-            snapshot.SetFrontRightImuTelemetry(ImuTelemetry{});
-            snapshot.SetBackLeftImuTelemetry(ImuTelemetry{});
-            snapshot.SetImuTiming(ImuObservationTiming{});
-            snapshot.SetBodyRightAccelerationMps2(0.0f);
-            snapshot.SetBodyForwardAccelerationMps2(0.0f);
-            snapshot.SetPlanarAccelerationMps2(0.0f);
-            snapshot.SetAccelerationBiasValid(accel_bias_initialized_);
-            snapshot.SetRawYawRateRadps(0.0f);
-            snapshot.SetYawRateBiasRadps(gyro_bias_radps_);
-            snapshot.SetYawRateRadps(-gyro_bias_radps_);
-        }
-
-        int16_t ReadGyroX() const { return 0; }
-        int16_t ReadGyroY() const { return 0; }
-        int16_t ReadGyroZ() const { return 0; }
-
-        int16_t ReadAccelX() const { return 0; }
-        int16_t ReadAccelY() const { return 0; }
-        int16_t ReadAccelZ() const { return 0; }
-
-        int16_t ReadTemp() const { return 0; }
-        float ReadTempC() const { return 25.0f; }
-        float AccelSensitivityMgPerLsb() const
-        {
-            switch (accel_scale_)
-            {
-            case ACCEL_FULLSCALE::G2:
-                return 0.061f;
-            case ACCEL_FULLSCALE::G4:
-                return 0.122f;
-            case ACCEL_FULLSCALE::G8:
-                return 0.244f;
-            case ACCEL_FULLSCALE::G16:
-            default:
-                return 0.488f;
-            }
-        }
-        float GyroSensitivityMdpsPerLsb() const
-        {
-            switch (gyro_scale_)
-            {
-            case GYRO_FULLSCALE_RANGE::DPS0125:
-                return 4.375f;
-            case GYRO_FULLSCALE_RANGE::DPS0250:
-                return 8.75f;
-            case GYRO_FULLSCALE_RANGE::DPS0500:
-                return 17.5f;
-            case GYRO_FULLSCALE_RANGE::DPS1000:
-                return 35.0f;
-            case GYRO_FULLSCALE_RANGE::DPS2000:
-                return 70.0f;
-            case GYRO_FULLSCALE_RANGE::DPS4000:
-            default:
-                return 140.0f;
-            }
-        }
-        float AccelRawToG(int16_t raw) const
-        {
-            return (static_cast<float>(raw) * AccelSensitivityMgPerLsb()) / 1000.0f;
-        }
-        float GyroRawToDps(int16_t raw) const
-        {
-            return (static_cast<float>(raw) * GyroSensitivityMdpsPerLsb()) / 1000.0f;
-        }
-
-        static constexpr float ClockwiseYawFromSensorZSign() noexcept
-        {
-            return -1.0f;
-        }
-
-        float GyroRawToClockwiseYawDps(int16_t raw) const
-        {
-            return ClockwiseYawFromSensorZSign() * GyroRawToDps(raw);
-        }
-
-        float GyroRawToBodyYawRadps(int16_t raw) const
-        {
-            return mount_.TransformClockwiseYawRateToBody(GyroRawToClockwiseYawDps(raw) * DEG_TO_RAD_F);
-        }
-
-        float ReadClockwiseYawDps() const
-        {
-            return GyroRawToClockwiseYawDps(ReadGyroZ());
-        }
-
-        float ReadBodyYawRateRadps() const
-        {
-            return GyroRawToBodyYawRadps(ReadGyroZ());
-        }
-
-        Eigen::Vector2f AccelRawToBodyPlanarG(int16_t rawX, int16_t rawY) const
-        {
-            return mount_.TransformPlanarVectorToBody(
-                Eigen::Vector2f(
-                    AccelRawToG(rawX),
-                    AccelRawToG(rawY)));
-        }
-
-    private:
-        ACCEL_FULLSCALE accel_scale_ = ACCEL_FULLSCALE::G2;
-        GYRO_FULLSCALE_RANGE gyro_scale_ = GYRO_FULLSCALE_RANGE::DPS0125;
-        MazeMap::SensorMount mount_;
-        float gyro_bias_radps_ = 0.0f;
-        float accel_bias_right_g_ = 0.0f;
-        float accel_bias_forward_g_ = 0.0f;
-        bool accel_bias_initialized_ = false;
-    };
-
-}
-
-#endif

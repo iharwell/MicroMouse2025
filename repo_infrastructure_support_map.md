@@ -189,8 +189,10 @@ The auxiliary selector entry can resolve to:
   - Hardware timing and electrical constants.
 - `MazeMap/MazeMap/TeensyLayout.h`
   - Teensy bring-up helpers: pin configuration, SPI start, encoder init, wall-sensor ADC setup, SD mounting, and status LEDs.
-- `MazeMap/MazeMap/LSM6DSV16X_IMU.h`
-  - Production IMU device driver.
+- `MazeMap/MazeMap/Imu.h` and `.cpp`
+  - Public IMU hardware/domain owner composed by `Vehicle`: runtime configuration, calibration sampling, runtime bias, and inertial snapshot capture.
+- `MazeMap/MazeMap/LSM6DSV16X_IMU.h` and `.cpp`
+  - Low-level IMU device driver for datasheet register access, raw reads, range/ODR/self-test controls, and axis/sign conversion primitives.
 
 ### Sensor and calibration infrastructure
 

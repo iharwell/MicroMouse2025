@@ -237,24 +237,8 @@ namespace MazeMap::App::Internal
         std::uint32_t _imuPhaseTicksRemaining{};
         std::uint32_t _imuSampleCountdownTicks{};
         unsigned long _imuRequiredSamples{};
-        unsigned long _imuCollectedSamples{};
         std::int64_t _imuStartLeftEncoderCounts{};
         std::int64_t _imuStartRightEncoderCounts{};
-        double _imuAccelMgSumX{};
-        double _imuAccelMgSumY{};
-        double _imuAccelMgSumZ{};
-        double _imuGyroDpsSumX{};
-        double _imuGyroDpsSumY{};
-        double _imuGyroDpsSumZ{};
-        double _imuGyroBiasRadpsSum{};
-        double _imuAccelBiasRightGSum{};
-        double _imuAccelBiasForwardGSum{};
-        float _imuBaselineAccelMgX{};
-        float _imuBaselineAccelMgY{};
-        float _imuBaselineAccelMgZ{};
-        float _imuBaselineGyroDpsX{};
-        float _imuBaselineGyroDpsY{};
-        float _imuBaselineGyroDpsZ{};
     };
 
     inline constexpr StartupCalibration::SensorCalibration operator|(

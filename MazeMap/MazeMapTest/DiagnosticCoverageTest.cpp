@@ -6,8 +6,7 @@
 #include "..\MazeMap\EncoderStallPolicy.h"
 #include "..\MazeMap\FanRampProfile.h"
 #include "..\MazeMap\FrontWallCharacterizationStorage.h"
-#include "..\MazeMap\ImuCalibrationPolicy.h"
-#include "..\MazeMap\ImuSamplingProfile.h"
+#include "..\MazeMap\Imu.h"
 #include "..\MazeMap\Maze.h"
 #include "..\MazeMap\MissionMazeExport.h"
 #include "..\MazeMap\MissionStartPolicy.h"
@@ -17,6 +16,7 @@
 #include "..\MazeMap\PlantModel.h"
 #include "..\MazeMap\RollingAverageWindow.h"
 #include "..\MazeMap\SearchRunPlanner.h"
+#include "..\MazeMap\SensorSnapshot.h"
 #include "..\MazeMap\SmoothTurnYawRateController.h"
 #include "..\MazeMap\StartupWaitProfile.h"
 #include "..\MazeMap\TrackWidthEstimate.h"
@@ -1483,75 +1483,122 @@ namespace MazeMap
 			Assert::IsTrue(std::fabs(ComputeFanRampDutyCycle(0.80f, 0UL, 0UL) - 0.80f) < 1.0e-6f);
 		}
 
-		TEST_METHOD(ComputeGyroBiasSampleCountRespectsMinimumAveragingWindow)
+		TEST_METHOD(ImuStationaryBiasSampleCountRespectsMinimumAveragingWindow)
 		{
-			Assert::AreEqual(300UL, ComputeGyroBiasSampleCount(300UL, 2UL, 500UL));
-			Assert::AreEqual(250UL, ComputeGyroBiasSampleCount(100UL, 2UL, 500UL));
-			Assert::AreEqual(125UL, ComputeGyroBiasSampleCount(100UL, 4UL, 500UL));
-		}
-
-		TEST_METHOD(HaveEncoderCountsChangedFlagsEitherWheelMotion)
-		{
-			const EncoderCountPair start{ 100, -50 };
-
-			Assert::IsFalse(HaveEncoderCountsChanged(start, EncoderCountPair{ 100, -50 }));
-			Assert::IsTrue(HaveEncoderCountsChanged(start, EncoderCountPair{ 101, -50 }));
-			Assert::IsTrue(HaveEncoderCountsChanged(start, EncoderCountPair{ 100, -49 }));
+			Assert::AreEqual(300UL, Imu::ComputeRequiredStationaryBiasSamples(300UL, 1000UL, 2U, 500UL));
+			Assert::AreEqual(250UL, Imu::ComputeRequiredStationaryBiasSamples(100UL, 1000UL, 2U, 500UL));
+			Assert::AreEqual(125UL, Imu::ComputeRequiredStationaryBiasSamples(100UL, 1000UL, 4U, 500UL));
 		}
 
 		TEST_METHOD(AccelSelfTestValidationMatchesDatasheetBand)
 		{
-			Assert::IsTrue(IsAccelSelfTestDeltaValidMg(50.0f));
-			Assert::IsTrue(IsAccelSelfTestDeltaValidMg(1700.0f));
-			Assert::IsFalse(IsAccelSelfTestDeltaValidMg(49.9f));
-			Assert::IsFalse(IsAccelSelfTestDeltaValidMg(1700.1f));
+			Assert::IsTrue(Imu::IsAccelSelfTestDeltaValidMg(50.0f));
+			Assert::IsTrue(Imu::IsAccelSelfTestDeltaValidMg(1700.0f));
+			Assert::IsFalse(Imu::IsAccelSelfTestDeltaValidMg(49.9f));
+			Assert::IsFalse(Imu::IsAccelSelfTestDeltaValidMg(1700.1f));
 		}
 
 		TEST_METHOD(GyroSelfTestValidationMatchesSupportedDatasheetBands)
 		{
-			Assert::IsTrue(IsGyroSelfTestDeltaValidDps(20.0f, 250.0f));
-			Assert::IsTrue(IsGyroSelfTestDeltaValidDps(80.0f, 250.0f));
-			Assert::IsFalse(IsGyroSelfTestDeltaValidDps(19.9f, 250.0f));
-			Assert::IsFalse(IsGyroSelfTestDeltaValidDps(80.1f, 250.0f));
-			Assert::IsTrue(IsGyroSelfTestDeltaValidDps(150.0f, 2000.0f));
-			Assert::IsTrue(IsGyroSelfTestDeltaValidDps(700.0f, 2000.0f));
-			Assert::IsFalse(IsGyroSelfTestDeltaValidDps(149.9f, 2000.0f));
-			Assert::IsFalse(IsGyroSelfTestDeltaValidDps(700.1f, 2000.0f));
-			Assert::IsFalse(IsGyroSelfTestDeltaValidDps(150.0f, 500.0f));
+			Assert::IsTrue(Imu::IsGyroSelfTestDeltaValidDps(20.0f, 250.0f));
+			Assert::IsTrue(Imu::IsGyroSelfTestDeltaValidDps(80.0f, 250.0f));
+			Assert::IsFalse(Imu::IsGyroSelfTestDeltaValidDps(19.9f, 250.0f));
+			Assert::IsFalse(Imu::IsGyroSelfTestDeltaValidDps(80.1f, 250.0f));
+			Assert::IsTrue(Imu::IsGyroSelfTestDeltaValidDps(150.0f, 2000.0f));
+			Assert::IsTrue(Imu::IsGyroSelfTestDeltaValidDps(700.0f, 2000.0f));
+			Assert::IsFalse(Imu::IsGyroSelfTestDeltaValidDps(149.9f, 2000.0f));
+			Assert::IsFalse(Imu::IsGyroSelfTestDeltaValidDps(700.1f, 2000.0f));
+			Assert::IsFalse(Imu::IsGyroSelfTestDeltaValidDps(150.0f, 500.0f));
 		}
 
-		TEST_METHOD(UiImuSamplingProfileMatchesSupportedControlPeriods)
+		TEST_METHOD(ImuSelfTestValidationUsesRuntimeGyroScale)
 		{
-			Assert::AreEqual(1000UL, GetUiImuSampleRateHzForControlPeriodUs(1000UL));
-			Assert::AreEqual(2000UL, GetUiImuSampleRateHzForControlPeriodUs(500UL));
-			Assert::AreEqual(0UL, GetUiImuSampleRateHzForControlPeriodUs(750UL));
+			Imu imu(37U, 33U, 11U, 12U, 13U);
+			imu.ConfigureRuntimeRanges(true, Imu::AccelFilterFreq::Frac1Over020);
+
+			Assert::IsTrue(imu.SelfTestDeltasValid(
+				50.0f,
+				1700.0f,
+				100.0f,
+				150.0f,
+				700.0f,
+				200.0f));
+			Assert::IsFalse(imu.SelfTestDeltasValid(
+				50.0f,
+				1700.0f,
+				100.0f,
+				149.9f,
+				700.0f,
+				200.0f));
+		}
+
+		TEST_METHOD(ImuStationaryBiasSamplingStoresRuntimeCalibration)
+		{
+			Imu imu(37U, 33U, 11U, 12U, 13U);
+			imu.ConfigureRuntimeRanges(true, Imu::AccelFilterFreq::Frac1Over020);
+			imu.BeginStationaryBiasSampling();
+			imu.AccumulateStationaryBiasSample();
+
+			Assert::IsTrue(imu.CompleteStationaryBiasSampling());
+			Assert::AreEqual(1UL, imu.CalibrationCollectedSamples());
+			Assert::AreEqual(0.0f, imu.RuntimeGyroBiasRadps(), 1.0e-6f);
+			Assert::IsTrue(imu.HasRuntimeAccelBias());
+			Assert::AreEqual(0.0f, imu.RuntimeAccelBiasRightG(), 1.0e-6f);
+			Assert::AreEqual(0.0f, imu.RuntimeAccelBiasForwardG(), 1.0e-6f);
+		}
+
+		TEST_METHOD(ImuCalibratedSnapshotAppliesYawAndPlanarAccelBias)
+		{
+			Imu imu(37U, 33U, 11U, 12U, 13U);
+			imu.SetRuntimeCalibration(0.125f, true, 0.25f, -0.5f);
+			SensorSnapshot snapshot{};
+
+			imu.CaptureRuntimeInertialSnapshot(snapshot);
+
+			Assert::IsTrue(snapshot.AccelerationBiasValid());
+			Assert::AreEqual(0.0f, snapshot.RawYawRateRadps(), 1.0e-6f);
+			Assert::AreEqual(0.125f, snapshot.YawRateBiasRadps(), 1.0e-6f);
+			Assert::AreEqual(-0.125f, snapshot.YawRateRadps(), 1.0e-6f);
+			Assert::AreEqual(-0.25f * GRAVITY_MPS2, snapshot.BodyRightAccelerationMps2(), 1.0e-5f);
+			Assert::AreEqual(0.5f * GRAVITY_MPS2, snapshot.BodyForwardAccelerationMps2(), 1.0e-5f);
+			Assert::AreEqual(
+				GRAVITY_MPS2 * std::sqrt((0.25f * 0.25f) + (0.5f * 0.5f)),
+				snapshot.PlanarAccelerationMps2(),
+				1.0e-5f);
+		}
+
+		TEST_METHOD(ImuRuntimeMetadataMatchesSupportedControlPeriods)
+		{
+			Assert::AreEqual(1000UL, Imu::GetUiImuSampleRateHzForControlPeriodUs(1000UL));
+			Assert::AreEqual(2000UL, Imu::GetUiImuSampleRateHzForControlPeriodUs(500UL));
+			Assert::AreEqual(0UL, Imu::GetUiImuSampleRateHzForControlPeriodUs(750UL));
 		}
 
 		TEST_METHOD(UiImuAccelLpf2CutoffMatchesDatasheetOdrDiv400Rule)
 		{
-			Assert::IsTrue(std::fabs(GetUiAccelLpf2CutoffHzForControlPeriodUs(1000UL) - 2.5f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(GetUiAccelLpf2CutoffHzForControlPeriodUs(500UL) - 5.0f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(GetUiAccelLpf2CutoffHzForControlPeriodUs(750UL)) < 1.0e-6f);
+			Assert::IsTrue(std::fabs(Imu::GetUiAccelLpf2CutoffHzForControlPeriodUs(1000UL) - 2.5f) < 1.0e-6f);
+			Assert::IsTrue(std::fabs(Imu::GetUiAccelLpf2CutoffHzForControlPeriodUs(500UL) - 5.0f) < 1.0e-6f);
+			Assert::IsTrue(std::fabs(Imu::GetUiAccelLpf2CutoffHzForControlPeriodUs(750UL)) < 1.0e-6f);
 		}
 
 		TEST_METHOD(UiImuAccelLpf2CutoffMatchesConfiguredFraction)
 		{
-			Assert::IsTrue(std::fabs(GetUiAccelLpf2CutoffHzForControlPeriodUs(
+			Assert::IsTrue(std::fabs(Imu::GetUiAccelLpf2CutoffHzForControlPeriodUs(
 				500UL,
-				MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::ACCEL_FILTER_FREQ::FRAC_1_020) - 100.0f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(GetUiAccelLpf2CutoffHzForControlPeriodUs(
+				Imu::AccelFilterFreq::Frac1Over020) - 100.0f) < 1.0e-6f);
+			Assert::IsTrue(std::fabs(Imu::GetUiAccelLpf2CutoffHzForControlPeriodUs(
 				500UL,
-				MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::ACCEL_FILTER_FREQ::FRAC_1_400) - 5.0f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(GetUiAccelLpf2CutoffHzForControlPeriodUs(
+				Imu::AccelFilterFreq::Frac1Over400) - 5.0f) < 1.0e-6f);
+			Assert::IsTrue(std::fabs(Imu::GetUiAccelLpf2CutoffHzForControlPeriodUs(
 				500UL,
-				MazeMap::LSM6DSV16X_IMU<37, 33, 11, 12, 13>::ACCEL_FILTER_FREQ::FRAC_1_002)) < 1.0e-6f);
+				Imu::AccelFilterFreq::Frac1Over002)) < 1.0e-6f);
 		}
 
 		TEST_METHOD(UiImuGyroCut213ReferenceMatchesDatasheetTables)
 		{
-			Assert::IsTrue(std::fabs(GetUiGyroCut213DatasheetReferenceHzForControlPeriodUs(1000UL) - 195.0f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(GetUiGyroCut213DatasheetReferenceHzForControlPeriodUs(500UL) - 210.0f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(GetUiGyroCut213DatasheetReferenceHzForControlPeriodUs(750UL)) < 1.0e-6f);
+			Assert::IsTrue(std::fabs(Imu::GetUiGyroCut213DatasheetReferenceHzForControlPeriodUs(1000UL) - 195.0f) < 1.0e-6f);
+			Assert::IsTrue(std::fabs(Imu::GetUiGyroCut213DatasheetReferenceHzForControlPeriodUs(500UL) - 210.0f) < 1.0e-6f);
+			Assert::IsTrue(std::fabs(Imu::GetUiGyroCut213DatasheetReferenceHzForControlPeriodUs(750UL)) < 1.0e-6f);
 		}
 
 		TEST_METHOD(StartupWaitIndicatorBlinksAtOneHertzWithHalfSecondDuty)

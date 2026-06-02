@@ -210,8 +210,7 @@
     <ClInclude Include="FloodFillPathFinder.h" />
     <ClInclude Include="HardwareConfig.h" />
     <ClInclude Include="HalfStepPath.h" />
-    <ClInclude Include="ImuCalibrationPolicy.h" />
-    <ClInclude Include="ImuSamplingProfile.h" />
+    <ClInclude Include="Imu.h" />
     <ClInclude Include="Kinematics.h" />
     <ClInclude Include="LedCalibrationConfig.h" />
     <ClInclude Include="LSM6DSV16X_IMU.h" />
@@ -312,7 +311,9 @@
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="EncoderProgressWatchdog.cpp" />
     <ClCompile Include="Fresnel.cpp" />
+    <ClCompile Include="Imu.cpp" />
     <ClCompile Include="Kinematics.cpp" />
+    <ClCompile Include="LSM6DSV16X_IMU.cpp" />
     <ClCompile Include="LoopController.cpp" />
     <ClCompile Include="Maneuver.cpp" />
     <ClCompile Include="ManeuverExecutor.cpp" />
