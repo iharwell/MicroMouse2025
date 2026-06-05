@@ -341,12 +341,18 @@ def parse_int(row: dict[str, str], *names: str) -> int | None:
     return None
 
 
-def corrected_gyro_radps(row: dict[str, str]) -> float | None:
+def sensor_yaw_rate_radps(row: dict[str, str]) -> float | None:
     gyro_raw = parse_float(row, "gyro_raw_radps")
-    gyro_bias = parse_float(row, "gyro_bias_radps")
     if gyro_raw is not None:
-        return gyro_raw - (gyro_bias or 0.0)
-    return parse_float(row, "gyro_radps", "current_yaw_rate_sensor_radps", "target_yaw_rate_sensor_radps", "measured_angular_speed_radps", "angular_speed_radps")
+        return gyro_raw
+    return parse_float(
+        row,
+        "current_yaw_rate_sensor_radps",
+        "target_yaw_rate_sensor_radps",
+        "measured_angular_speed_radps",
+        "angular_speed_radps",
+        "gyro_radps",
+    )
 
 
 def sensor_forward_velocity_mps(row: dict[str, str]) -> float | None:
@@ -408,8 +414,8 @@ def build_transition_sample(
         return None
     current_velocity = sensor_forward_velocity_mps(current_row)
     next_velocity = sensor_forward_velocity_mps(next_row)
-    current_yaw = corrected_gyro_radps(current_row)
-    next_yaw = corrected_gyro_radps(next_row)
+    current_yaw = sensor_yaw_rate_radps(current_row)
+    next_yaw = sensor_yaw_rate_radps(next_row)
     if (
         current_velocity is None or
         next_velocity is None or

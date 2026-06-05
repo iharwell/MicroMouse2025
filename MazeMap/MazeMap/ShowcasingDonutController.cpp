@@ -535,6 +535,14 @@ namespace MazeMap::App::Internal
         row.front_timestamp_us = sensors.FrontTiming().observationReadyUs;
         row.left_timestamp_us = sensors.LeftTiming().observationReadyUs;
         row.right_timestamp_us = sensors.RightTiming().observationReadyUs;
+        row.front_left_wall_ambient_adc = _vehicle.FrontLeftWallSensor().LatestAmbientAdcCode();
+        row.front_left_wall_lit_adc = _vehicle.FrontLeftWallSensor().LatestLitAdcCode();
+        row.front_right_wall_ambient_adc = _vehicle.FrontRightWallSensor().LatestAmbientAdcCode();
+        row.front_right_wall_lit_adc = _vehicle.FrontRightWallSensor().LatestLitAdcCode();
+        row.side_left_wall_ambient_adc = _vehicle.SideLeftWallSensor().LatestAmbientAdcCode();
+        row.side_left_wall_lit_adc = _vehicle.SideLeftWallSensor().LatestLitAdcCode();
+        row.side_right_wall_ambient_adc = _vehicle.SideRightWallSensor().LatestAmbientAdcCode();
+        row.side_right_wall_lit_adc = _vehicle.SideRightWallSensor().LatestLitAdcCode();
         row.front_left_obs_class = static_cast<std::uint8_t>(frontLeftObs.Class());
         row.front_right_obs_class = static_cast<std::uint8_t>(frontRightObs.Class());
         row.left_obs_class = static_cast<std::uint8_t>(leftObs.Class());

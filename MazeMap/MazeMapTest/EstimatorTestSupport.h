@@ -62,7 +62,7 @@ namespace MazeMap
 
         if (std::isfinite(snapshot.RawYawRateRadps()))
         {
-            if (!estimator.updateYawRate(snapshot.RawYawRateRadps()))
+            if (!estimator.updateYawRate(snapshot.YawRateRadps()))
             {
                 return;
             }

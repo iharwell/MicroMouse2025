@@ -243,14 +243,14 @@
     <ClCompile Include="EstimatorBiasAndStationaryTest.cpp" />
     <ClCompile Include="EstimatorModeAndDiagnosticsTest.cpp" />
     <ClCompile Include="EstimatorActiveCommandStorageTest.cpp" />
-    <ClCompile Include="EstimatorBiasedYawRateUpdateTest.cpp" />
+    <ClCompile Include="EstimatorCorrectedYawRateUpdateTest.cpp" />
     <ClCompile Include="EstimatorControlDirectionTrackingTest.cpp" />
     <ClCompile Include="EstimatorDirectEncoderUpdateTest.cpp" />
     <ClCompile Include="EstimatorFeedforwardRuntimeTest.cpp" />
     <ClCompile Include="EstimatorLatestEncoderUpdateTest.cpp" />
     <ClCompile Include="EstimatorLaunchEncoderYawUpdateTest.cpp" />
     <ClCompile Include="EstimatorMovingEncoderUpdateTest.cpp" />
-    <ClCompile Include="EstimatorMovingPredictGyroBiasTest.cpp" />
+    <ClCompile Include="EstimatorMovingPredictResidualTest.cpp" />
     <ClCompile Include="EstimatorOpposedControlUpdateTest.cpp" />
     <ClCompile Include="EstimatorRejectedEncoderUpdateTest.cpp" />
     <ClCompile Include="EstimatorSplitCommandPredictTest.cpp" />

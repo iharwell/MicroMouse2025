@@ -42,8 +42,7 @@ namespace MazeMap
                 << L"\nlateral_velocity_mps=" << state.GetRightwardVelocity()
                 << L"\nyaw_rate_radps=" << state.GetYawRate()
                 << L"\nleft_wheel_speed_radps=" << state.GetWheelSpeedLeft()
-                << L"\nright_wheel_speed_radps=" << state.GetWheelSpeedRight()
-                << L"\ngyro_bias_z_radps=" << state.GetGyroBiasZ();
+                << L"\nright_wheel_speed_radps=" << state.GetWheelSpeedRight();
         }
 
         float MaxPreProjectionUtilizationForBank(
@@ -197,7 +196,6 @@ namespace MazeMap
             state.SetYawRate(0.0f);
             state.SetWheelSpeedLeft(Vehicle::WheelSpeedFromLinearVelocity(1.0f));
             state.SetWheelSpeedRight(Vehicle::WheelSpeedFromLinearVelocity(1.0f));
-            state.SetGyroBiasZ(0.0f);
             PlantModel plant(vehicle, state);
             constexpr float dtSeconds = 0.001f;
 
@@ -249,7 +247,6 @@ namespace MazeMap
             state.SetYawRate(0.0f);
             state.SetWheelSpeedLeft(Vehicle::WheelSpeedFromLinearVelocity(1.0f));
             state.SetWheelSpeedRight(Vehicle::WheelSpeedFromLinearVelocity(1.0f));
-            state.SetGyroBiasZ(0.0f);
             PlantModel plant(vehicle, state);
 
             float peakAccelerationMps2 = 0.0f;
@@ -743,7 +740,6 @@ namespace MazeMap
             state.SetYawRate(0.0f);
             state.SetWheelSpeedLeft(0.0f);
             state.SetWheelSpeedRight(0.0f);
-            state.SetGyroBiasZ(0.12f);
             PlantModel plant(vehicle, state);
 
             const App::Internal::CommandVector control{};
@@ -1498,19 +1494,6 @@ namespace MazeMap
 
             Assert::IsTrue(
                 std::isfinite(state.GetWheelSpeedRight()),
-                message.str().c_str());
-        }
-
-        TEST_METHOD(DifferentialWheelSpinGyroBiasStaysFinite)
-        {
-            const VehicleState state = IntegrateDifferentialWheelSpin();
-            std::wstringstream message;
-            message << L"DifferentialWheelSpinGyroBiasStaysFinite"
-                << L"\nactual=" << state.GetGyroBiasZ()
-                << L"\ncriterion=isfinite(actual)";
-
-            Assert::IsTrue(
-                std::isfinite(state.GetGyroBiasZ()),
                 message.str().c_str());
         }
 
@@ -3956,18 +3939,6 @@ namespace MazeMap
             Assert::AreEqual(0.21f, state.GetHeading(), 1.0e-7f, message.str().c_str());
         }
 
-        TEST_METHOD(ExactRestHoldPreservesGyroBias)
-        {
-            const VehicleState state = IntegrateExactRestHold();
-            std::wstringstream message;
-            message << L"ExactRestHoldPreservesGyroBias"
-                << L"\nexpected=0.12"
-                << L"\nactual=" << state.GetGyroBiasZ()
-                << L"\ntolerance=1e-7";
-
-            Assert::AreEqual(0.12f, state.GetGyroBiasZ(), 1.0e-7f, message.str().c_str());
-        }
-
         TEST_METHOD(ExactRestHoldForwardVelocityStaysZero)
         {
             const VehicleState state = IntegrateExactRestHold();
@@ -5000,19 +4971,6 @@ namespace MazeMap
             std::wstringstream message;
             message << L"MixedSlipStateRightWheelSpeedIsFinite"
                 << L"\nfield=right_wheel_speed_radps"
-                << L"\nactual=" << actual
-                << L"\ncriterion=isfinite(actual)";
-
-            Assert::IsTrue(std::isfinite(actual), message.str().c_str());
-        }
-
-        TEST_METHOD(MixedSlipStateGyroBiasIsFinite)
-        {
-            const MixedSlipMeasurement measurement = MeasureMixedSlipCommand();
-            const float actual = measurement.state.GetGyroBiasZ();
-            std::wstringstream message;
-            message << L"MixedSlipStateGyroBiasIsFinite"
-                << L"\nfield=gyro_bias_z_radps"
                 << L"\nactual=" << actual
                 << L"\ncriterion=isfinite(actual)";
 

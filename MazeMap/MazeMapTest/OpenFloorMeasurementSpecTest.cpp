@@ -1,7 +1,10 @@
 #include "pch.h"
 #include "CppUnitTest.h"
 
+#include "..\MazeMap\OpenFloorMeasurementController.h"
 #include "..\MazeMap\OpenFloorMeasurementSpec.h"
+
+#include <string>
 
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
@@ -117,6 +120,17 @@ namespace MazeMap
         TEST_METHOD(RecoveryArrivalHeadingToleranceIsOneDegree)
         {
             Assert::AreEqual(1.0f * DEG_TO_RAD_F, MazeMap::kOpenFloorRecoveryArrivalHeadingToleranceRad, 1.0e-6f);
+        }
+
+        TEST_METHOD(OpenFloorMainLogSchemaKeepsSensorYawBiasFieldsOutOfUkfState)
+        {
+            const std::string header =
+                App::Internal::Runtime::OpenFloorMainRow::header_cstr();
+
+            Assert::IsTrue(header.find("gyro_raw_radps") != std::string::npos);
+            Assert::IsTrue(header.find("gyro_bias_radps") != std::string::npos);
+            Assert::IsTrue(header.find("gyro_radps") != std::string::npos);
+            Assert::IsTrue(header.find("ukf_state_gyro_bias_z_radps") == std::string::npos);
         }
     };
 }

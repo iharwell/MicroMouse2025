@@ -35,7 +35,7 @@ namespace
     constexpr uint32_t kDefaultOpenFloorUkfBenchmarkIterations = 200000U;
     constexpr uint32_t kOpenFloorUkfBenchmarkWarmupIterations = 2048U;
     constexpr float kOpenFloorUkfBenchmarkDtSeconds = 0.001f;
-    constexpr float kOpenFloorUkfBenchmarkStationaryGyroRawRadps = 0.015f;
+    constexpr float kOpenFloorUkfBenchmarkStationaryYawRateRadps = 0.015f;
 
     void ResetOpenFloorBenchmarkUkf(MazeMap::Estimator& ukf)
     {
@@ -48,7 +48,7 @@ namespace
         const MazeMap::App::Internal::CommandVector& control,
         const MazeMap::EncoderObs& encoderObservation,
         const MazeMap::ImuAccelObs& accelObservation,
-        float rawGyroRadps)
+        float yawRateRadps)
     {
         if (!ukf.predict(dtSeconds, control))
         {
@@ -60,7 +60,7 @@ namespace
             return false;
         }
 
-        if (!ukf.updateYawRate(rawGyroRadps))
+        if (!ukf.updateYawRate(yawRateRadps))
         {
             return false;
         }
@@ -123,7 +123,7 @@ namespace
                     control,
                     encoderObservation,
                     accelObservation,
-                    kOpenFloorUkfBenchmarkStationaryGyroRawRadps))
+                    kOpenFloorUkfBenchmarkStationaryYawRateRadps))
             {
                 std::cerr << "Open-floor UKF warmup failed at iteration " << index << "\n";
                 return 1;
@@ -144,7 +144,7 @@ namespace
                     control,
                     encoderObservation,
                     accelObservation,
-                    kOpenFloorUkfBenchmarkStationaryGyroRawRadps))
+                    kOpenFloorUkfBenchmarkStationaryYawRateRadps))
             {
                 std::cerr << "Open-floor UKF benchmark failed at iteration " << index << "\n";
                 return 1;
@@ -165,7 +165,7 @@ namespace
         std::cout << "  iterations: " << iterations << "\n";
         std::cout << "  dt_seconds: " << kOpenFloorUkfBenchmarkDtSeconds << "\n";
         std::cout << "  fan_duty: " << vehicle.GetFanDuty() << "\n";
-        std::cout << "  raw_gyro_radps: " << kOpenFloorUkfBenchmarkStationaryGyroRawRadps << "\n";
+        std::cout << "  yaw_rate_radps: " << kOpenFloorUkfBenchmarkStationaryYawRateRadps << "\n";
         std::cout << "  elapsed_ms: " << elapsedMs.count() << "\n";
         std::cout << "  us_per_iteration: " << microsecondsPerIteration << "\n";
         std::cout << "  final_state:"
@@ -177,7 +177,6 @@ namespace
             << " yaw_rate=" << state.GetYawRate()
             << " left_wheel_speed=" << state.GetWheelSpeedLeft()
             << " right_wheel_speed=" << state.GetWheelSpeedRight()
-            << " yaw_rate_bias=" << state.GetGyroBiasZ()
             << "\n";
         return 0;
     }

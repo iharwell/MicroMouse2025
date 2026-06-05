@@ -87,8 +87,6 @@ namespace MazeMap
         _sqrtFrontNoise(0, 0) = 0.010f;
         _sqrtFrontNoise(1, 1) = 0.010f;
         _sqrtSideNoise(0, 0) = 0.012f;
-        _yawRateBiasAnchorRadps = _runtimeState.GetGyroBiasZ();
-        _yawRateBiasAnchorVarianceRadps2 = _runtimeState.GetGyroBiasZVar();
         _prePredictState = _workingFilter.state();
         _prePredictCovariance = _workingFilter.covariance();
         _runtimeState.SetCurrentCommand(_lastControl);
@@ -155,20 +153,6 @@ namespace MazeMap
         _sqrtProcessNoiseDensity = BuildProcessNoiseSquareRoot();
         _workingFilter.setProcessNoiseSquareRoot(_sqrtProcessNoiseDensity);
 
-        _yawRateBiasAnchorRadps = _runtimeState.GetGyroBiasZ();
-        _yawRateBiasAnchorVarianceRadps2 = _runtimeState.GetGyroBiasZVar();
-        if (!std::isfinite(_yawRateBiasAnchorVarianceRadps2) || !(_yawRateBiasAnchorVarianceRadps2 > 0.0f))
-        {
-            _yawRateBiasAnchorVarianceRadps2 = kYawRateBiasInitialVarianceUnseededRadps2;
-        }
-        _runtimeState.SetGyroBiasZVar(_yawRateBiasAnchorVarianceRadps2);
-
-        _initialStationaryYawRateBiasPhaseExited = false;
-        _initialStationaryYawRateBiasSeedApplied = false;
-        _biasUpdateEnabled = false;
-        _initialStationaryYawRateBiasSampleOrdinal = 0U;
-        _initialStationaryYawRateBiasCollectedSeedSamples = 0U;
-        _initialStationaryYawRateBiasSeedAccumRadps = 0.0;
         _runtimeState.SetForwardAcceleration(0.0f);
         _runtimeState.SetRightAcceleration(0.0f);
         _runtimeState.SetYawAccel(0.0f);
@@ -396,18 +380,6 @@ namespace MazeMap
                 kEstimatorSideNoiseFieldNames,
                 _sqrtSideNoise,
                 0))
-        {
-            return false;
-        }
-
-        if (!EmitDebugTextLine(
-                context,
-                sink,
-                "estimator_dump_yaw_rate_bias",
-                "yaw_rate_bias_anchor_radps=%.9g;yaw_rate_bias_var_radps2=%.9g;bias_update_enabled=%s",
-                static_cast<double>(_yawRateBiasAnchorRadps),
-                static_cast<double>(_yawRateBiasAnchorVarianceRadps2),
-                _biasUpdateEnabled ? "true" : "false"))
         {
             return false;
         }
@@ -1030,23 +1002,14 @@ namespace MazeMap
 
         const Eigen::Matrix<float, VehicleState::kDimension, 1> priorState = _workingFilter.state();
         const Eigen::Matrix<float, VehicleState::kDimension, VehicleState::kDimension> priorSqrtCovariance = _workingFilter.sqrtCovariance();
-        const float yawRateBiasRadps = _runtimeState.GetGyroBiasZ();
-        _measurementYawRateBiasRadps = std::isfinite(yawRateBiasRadps) ? yawRateBiasRadps : 0.0f;
         _lastYawRateMeasurementRadps = yawRateRadps;
-        const float correctedYawRateMeasurementRadps = yawRateRadps - _measurementYawRateBiasRadps;
-        _lastYawRateInnovationRadps =
-            correctedYawRateMeasurementRadps - priorState(VehicleState::kYawRate);
+        _lastYawRateInnovationRadps = yawRateRadps - priorState(VehicleState::kYawRate);
 
         Eigen::Matrix<float, 1, 1> measurement_vec;
-        measurement_vec << correctedYawRateMeasurementRadps;
+        measurement_vec << yawRateRadps;
         Eigen::Matrix<float, 1, 1> sqrtNoise;
         float yawRateMeasurementVariance =
-            YawRateMeasurementVarianceRadps2(correctedYawRateMeasurementRadps);
-        const float yawRateBiasVarianceRadps2 = _runtimeState.GetGyroBiasZVar();
-        if (std::isfinite(yawRateBiasVarianceRadps2) && (yawRateBiasVarianceRadps2 > 0.0f))
-        {
-            yawRateMeasurementVariance += yawRateBiasVarianceRadps2;
-        }
+            YawRateMeasurementVarianceRadps2(yawRateRadps);
         const float gyroFilterCutoffHz = Vehicle::GetBackLeftImuRuntimeGyroLpfCutoffHz();
         if (std::isfinite(gyroFilterCutoffHz) && (gyroFilterCutoffHz > 0.0f))
         {
@@ -1112,7 +1075,6 @@ namespace MazeMap
             _workingFilter.setStateSquareRootCovariance(projectedState, projectedSqrtCovariance);
 
             updateStationaryCertification(yawRateRadps);
-            updateInitialStationaryYawRateBias(yawRateRadps, _stationaryCertified);
         }
         return _lastUpdateAccepted;
     }
@@ -1378,7 +1340,7 @@ namespace MazeMap
             std::isfinite(_lastEncoderObs.RightWheelSpeedRadps()) &&
             std::fabs(_lastEncoderObs.RightWheelSpeedRadps()) < kStationaryCandidateMaxEncoderWheelSpeedRadps &&
             std::isfinite(yawRateRadps) &&
-            std::fabs(correctedYawRateRadps(yawRateRadps)) < kStationaryCandidateMaxCorrectedGyroRadps;
+            std::fabs(yawRateRadps) < kStationaryCandidateMaxYawRateRadps;
     }
 
     void Estimator::updateStationaryCertification(float yawRateRadps) noexcept
@@ -1395,101 +1357,6 @@ namespace MazeMap
             _stationaryCandidateDwellS = 0.0f;
         }
         _stationaryCertified = _stationaryCandidateDwellS >= kStationaryCertificationDwellS;
-    }
-
-    float Estimator::correctedYawRateRadps(float yawRateRawRadps) const noexcept
-    {
-        if (!std::isfinite(yawRateRawRadps))
-        {
-            return 0.0f;
-        }
-
-        const float yawRateBiasRadps = _runtimeState.GetGyroBiasZ();
-        return yawRateRawRadps - (std::isfinite(yawRateBiasRadps) ? yawRateBiasRadps : 0.0f);
-    }
-
-    void Estimator::updateInitialStationaryYawRateBias(
-        float yawRateRadps,
-        bool stationaryCertified) noexcept
-    {
-        _biasUpdateEnabled = false;
-        if (_initialStationaryYawRateBiasPhaseExited)
-        {
-            return;
-        }
-
-        const bool startupStationaryTick =
-            stationaryCertified;
-        if (!startupStationaryTick)
-        {
-            if (!isStationaryCandidate(yawRateRadps))
-            {
-                _initialStationaryYawRateBiasPhaseExited = true;
-            }
-            return;
-        }
-
-        if (!std::isfinite(yawRateRadps))
-        {
-            return;
-        }
-
-        if (_initialStationaryYawRateBiasSampleOrdinal < (std::numeric_limits<std::uint16_t>::max)())
-        {
-            ++_initialStationaryYawRateBiasSampleOrdinal;
-        }
-
-        if ((_initialStationaryYawRateBiasSampleOrdinal >= kInitialStationaryYawRateBiasSeedStartSample) &&
-            (_initialStationaryYawRateBiasSampleOrdinal <= kInitialStationaryYawRateBiasSeedEndSample))
-        {
-            _initialStationaryYawRateBiasSeedAccumRadps += static_cast<double>(yawRateRadps);
-            if (_initialStationaryYawRateBiasCollectedSeedSamples < (std::numeric_limits<std::uint16_t>::max)())
-            {
-                ++_initialStationaryYawRateBiasCollectedSeedSamples;
-            }
-        }
-
-        const float measurementVarianceRadps2 = YawRateMeasurementVarianceRadps2(yawRateRadps);
-        if (!_initialStationaryYawRateBiasSeedApplied)
-        {
-            if ((_initialStationaryYawRateBiasSampleOrdinal >= kInitialStationaryYawRateBiasSeedEndSample) &&
-                (_initialStationaryYawRateBiasCollectedSeedSamples > 0U))
-            {
-                _yawRateBiasAnchorRadps = static_cast<float>(
-                    _initialStationaryYawRateBiasSeedAccumRadps /
-                    static_cast<double>(_initialStationaryYawRateBiasCollectedSeedSamples));
-                _yawRateBiasAnchorVarianceRadps2 = kYawRateBiasInitialVarianceUnseededRadps2;
-                _runtimeState.SetGyroBiasZ(_yawRateBiasAnchorRadps);
-                _runtimeState.SetGyroBiasZVar(_yawRateBiasAnchorVarianceRadps2);
-                _initialStationaryYawRateBiasSeedApplied = true;
-                _biasUpdateEnabled = true;
-            }
-            return;
-        }
-
-        const float priorVarianceRadps2 =
-            (std::isfinite(_yawRateBiasAnchorVarianceRadps2) && (_yawRateBiasAnchorVarianceRadps2 > 0.0f)) ?
-            _yawRateBiasAnchorVarianceRadps2 :
-            kYawRateBiasInitialVarianceUnseededRadps2;
-        const float predictedVarianceRadps2 =
-            priorVarianceRadps2 + kYawRateBiasProcessVarianceStationaryRadps2PerSample;
-        const float innovationVarianceRadps2 = predictedVarianceRadps2 + measurementVarianceRadps2;
-        if (!(std::isfinite(predictedVarianceRadps2) && std::isfinite(innovationVarianceRadps2)) ||
-            !(innovationVarianceRadps2 > 0.0f))
-        {
-            return;
-        }
-
-        const float kalmanGain = (std::clamp)(predictedVarianceRadps2 / innovationVarianceRadps2, 0.0f, 1.0f);
-        _yawRateBiasAnchorRadps += kalmanGain * (yawRateRadps - _yawRateBiasAnchorRadps);
-        _yawRateBiasAnchorVarianceRadps2 = (1.0f - kalmanGain) * predictedVarianceRadps2;
-        if (!std::isfinite(_yawRateBiasAnchorVarianceRadps2) || !(_yawRateBiasAnchorVarianceRadps2 > 0.0f))
-        {
-            _yawRateBiasAnchorVarianceRadps2 = kYawRateBiasInitialVarianceUnseededRadps2;
-        }
-        _runtimeState.SetGyroBiasZ(_yawRateBiasAnchorRadps);
-        _runtimeState.SetGyroBiasZVar(_yawRateBiasAnchorVarianceRadps2);
-        _biasUpdateEnabled = true;
     }
 
     float Estimator::wallNoiseFromConfidence(float confidence, float minimumNoise) noexcept
@@ -1839,10 +1706,6 @@ namespace MazeMap
         state(VehicleState::kPx) = std::isfinite(xMeters) ? xMeters : 0.0f;
         state(VehicleState::kPy) = std::isfinite(yMeters) ? yMeters : 0.0f;
         state(VehicleState::kHeading) = WrapAngleRad(headingRad);
-        if (!std::isfinite(_runtimeState.GetGyroBiasZ()))
-        {
-            _runtimeState.SetGyroBiasZ(0.0f);
-        }
 
         ClearFault();
         const bool ok = reset(state, BuildDefaultInitialCovariance());
@@ -1861,12 +1724,6 @@ namespace MazeMap
         // Sorting note: this owns only the estimator state restore. Encoder consumption,
         // controller reset, and braking remain DriveBase concerns and are not translated here.
         return ResetForSessionTransition(xMeters, yMeters, headingRad);
-    }
-
-    bool Estimator::SetGyroBiasZ(float gyroBiasRadps) noexcept
-    {
-        _runtimeState.SetGyroBiasZ(std::isfinite(gyroBiasRadps) ? gyroBiasRadps : 0.0f);
-        return true;
     }
 
     void Estimator::ResetRuntimeMetadata() noexcept

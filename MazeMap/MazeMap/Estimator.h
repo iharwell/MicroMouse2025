@@ -49,7 +49,6 @@ namespace MazeMap
         bool ResetPose(float xMeters, float yMeters, float headingRad) noexcept;
         bool ResetForSessionTransition(float xMeters, float yMeters, float headingRad) noexcept;
         bool RestoreSessionStartPhysicalState(float xMeters, float yMeters, float headingRad) noexcept;
-        bool SetGyroBiasZ(float gyroBiasRadps) noexcept;
 
         bool WriteDebugTextDump(
             void* context,
@@ -163,7 +162,7 @@ namespace MazeMap
         static constexpr float kStationaryCertificationDwellS = 0.150f;
         static constexpr float kStationaryCandidateMaxDriveCommand = 0.08f;
         static constexpr float kStationaryCandidateMaxEncoderWheelSpeedRadps = 1.0f;
-        static constexpr float kStationaryCandidateMaxCorrectedGyroRadps = 0.12f;
+        static constexpr float kStationaryCandidateMaxYawRateRadps = 0.12f;
         static constexpr float kGeneralEncoderLinearSpeedSigmaMps = 0.021187f;
         static constexpr float kGeneralEncoderYawRateSigmaRadps = 0.111268f;
         static constexpr float kEncoderBodyNisThreshold = 13.81551f;
@@ -175,8 +174,6 @@ namespace MazeMap
         static constexpr float kImuYawRateSigmaRadps = 0.0010954451f;
         // LSM6DSV16X datasheet sensitivity tolerance for the runtime DPS2000 gyro range.
         static constexpr float kImuGyroSensitivityToleranceFraction = 0.003f;
-        static constexpr float kYawRateBiasProcessVarianceStationaryRadps2PerSample = 3.0e-16f;
-        static constexpr float kYawRateBiasInitialVarianceUnseededRadps2 = 3.05e-4f;
         static constexpr float kImuAccelSigmaMps2 = 0.569900f;
         static constexpr float kTimingUncertaintySeconds = 0.00035f;
         static constexpr float kResidualForwardBaseSigmaSsMps2 = 0.010f;
@@ -200,8 +197,6 @@ namespace MazeMap
         static constexpr std::uint32_t kMaxCredibleWallTimingDeltaUs = 20000U;
         static constexpr float kMinimumVelocityVariance = 1.0e-8f;
         static constexpr float kMinimumYawRateVariance = 1.0e-8f;
-        static constexpr std::uint16_t kInitialStationaryYawRateBiasSeedStartSample = 50U;
-        static constexpr std::uint16_t kInitialStationaryYawRateBiasSeedEndSample = 150U;
 
         template <typename Sink>
         static bool InvokeTypedDebugSink(
@@ -289,11 +284,7 @@ namespace MazeMap
 
         bool controlCommandsAreEffectivelyZero() const noexcept;
         bool isStationaryCandidate(float yawRateRadps) const noexcept;
-        void updateInitialStationaryYawRateBias(
-            float yawRateRadps,
-            bool stationaryCertified) noexcept;
         void updateStationaryCertification(float yawRateRadps) noexcept;
-        float correctedYawRateRadps(float yawRateRawRadps) const noexcept;
         float runtimeFanDuty() const noexcept;
         float runtimeBatteryVoltage() const noexcept;
         void ResetRuntimeMetadata() noexcept;
@@ -350,19 +341,10 @@ namespace MazeMap
         Eigen::Matrix<float, 3, 3> _sqrtImuNoise = Eigen::Matrix<float, 3, 3>::Identity();
         Eigen::Matrix<float, 2, 2> _sqrtFrontNoise = Eigen::Matrix<float, 2, 2>::Identity();
         Eigen::Matrix<float, 1, 1> _sqrtSideNoise = Eigen::Matrix<float, 1, 1>::Identity();
-        float _yawRateBiasAnchorRadps = 0.0f;
-        float _yawRateBiasAnchorVarianceRadps2 = 3.05e-4f;
-        bool _initialStationaryYawRateBiasPhaseExited = false;
-        bool _initialStationaryYawRateBiasSeedApplied = false;
-        bool _biasUpdateEnabled = false;
-        std::uint16_t _initialStationaryYawRateBiasSampleOrdinal = 0U;
-        std::uint16_t _initialStationaryYawRateBiasCollectedSeedSamples = 0U;
-        double _initialStationaryYawRateBiasSeedAccumRadps = 0.0;
         float _stationaryCandidateDwellS = 0.0f;
         bool _stationaryCertified = false;
         bool _predictionUsesEncoderInput = false;
         EncoderObs _predictionEncoderInput{};
-        float _measurementYawRateBiasRadps = 0.0f;
         const Maze* _measurementMaze = nullptr;
         SensorMount _measurementSensor{};
         float _measurementNoHitRangeM = 0.0f;

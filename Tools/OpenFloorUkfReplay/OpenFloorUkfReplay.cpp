@@ -30,6 +30,7 @@
     constexpr const char* kAggregateMetricsFileName = "aggregate_metrics.json";
     constexpr const char* kFeedforwardPathSummaryFileName = "feedforward_path_summary.csv";
     constexpr float kRadiansToDegrees = 57.295779513082320876f;
+    constexpr float kDegreesToRadians = 0.01745329251994329577f;
     constexpr float kWheelVelocitySensorBoundMps = 0.06f;
     constexpr float kYawRateSensorBoundRadps = 0.03f;
 
@@ -98,16 +99,42 @@
         float rightPlantCommand = 0.0f;
         std::int32_t leftEncoderCount = 0;
         std::int32_t rightEncoderCount = 0;
+        float leftEncoderDistanceM = 0.0f;
+        float rightEncoderDistanceM = 0.0f;
+        float leftEncoderDistanceDeltaM = 0.0f;
+        float rightEncoderDistanceDeltaM = 0.0f;
         float leftEncoderWheelSpeedRadps = 0.0f;
         float rightEncoderWheelSpeedRadps = 0.0f;
         float leftEncoderVelocityMps = 0.0f;
         float rightEncoderVelocityMps = 0.0f;
+        bool encoderKinematicsValid = false;
+        std::uint8_t imuStatus = 0U;
+        std::int16_t imuGyroX = 0;
+        std::int16_t imuGyroY = 0;
+        std::int16_t imuGyroZ = 0;
+        std::int16_t imuAccelX = 0;
+        std::int16_t imuAccelY = 0;
+        std::int16_t imuAccelZ = 0;
+        std::int16_t imuTemp = 0;
+        float imuGyroMdpsPerLsb = std::numeric_limits<float>::quiet_NaN();
+        float imuAccelMgPerLsb = std::numeric_limits<float>::quiet_NaN();
         bool accelBiasValid = false;
         float gyroRawRadps = std::numeric_limits<float>::quiet_NaN();
-        float gyroCorrectedRadps = std::numeric_limits<float>::quiet_NaN();
+        float gyroRawDebugRadps = std::numeric_limits<float>::quiet_NaN();
+        float gyroBiasDebugRadps = std::numeric_limits<float>::quiet_NaN();
+        float correctedYawRateRadps = std::numeric_limits<float>::quiet_NaN();
         float accelBodyRightMps2 = std::numeric_limits<float>::quiet_NaN();
         float accelBodyForwardMps2 = std::numeric_limits<float>::quiet_NaN();
         float planarAccelMps2 = std::numeric_limits<float>::quiet_NaN();
+        std::uint16_t frontLeftWallAmbientAdc = 0U;
+        std::uint16_t frontLeftWallLitAdc = 0U;
+        std::uint16_t frontRightWallAmbientAdc = 0U;
+        std::uint16_t frontRightWallLitAdc = 0U;
+        std::uint16_t sideLeftWallAmbientAdc = 0U;
+        std::uint16_t sideLeftWallLitAdc = 0U;
+        std::uint16_t sideRightWallAmbientAdc = 0U;
+        std::uint16_t sideRightWallLitAdc = 0U;
+        bool wallAdcPresent = false;
         float fanDutyCycle = 0.0f;
     };
 
@@ -374,7 +401,6 @@
         ErrorStats yawRateRadps;
         ErrorStats leftWheelSpeedRadps;
         ErrorStats rightWheelSpeedRadps;
-        ErrorStats gyroBiasRadps;
 
         void merge(const ConsistencyMetrics& other) noexcept
         {
@@ -385,7 +411,6 @@
             yawRateRadps.merge(other.yawRateRadps);
             leftWheelSpeedRadps.merge(other.leftWheelSpeedRadps);
             rightWheelSpeedRadps.merge(other.rightWheelSpeedRadps);
-            gyroBiasRadps.merge(other.gyroBiasRadps);
         }
     };
 
@@ -579,6 +604,20 @@
         return true;
     }
 
+    static bool ParseInt16(const std::string& text, std::int16_t& value) noexcept
+    {
+        std::int32_t parsed = 0;
+        if (!ParseInt32(text, parsed) ||
+            (parsed < static_cast<std::int32_t>((std::numeric_limits<std::int16_t>::min)())) ||
+            (parsed > static_cast<std::int32_t>((std::numeric_limits<std::int16_t>::max)())))
+        {
+            return false;
+        }
+
+        value = static_cast<std::int16_t>(parsed);
+        return true;
+    }
+
     static bool ParseFloat(const std::string& text, float& value) noexcept
     {
         char* end = nullptr;
@@ -605,6 +644,127 @@
         }
 
         token = tokens[it->second];
+        return true;
+    }
+
+    template <typename T, typename Parser>
+    static bool ParseFieldIfPresent(
+        const std::vector<std::string>& tokens,
+        const std::unordered_map<std::string, std::size_t>& indices,
+        const char* fieldName,
+        T& value,
+        Parser&& parser,
+        bool& present,
+        std::string& error)
+    {
+        std::string token;
+        if (!GetToken(tokens, indices, fieldName, token))
+        {
+            return true;
+        }
+
+        present = true;
+        if (!parser(token, value))
+        {
+            error = std::string("Failed to parse CSV field: ") + fieldName + " value=" + token;
+            return false;
+        }
+
+        return true;
+    }
+
+    template <typename T, typename Parser>
+    static bool ParseFieldIfPresent(
+        const std::vector<std::string>& tokens,
+        const std::unordered_map<std::string, std::size_t>& indices,
+        const char* fieldName,
+        T& value,
+        Parser&& parser,
+        std::string& error)
+    {
+        bool present = false;
+        return ParseFieldIfPresent(tokens, indices, fieldName, value, std::forward<Parser>(parser), present, error);
+    }
+
+    static float RawImuZToBodyYawRateRadps(
+        const std::int16_t rawGyroZ,
+        const float gyroSensitivityMdpsPerLsb) noexcept
+    {
+        if (!std::isfinite(gyroSensitivityMdpsPerLsb) || (gyroSensitivityMdpsPerLsb <= 0.0f))
+        {
+            return std::numeric_limits<float>::quiet_NaN();
+        }
+
+        constexpr float kClockwiseYawFromSensorZSign = -1.0f;
+        return
+            kClockwiseYawFromSensorZSign *
+            static_cast<float>(rawGyroZ) *
+            gyroSensitivityMdpsPerLsb *
+            0.001f *
+            kDegreesToRadians;
+    }
+
+    static bool DeriveEncoderKinematicsFromCounts(std::vector<LoggedRow>& rows, std::string& error)
+    {
+        for (std::size_t index = 0; index < rows.size(); ++index)
+        {
+            LoggedRow& row = rows[index];
+            row.leftEncoderDistanceM =
+                MazeMap::Vehicle::DriveEncoderDistanceFromCounts(static_cast<std::int64_t>(row.leftEncoderCount));
+            row.rightEncoderDistanceM =
+                MazeMap::Vehicle::DriveEncoderDistanceFromCounts(static_cast<std::int64_t>(row.rightEncoderCount));
+
+            if (!std::isfinite(row.leftEncoderDistanceM) || !std::isfinite(row.rightEncoderDistanceM))
+            {
+                error = "Failed to derive encoder total distance from raw counts";
+                return false;
+            }
+
+            row.encoderKinematicsValid = false;
+            row.leftEncoderDistanceDeltaM = 0.0f;
+            row.rightEncoderDistanceDeltaM = 0.0f;
+            row.leftEncoderVelocityMps = 0.0f;
+            row.rightEncoderVelocityMps = 0.0f;
+            row.leftEncoderWheelSpeedRadps = 0.0f;
+            row.rightEncoderWheelSpeedRadps = 0.0f;
+
+            if (index > 0U)
+            {
+                const LoggedRow& previous = rows[index - 1U];
+                const float dtSeconds = static_cast<float>(row.dtUs) * 1.0e-6f;
+                if (std::isfinite(dtSeconds) && (dtSeconds > 0.0f))
+                {
+                    const std::int64_t leftDeltaCounts =
+                        static_cast<std::int64_t>(row.leftEncoderCount) -
+                        static_cast<std::int64_t>(previous.leftEncoderCount);
+                    const std::int64_t rightDeltaCounts =
+                        static_cast<std::int64_t>(row.rightEncoderCount) -
+                        static_cast<std::int64_t>(previous.rightEncoderCount);
+                    row.leftEncoderDistanceDeltaM =
+                        MazeMap::Vehicle::DriveEncoderDistanceFromCounts(leftDeltaCounts);
+                    row.rightEncoderDistanceDeltaM =
+                        MazeMap::Vehicle::DriveEncoderDistanceFromCounts(rightDeltaCounts);
+
+                    row.leftEncoderVelocityMps = row.leftEncoderDistanceDeltaM / dtSeconds;
+                    row.rightEncoderVelocityMps = row.rightEncoderDistanceDeltaM / dtSeconds;
+                    row.leftEncoderWheelSpeedRadps =
+                        MazeMap::Vehicle::WheelSpeedFromLinearVelocity(row.leftEncoderVelocityMps);
+                    row.rightEncoderWheelSpeedRadps =
+                        MazeMap::Vehicle::WheelSpeedFromLinearVelocity(row.rightEncoderVelocityMps);
+                    row.encoderKinematicsValid =
+                        std::isfinite(row.leftEncoderDistanceDeltaM) &&
+                        std::isfinite(row.rightEncoderDistanceDeltaM) &&
+                        std::isfinite(row.leftEncoderVelocityMps) &&
+                        std::isfinite(row.rightEncoderVelocityMps) &&
+                        std::isfinite(row.leftEncoderWheelSpeedRadps) &&
+                        std::isfinite(row.rightEncoderWheelSpeedRadps);
+                }
+            }
+
+            row.loggedState.SetWheelSpeedLeft(row.leftEncoderWheelSpeedRadps);
+            row.loggedState.SetWheelSpeedRight(row.rightEncoderWheelSpeedRadps);
+        }
+
         return true;
     }
 
@@ -1462,6 +1622,28 @@
             error = "Missing or invalid fan_duty_cycle metadata: " + candidate.sidecar.path.string();
             return false;
         }
+        const auto gyroScaleIt = candidate.sidecar.metadata.find("imu_gyro_mdps_per_lsb");
+        float loggedGyroMdpsPerLsb = std::numeric_limits<float>::quiet_NaN();
+        if (gyroScaleIt == candidate.sidecar.metadata.end() ||
+            !ParseFloat(gyroScaleIt->second, loggedGyroMdpsPerLsb) ||
+            !std::isfinite(loggedGyroMdpsPerLsb) ||
+            (loggedGyroMdpsPerLsb <= 0.0f))
+        {
+            error = "Missing or invalid imu_gyro_mdps_per_lsb metadata: " + candidate.sidecar.path.string();
+            return false;
+        }
+        const auto accelScaleIt = candidate.sidecar.metadata.find("imu_accel_mg_per_lsb");
+        float loggedAccelMgPerLsb = std::numeric_limits<float>::quiet_NaN();
+        if (accelScaleIt == candidate.sidecar.metadata.end() ||
+            !ParseFloat(accelScaleIt->second, loggedAccelMgPerLsb) ||
+            !std::isfinite(loggedAccelMgPerLsb) ||
+            (loggedAccelMgPerLsb <= 0.0f))
+        {
+            error = "Missing or invalid imu_accel_mg_per_lsb metadata: " + candidate.sidecar.path.string();
+            return false;
+        }
+        const bool hasWallAdcFields =
+            indices.find("front_left_wall_ambient_adc") != indices.end();
 
         rows.clear();
         std::string line;
@@ -1490,7 +1672,6 @@
             float loggedForwardAccelResidualMps2 = 0.0f;
             float loggedRightwardAccelResidualMps2 = 0.0f;
             float loggedYawAccelResidualRadps2 = 0.0f;
-            float loggedGyroBiasRadps = 0.0f;
             if (!ParseField(tokens, indices, "master_time_us", row.masterTimeUs, ParseUnsigned32, error) ||
                 !ParseField(tokens, indices, "control_tick_sequence", row.controlTickSequence, ParseUnsigned32, error) ||
                 !ParseField(tokens, indices, "dt_us", row.dtUs, ParseUnsigned32, error) ||
@@ -1508,7 +1689,6 @@
                 !ParseField(tokens, indices, "ukf_state_delta_af_mps2", loggedForwardAccelResidualMps2, ParseFloat, error) ||
                 !ParseField(tokens, indices, "ukf_state_delta_ar_mps2", loggedRightwardAccelResidualMps2, ParseFloat, error) ||
                 !ParseField(tokens, indices, "ukf_state_delta_yaw_accel_radps2", loggedYawAccelResidualRadps2, ParseFloat, error) ||
-                !ParseField(tokens, indices, "ukf_state_gyro_bias_z_radps", loggedGyroBiasRadps, ParseFloat, error) ||
                 !ParseField(tokens, indices, "measured_linear_speed_mps", row.measuredLinearSpeedMps, ParseFloat, error) ||
                 !ParseField(tokens, indices, "measured_yaw_rate_radps", row.measuredYawRateRadps, ParseFloat, error) ||
                 !ParseField(tokens, indices, "cmd_linear_mps", row.commandedLinearMps, ParseFloat, error) ||
@@ -1519,12 +1699,14 @@
                 !ParseField(tokens, indices, "right_plant_command", row.rightPlantCommand, ParseFloat, error) ||
                 !ParseField(tokens, indices, "left_encoder_count", row.leftEncoderCount, ParseInt32, error) ||
                 !ParseField(tokens, indices, "right_encoder_count", row.rightEncoderCount, ParseInt32, error) ||
-                !ParseField(tokens, indices, "left_encoder_wheel_speed_radps", row.leftEncoderWheelSpeedRadps, ParseFloat, error) ||
-                !ParseField(tokens, indices, "right_encoder_wheel_speed_radps", row.rightEncoderWheelSpeedRadps, ParseFloat, error) ||
-                !ParseField(tokens, indices, "left_encoder_velocity_mps", row.leftEncoderVelocityMps, ParseFloat, error) ||
-                !ParseField(tokens, indices, "right_encoder_velocity_mps", row.rightEncoderVelocityMps, ParseFloat, error) ||
-                !ParseField(tokens, indices, "gyro_raw_radps", row.gyroRawRadps, ParseFloat, error) ||
-                !ParseField(tokens, indices, "gyro_radps", row.gyroCorrectedRadps, ParseFloat, error) ||
+                !ParseField(tokens, indices, "imu_status", row.imuStatus, ParseUnsigned8, error) ||
+                !ParseField(tokens, indices, "imu_gyro_x", row.imuGyroX, ParseInt16, error) ||
+                !ParseField(tokens, indices, "imu_gyro_y", row.imuGyroY, ParseInt16, error) ||
+                !ParseField(tokens, indices, "imu_gyro_z", row.imuGyroZ, ParseInt16, error) ||
+                !ParseField(tokens, indices, "imu_accel_x", row.imuAccelX, ParseInt16, error) ||
+                !ParseField(tokens, indices, "imu_accel_y", row.imuAccelY, ParseInt16, error) ||
+                !ParseField(tokens, indices, "imu_accel_z", row.imuAccelZ, ParseInt16, error) ||
+                !ParseField(tokens, indices, "imu_temp", row.imuTemp, ParseInt16, error) ||
                 !ParseField(tokens, indices, "accel_body_right_mps2", row.accelBodyRightMps2, ParseFloat, error) ||
                 !ParseField(tokens, indices, "accel_body_forward_mps2", row.accelBodyForwardMps2, ParseFloat, error) ||
                 !ParseField(tokens, indices, "planar_accel_mps2", row.planarAccelMps2, ParseFloat, error))
@@ -1539,6 +1721,50 @@
             }
 
             row.accelBiasValid = (accelBiasValid != 0U);
+            row.imuGyroMdpsPerLsb = loggedGyroMdpsPerLsb;
+            row.imuAccelMgPerLsb = loggedAccelMgPerLsb;
+            row.gyroRawRadps = RawImuZToBodyYawRateRadps(row.imuGyroZ, row.imuGyroMdpsPerLsb);
+            if (!std::isfinite(row.gyroRawRadps))
+            {
+                error =
+                    "Failed to derive raw IMU yaw rate from imu_gyro_z and imu_gyro_mdps_per_lsb: " +
+                    candidate.csvPath.string();
+                return false;
+            }
+            bool correctedYawRatePresent = false;
+            if (!ParseFieldIfPresent(tokens, indices, "gyro_raw_radps", row.gyroRawDebugRadps, ParseFloat, error) ||
+                !ParseFieldIfPresent(tokens, indices, "gyro_bias_radps", row.gyroBiasDebugRadps, ParseFloat, error) ||
+                !ParseFieldIfPresent(
+                    tokens,
+                    indices,
+                    "gyro_radps",
+                    row.correctedYawRateRadps,
+                    ParseFloat,
+                    correctedYawRatePresent,
+                    error))
+            {
+                return false;
+            }
+            if (!correctedYawRatePresent)
+            {
+                error = "Missing corrected yaw-rate field gyro_radps: " + candidate.csvPath.string();
+                return false;
+            }
+            if (hasWallAdcFields)
+            {
+                row.wallAdcPresent = true;
+                if (!ParseField(tokens, indices, "front_left_wall_ambient_adc", row.frontLeftWallAmbientAdc, ParseUnsigned16, error) ||
+                    !ParseField(tokens, indices, "front_left_wall_lit_adc", row.frontLeftWallLitAdc, ParseUnsigned16, error) ||
+                    !ParseField(tokens, indices, "front_right_wall_ambient_adc", row.frontRightWallAmbientAdc, ParseUnsigned16, error) ||
+                    !ParseField(tokens, indices, "front_right_wall_lit_adc", row.frontRightWallLitAdc, ParseUnsigned16, error) ||
+                    !ParseField(tokens, indices, "side_left_wall_ambient_adc", row.sideLeftWallAmbientAdc, ParseUnsigned16, error) ||
+                    !ParseField(tokens, indices, "side_left_wall_lit_adc", row.sideLeftWallLitAdc, ParseUnsigned16, error) ||
+                    !ParseField(tokens, indices, "side_right_wall_ambient_adc", row.sideRightWallAmbientAdc, ParseUnsigned16, error) ||
+                    !ParseField(tokens, indices, "side_right_wall_lit_adc", row.sideRightWallLitAdc, ParseUnsigned16, error))
+                {
+                    return false;
+                }
+            }
             row.fanDutyCycle = loggedFanDutyCycle;
             row.loggedState.SetPosition(Eigen::Vector2f(loggedPxM, loggedPyM));
             row.loggedState.SetHeading(loggedHeadingRad);
@@ -1548,9 +1774,6 @@
             row.loggedState.SetForwardAccelerationResidual(loggedForwardAccelResidualMps2);
             row.loggedState.SetRightwardAccelerationResidual(loggedRightwardAccelResidualMps2);
             row.loggedState.SetYawAccelResidual(loggedYawAccelResidualRadps2);
-            row.loggedState.SetWheelSpeedLeft(row.leftEncoderWheelSpeedRadps);
-            row.loggedState.SetWheelSpeedRight(row.rightEncoderWheelSpeedRadps);
-            row.loggedState.SetGyroBiasZ(loggedGyroBiasRadps);
             row.loggedState.SetCurrentCommand(
                 MazeMap::App::Internal::CommandVector(row.leftDriveCommand, row.rightDriveCommand));
             rows.push_back(row);
@@ -1562,6 +1785,11 @@
             return false;
         }
 
+        if (!DeriveEncoderKinematicsFromCounts(rows, error))
+        {
+            return false;
+        }
+
         return true;
     }
 
@@ -1569,6 +1797,7 @@
     {
         MazeMap::EncoderObs observation{};
         observation.SetCounts(row.leftEncoderCount, row.rightEncoderCount);
+        observation.SetDistanceDeltasM(row.leftEncoderDistanceDeltaM, row.rightEncoderDistanceDeltaM);
         observation.SetWheelLinearVelocityMps(row.leftEncoderVelocityMps, row.rightEncoderVelocityMps);
         observation.SetWheelSpeedRadps(row.leftEncoderWheelSpeedRadps, row.rightEncoderWheelSpeedRadps);
         return observation;
@@ -1576,6 +1805,11 @@
 
     static float SensorForwardVelocityMps(const LoggedRow& row) noexcept
     {
+        if (!row.encoderKinematicsValid)
+        {
+            return std::numeric_limits<float>::quiet_NaN();
+        }
+
         return 0.5f * (row.leftEncoderVelocityMps + row.rightEncoderVelocityMps);
     }
 
@@ -1635,9 +1869,9 @@
 
         const float responseTimeS = static_cast<float>(targetRow.dtUs) * 1.0e-6f;
         const float currentForwardVelocityMps = SensorForwardVelocityMps(sourceRow);
-        const float currentYawRateRadps = sourceRow.gyroCorrectedRadps;
+        const float currentYawRateRadps = sourceRow.correctedYawRateRadps;
         const float targetForwardVelocityMps = SensorForwardVelocityMps(targetRow);
-        const float targetYawRateRadps = targetRow.gyroCorrectedRadps;
+        const float targetYawRateRadps = targetRow.correctedYawRateRadps;
         if (!(std::isfinite(responseTimeS) &&
             (responseTimeS > 0.0f) &&
             std::isfinite(sourceRow.leftEncoderVelocityMps) &&
@@ -1744,9 +1978,9 @@
                                     static_cast<float>(nextLeftSign) * kWheelVelocitySensorBoundMps;
                                 perturbedNext.rightEncoderVelocityMps +=
                                     static_cast<float>(nextRightSign) * kWheelVelocitySensorBoundMps;
-                                perturbedCurrent.gyroCorrectedRadps +=
+                                perturbedCurrent.correctedYawRateRadps +=
                                     static_cast<float>(currentYawSign) * kYawRateSensorBoundRadps;
-                                perturbedNext.gyroCorrectedRadps +=
+                                perturbedNext.correctedYawRateRadps +=
                                     static_cast<float>(nextYawSign) * kYawRateSensorBoundRadps;
 
                                 MazeMap::App::Internal::CommandVector perturbedCommand{};
@@ -1778,10 +2012,9 @@
         runtimeState.SetHeading(0.0f);
         runtimeState.SetForwardVelocity(SensorForwardVelocityMps(currentRow));
         runtimeState.SetRightwardVelocity(0.0f);
-        runtimeState.SetYawRate(currentRow.gyroCorrectedRadps);
+        runtimeState.SetYawRate(currentRow.correctedYawRateRadps);
         runtimeState.SetWheelSpeedLeft(MazeMap::Vehicle::WheelSpeedFromLinearVelocity(currentRow.leftEncoderVelocityMps));
         runtimeState.SetWheelSpeedRight(MazeMap::Vehicle::WheelSpeedFromLinearVelocity(currentRow.rightEncoderVelocityMps));
-        runtimeState.SetGyroBiasZ(0.0f);
         plantModel.integrate(command, responseTimeS);
 
         exportRow = {};
@@ -1804,11 +2037,11 @@
         exportRow.currentForwardSensorMps = SensorForwardVelocityMps(currentRow);
         exportRow.currentLeftVelocityMps = currentRow.leftEncoderVelocityMps;
         exportRow.currentRightVelocityMps = currentRow.rightEncoderVelocityMps;
-        exportRow.currentYawRateSensorRadps = currentRow.gyroCorrectedRadps;
+        exportRow.currentYawRateSensorRadps = currentRow.correctedYawRateRadps;
         exportRow.targetForwardSensorMps = SensorForwardVelocityMps(nextRow);
         exportRow.targetLeftVelocityMps = nextRow.leftEncoderVelocityMps;
         exportRow.targetRightVelocityMps = nextRow.rightEncoderVelocityMps;
-        exportRow.targetYawRateSensorRadps = nextRow.gyroCorrectedRadps;
+        exportRow.targetYawRateSensorRadps = nextRow.correctedYawRateRadps;
         exportRow.nominalLeftCommand = command.LeftCommand();
         exportRow.nominalRightCommand = command.RightCommand();
         exportRow.nominalAverageCommand =
@@ -1891,9 +2124,8 @@
         exportRow.predictedLinearSpeedMps = predictedState.GetForwardVelocity();
         exportRow.actualLinearSpeedMps = row.measuredLinearSpeedMps;
         exportRow.predictedYawRateRadps = predictedState.GetYawRate();
-        exportRow.actualYawRateRadps = row.gyroCorrectedRadps;
-        exportRow.predictedRawGyroRadps =
-            predictedState.GetYawRate() + predictedState.GetGyroBiasZ();
+        exportRow.actualYawRateRadps = row.correctedYawRateRadps;
+        exportRow.predictedRawGyroRadps = predictedState.GetYawRate();
         exportRow.actualRawGyroRadps = row.gyroRawRadps;
         return exportRow;
     }
@@ -1928,13 +2160,11 @@
             static_cast<double>(row.measuredLinearSpeedMps));
         metrics.bodyYawRateRadps.add(
             static_cast<double>(predictedState.GetYawRate()) -
-            static_cast<double>(row.gyroCorrectedRadps));
+            static_cast<double>(row.correctedYawRateRadps));
 
         if (std::isfinite(row.gyroRawRadps))
         {
-            const double predictedRawGyroRadps =
-                static_cast<double>(predictedState.GetYawRate()) +
-                static_cast<double>(predictedState.GetGyroBiasZ());
+            const double predictedRawGyroRadps = static_cast<double>(predictedState.GetYawRate());
             metrics.rawGyroRadps.add(predictedRawGyroRadps - static_cast<double>(row.gyroRawRadps));
         }
 
@@ -1971,8 +2201,6 @@
             static_cast<double>(replayedState.GetWheelSpeedLeft() - row.loggedState.GetWheelSpeedLeft()));
         metrics.rightWheelSpeedRadps.add(
             static_cast<double>(replayedState.GetWheelSpeedRight() - row.loggedState.GetWheelSpeedRight()));
-        metrics.gyroBiasRadps.add(
-            static_cast<double>(replayedState.GetGyroBiasZ() - row.loggedState.GetGyroBiasZ()));
     }
 
     static RunReport ReplayRun(const RunCandidate& candidate, const ReplayOptions& options)
@@ -2091,8 +2319,11 @@
                 previousRow.rightDriveCommand);
             const MazeMap::EncoderObs encoderObservation = BuildEncoderObservation(row);
             const bool encoderObservationValid =
+                row.encoderKinematicsValid &&
                 std::isfinite(dtSeconds) &&
                 (dtSeconds > 0.0f) &&
+                std::isfinite(row.leftEncoderDistanceDeltaM) &&
+                std::isfinite(row.rightEncoderDistanceDeltaM) &&
                 std::isfinite(row.leftEncoderWheelSpeedRadps) &&
                 std::isfinite(row.rightEncoderWheelSpeedRadps) &&
                 std::isfinite(row.leftEncoderVelocityMps) &&
@@ -2102,9 +2333,9 @@
             SensorSnapshot snapshot{};
             snapshot.SetEncoderObservation(encoderObservation, encoderObservationValid);
             snapshot.SetEncoderTotals(row.leftEncoderCount, row.rightEncoderCount);
-            snapshot.SetRawYawRateRadps(std::isfinite(row.gyroRawRadps) ? row.gyroRawRadps : 0.0f);
-            snapshot.SetYawRateRadps(std::isfinite(row.gyroCorrectedRadps) ? row.gyroCorrectedRadps : 0.0f);
-            snapshot.SetYawRateBiasRadps(runtimeState.GetGyroBiasZ());
+            snapshot.SetEncoderDistancesM(row.leftEncoderDistanceM, row.rightEncoderDistanceM);
+            snapshot.SetRawYawRateRadps(std::numeric_limits<float>::quiet_NaN());
+            snapshot.SetYawRateRadps(row.correctedYawRateRadps);
             snapshot.SetAccelerationBiasValid(row.accelBiasValid);
             snapshot.SetBodyRightAccelerationMps2(row.accelBodyRightMps2);
             snapshot.SetBodyForwardAccelerationMps2(row.accelBodyForwardMps2);
@@ -2152,9 +2383,9 @@
             {
                 (void)estimator.updateEncoderPair(encoderObservation, dtSeconds, true);
             }
-            if (std::isfinite(row.gyroRawRadps))
+            if (std::isfinite(snapshot.YawRateRadps()))
             {
-                if (!estimator.updateYawRate(row.gyroRawRadps))
+                if (!estimator.updateYawRate(snapshot.YawRateRadps()))
                 {
                     ++report.yawRejects;
                     report.completed = false;
@@ -2653,13 +2884,16 @@
                 "canonical open-floor marker `C` stationary state using `VehicleState` semantic defaults.\n" :
                 "first kept logged state using `VehicleState` semantic defaults.\n")
             << "- Battery policy: captured `battery_voltage_start` is reported; replay dynamics use `Vehicle::GetBatteryVoltage()` because no canonical logged-voltage override owner is exposed.\n"
+            << "- Canonical inertial input: corrected `gyro_radps`; raw IMU fields, `gyro_raw_radps`, and `gyro_bias_radps` are retained only for debug/report output.\n"
+            << "- Canonical encoder input: raw total encoder counts plus `dt_us`; decoded encoder speed/velocity columns are not required for replay.\n"
+            << "- Wall ADC policy: raw ambient/lit wall ADC columns are parsed when present, but wall updates are not injected until open-floor replay has a canonical maze/world-frame owner for those observations.\n"
             << "- Runtime-context gap: captured command targets, saturation flags, and acceleration context are parsed but not injected because no public `Estimator`/`VehicleState` owner path replaces the removed direct Estimator context hook.\n"
             << "- Plant diagnostic gap: body-acceleration prediction metrics remain non-finite until a canonical bound-state IMU-acceleration diagnostic is exposed.\n"
             << "- Prediction metrics compare the pre-update UKF prediction against observable sensor-space signals.\n"
             << "- Post-update replay deltas compare the replayed UKF state against the logged UKF state from the capture; they are consistency checks, not external ground truth.\n"
-            << "- Feedforward validation uses the present row's wheel-side velocities plus debiased gyro as the current state, the following row's wheel-side velocities plus debiased gyro as the target state, the following row's `dt_us` as the response horizon, and never uses logged UKF state for that validation.\n"
+            << "- Feedforward validation uses count-derived wheel-side velocities plus corrected `gyro_radps` as the current/target sensor state, the following row's `dt_us` as the response horizon, and never uses logged UKF state for that validation.\n"
             << "- Feedforward path coverage: " << corpus.feedforwardPaths.size() << " canonical PlantModel public feedforward path evaluated.\n"
-            << "- Feedforward audit sensor bounds: each wheel-side velocity is treated as a `+/- 0.06 m/s` sensor and debiased yaw rate as a `+/- 0.03 rad/s` sensor when computing per-path command envelopes.\n"
+            << "- Feedforward audit sensor bounds: each wheel-side velocity is treated as a `+/- 0.06 m/s` sensor and corrected yaw rate as a `+/- 0.03 rad/s` sensor when computing per-path command envelopes.\n"
             << "- Feedforward evaluations completed: " << totalFeedforwardEvaluations << "\n"
             << "- Phase analysis uses canonical `section_id` + `phase_id` buckets from the open-floor schema.\n"
             << "- `eta_squared_abs` is the fraction of absolute-error variance explained by those section-phase buckets.\n\n";
@@ -2688,7 +2922,6 @@
         WriteMetricRow(markdown, "yaw_rate", "rad/s", corpus.consistency.yawRateRadps);
         WriteMetricRow(markdown, "left_wheel_speed", "rad/s", corpus.consistency.leftWheelSpeedRadps);
         WriteMetricRow(markdown, "right_wheel_speed", "rad/s", corpus.consistency.rightWheelSpeedRadps);
-        WriteMetricRow(markdown, "gyro_bias", "rad/s", corpus.consistency.gyroBiasRadps);
 
         if (!corpus.feedforwardPaths.empty())
         {

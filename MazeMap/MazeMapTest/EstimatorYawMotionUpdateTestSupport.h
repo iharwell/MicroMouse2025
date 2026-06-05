@@ -64,14 +64,12 @@ namespace MazeMap
             const CovarianceMatrix& beforeCovariance,
             float observedYawRateRadps);
 
-        struct MovingPredictGyroBiasScenario final
+        struct MovingPredictResidualScenario final
         {
             bool resetAccepted = false;
             bool predictAccepted = false;
             StateVector initialState = StateVector::Zero();
             StateVector predictedState = NanState();
-            float beforeGyroBiasVarianceRadps2 = std::numeric_limits<float>::quiet_NaN();
-            float afterGyroBiasVarianceRadps2 = std::numeric_limits<float>::quiet_NaN();
         };
 
         struct LaunchEncoderSample final
@@ -79,7 +77,7 @@ namespace MazeMap
             float dtSeconds = 0.0f;
             float leftWheelSpeedRadps = 0.0f;
             float rightWheelSpeedRadps = 0.0f;
-            float gyroRawRadps = 0.0f;
+            float correctedYawRateRadps = 0.0f;
         };
 
         inline constexpr int kLaunchEncoderSampleCount = 10;
@@ -109,8 +107,6 @@ namespace MazeMap
             bool updateReturnedAccepted = false;
             bool updateRecordedAccepted = false;
             float observedYawRateRadps = std::numeric_limits<float>::quiet_NaN();
-            float beforeGyroBiasRadps = std::numeric_limits<float>::quiet_NaN();
-            float afterGyroBiasRadps = std::numeric_limits<float>::quiet_NaN();
             StateVector beforeState = NanState();
             StateVector afterState = NanState();
             CovarianceMatrix beforeCovariance = NanCovariance();
@@ -119,9 +115,9 @@ namespace MazeMap
             float actualNis = std::numeric_limits<float>::quiet_NaN();
         };
 
-        MovingPredictGyroBiasScenario RunMovingPredictGyroBiasScenario();
+        MovingPredictResidualScenario RunMovingPredictResidualScenario();
         LaunchEncoderScenario RunLaunchEncoderScenario();
         YawRateUpdateScenario RunYawResidualCrossScenario();
-        YawRateUpdateScenario RunBiasedYawRateScenario();
+        YawRateUpdateScenario RunCorrectedYawRateScenario();
     }
 }

@@ -22,8 +22,6 @@ namespace MazeMap
         constexpr float kStationaryMotionTolerance = 5.0e-4f;
         constexpr float kStationaryPoseDriftToleranceM = 1.0e-3f;
         constexpr float kStationaryYawVarianceToleranceRadps2 = 1.1e-4f;
-        constexpr float kStationaryBiasSeedYawRateTolerance = 5.0e-3f;
-        constexpr float kStationaryBiasWalkTolerance = 1.0e-4f;
 
         const wchar_t* BoolText(const bool value) noexcept
         {
@@ -236,8 +234,6 @@ namespace MazeMap
             CovarianceMatrix covariance = NaNCovariance();
             CovarianceMatrix firstCertifiedCovariance = NaNCovariance();
             bool capturedFirstCertifiedCovariance = false;
-            float gyroBiasRadps = NaN();
-            float gyroBiasVarianceRadps2 = NaN();
         };
     }
 
@@ -267,8 +263,7 @@ namespace MazeMap
     {
         void CaptureSnapshot(
             FilterSnapshot& snapshot,
-            Estimator& core,
-            VehicleState* runtimeState = nullptr)
+            Estimator& core)
         {
             if (!snapshot.status.completed)
             {
@@ -277,11 +272,6 @@ namespace MazeMap
 
             snapshot.state = EstimatorBiasAndStationaryTest::WorkingState(core);
             snapshot.covariance = EstimatorBiasAndStationaryTest::WorkingCovariance(core);
-            if (runtimeState != nullptr)
-            {
-                snapshot.gyroBiasRadps = runtimeState->GetGyroBiasZ();
-                snapshot.gyroBiasVarianceRadps2 = runtimeState->GetGyroBiasZVar();
-            }
         }
 
         void RunStationaryEncoderYawCycles(
@@ -353,11 +343,11 @@ namespace MazeMap
                     control,
                     encoder,
                     dt,
-                    0.04f,
+                    0.0f,
                     steps);
             }
 
-            CaptureSnapshot(result, core, &runtime.runtimeState);
+            CaptureSnapshot(result, core);
             return result;
         }
 
@@ -384,98 +374,6 @@ namespace MazeMap
             }
 
             CaptureSnapshot(result, core);
-            return result;
-        }
-
-        FilterSnapshot RunInitialStationaryGyroBias()
-        {
-            FilterSnapshot result{};
-            EstimatorTestRuntime runtime;
-            Estimator core(runtime.vehicle, runtime.plantModel, runtime.runtimeState);
-            App::Internal::CommandVector control{};
-            EncoderObs encoder{};
-            InitialStationaryGyroBiasExpectation expected{};
-            constexpr float dt = 0.0005f;
-            const int steps =
-                (std::max)(
-                    200,
-                    static_cast<int>(std::ceil(kEstimatorTestStationaryCertificationDwellS / dt)) + 20);
-
-            for (int step = 0; step < steps; ++step)
-            {
-                const float rawStationaryGyroRadps =
-                    (step < 49) ? 0.01f :
-                    ((step < 150) ? 0.04f : 0.07f);
-                const bool predictAccepted = core.predict(dt, control);
-                RecordOperation(result.status, predictAccepted, step, L"predict");
-                if (!predictAccepted)
-                {
-                    break;
-                }
-
-                const bool encoderAccepted = core.updateEncoderPair(encoder, dt, true);
-                RecordOperation(result.status, encoderAccepted, step, L"encoder");
-                if (!encoderAccepted)
-                {
-                    break;
-                }
-
-                const bool yawAccepted = core.updateYawRate(rawStationaryGyroRadps);
-                RecordOperation(result.status, yawAccepted, step, L"yaw");
-                if (!yawAccepted)
-                {
-                    break;
-                }
-
-                AdvanceInitialStationaryGyroBiasExpectation(expected, rawStationaryGyroRadps, dt);
-            }
-
-            result.capturedFirstCertifiedCovariance = expected.seedApplied;
-            CaptureSnapshot(result, core, &runtime.runtimeState);
-            return result;
-        }
-
-        struct BiasVarianceResult final
-        {
-            ScenarioStatus status{};
-            float beforeBiasVarianceRadps2 = NaN();
-            float afterBiasVarianceRadps2 = NaN();
-        };
-
-        BiasVarianceResult RunStationaryGyroBiasVariance()
-        {
-            BiasVarianceResult result{};
-            EstimatorTestRuntime runtime;
-            Estimator core(runtime.vehicle, runtime.plantModel, runtime.runtimeState);
-            App::Internal::CommandVector control{};
-            EncoderObs encoder{};
-            constexpr float dt = 0.0005f;
-
-            result.beforeBiasVarianceRadps2 = runtime.runtimeState.GetGyroBiasZVar();
-            for (int step = 0; step < 200; ++step)
-            {
-                const bool predictAccepted = core.predict(dt, control);
-                RecordOperation(result.status, predictAccepted, step, L"predict");
-                if (!predictAccepted)
-                {
-                    break;
-                }
-
-                const bool encoderAccepted = core.updateEncoderPair(encoder, dt, true);
-                RecordOperation(result.status, encoderAccepted, step, L"encoder");
-                if (!encoderAccepted)
-                {
-                    break;
-                }
-
-                const bool yawAccepted = core.updateYawRate(0.04f);
-                RecordOperation(result.status, yawAccepted, step, L"yaw");
-                if (!yawAccepted)
-                {
-                    break;
-                }
-            }
-            result.afterBiasVarianceRadps2 = runtime.runtimeState.GetGyroBiasZVar();
             return result;
         }
 
@@ -659,7 +557,6 @@ namespace MazeMap
             result.initialState = BuildRepeatedStationaryState();
 
             EstimatorTestRuntime runtime;
-            runtime.runtimeState.SetGyroBiasZ(0.04f);
             Estimator core(runtime.vehicle, runtime.plantModel, runtime.runtimeState);
             const bool resetAccepted =
                 EstimatorBiasAndStationaryTest::Reset(core, result.initialState, BuildRepeatedStationaryCovariance());
@@ -682,7 +579,7 @@ namespace MazeMap
                     &result.capturedFirstCertifiedCovariance);
             }
 
-            CaptureSnapshot(result, core, &runtime.runtimeState);
+            CaptureSnapshot(result, core);
             return result;
         }
 
@@ -818,21 +715,6 @@ namespace MazeMap
             Assert::AreEqual(0.0f, result.state(8), kStationaryMotionTolerance, message.c_str());
         }
 
-        TEST_METHOD(LearnsGyroBias)
-        {
-            const FilterSnapshot result = RunStationaryYawConstraint();
-            const std::wstring message = LimitMessage(L"gyro_bias_radps", result.gyroBiasRadps, L"magnitude >", 1.0e-3f, ScenarioMessage(result.status).c_str());
-            Assert::IsTrue(std::fabs(result.gyroBiasRadps) > 1.0e-3f, message.c_str());
-        }
-
-        TEST_METHOD(BiasTracksRawGyro)
-        {
-            const FilterSnapshot result = RunStationaryYawConstraint();
-            const float errorRadps = std::fabs((result.state(5) + result.gyroBiasRadps) - 0.04f);
-            const std::wstring message = LimitMessage(L"gyro_bias_plus_yaw_rate_error_radps", errorRadps, L"<", 0.04f, ScenarioMessage(result.status).c_str());
-            Assert::IsTrue(errorRadps < 0.04f, message.c_str());
-        }
-
         TEST_METHOD(ForwardVelocityVarianceBounded)
         {
             const FilterSnapshot result = RunStationaryYawConstraint();
@@ -848,12 +730,16 @@ namespace MazeMap
             Assert::IsTrue(result.covariance(4, 4) < limit, message.c_str());
         }
 
-        TEST_METHOD(YawRateVarianceRetainsFloor)
+        TEST_METHOD(YawRateVarianceTracksCorrectedYawObservation)
         {
             const FilterSnapshot result = RunStationaryYawConstraint();
-            const float limit = 0.010f * 0.010f;
-            const std::wstring message = LimitMessage(L"covariance[5,5]", result.covariance(5, 5), L">=", limit, ScenarioMessage(result.status).c_str());
-            Assert::IsTrue(result.covariance(5, 5) >= limit, message.c_str());
+            const std::wstring finiteMessage = ValueMessage(L"covariance[5,5]", result.covariance(5, 5), ScenarioMessage(result.status).c_str());
+            Assert::IsTrue(std::isfinite(result.covariance(5, 5)), finiteMessage.c_str());
+            const std::wstring positiveMessage = LimitMessage(L"covariance[5,5]", result.covariance(5, 5), L">", 0.0f, ScenarioMessage(result.status).c_str());
+            Assert::IsTrue(result.covariance(5, 5) > 0.0f, positiveMessage.c_str());
+            const float correctedYawVarianceLimitRadps2 = 1.5f * kEstimatorTestImuYawRateVarianceRadps2;
+            const std::wstring boundedMessage = LimitMessage(L"covariance[5,5]", result.covariance(5, 5), L"<=", correctedYawVarianceLimitRadps2, ScenarioMessage(result.status).c_str());
+            Assert::IsTrue(result.covariance(5, 5) <= correctedYawVarianceLimitRadps2, boundedMessage.c_str());
         }
 
         TEST_METHOD(ForwardAccelVarianceBounded)
@@ -884,13 +770,6 @@ namespace MazeMap
             Assert::IsTrue(result.covariance(8, 8) < 1.0e-4f, message.c_str());
         }
 
-        TEST_METHOD(GyroBiasVariancePositive)
-        {
-            const FilterSnapshot result = RunStationaryYawConstraint();
-            const std::wstring message = LimitMessage(L"gyro_bias_variance_radps2", result.gyroBiasVarianceRadps2, L">", 0.0f, ScenarioMessage(result.status).c_str());
-            Assert::IsTrue(result.gyroBiasVarianceRadps2 > 0.0f, message.c_str());
-        }
-
     };
 
     TEST_CLASS(EstimatorNonzeroStationaryEncoderCountsTest)
@@ -915,74 +794,6 @@ namespace MazeMap
             const FilterSnapshot result = RunExactStationaryLockWithNonzeroCounts();
             const std::wstring message = ScenarioMessage(result.status);
             Assert::AreEqual(result.initialState(2), result.state(2), 1.0e-4f, message.c_str());
-        }
-
-    };
-
-    TEST_CLASS(EstimatorStationaryGyroBiasTest)
-    {
-    public:
-        TEST_METHOD(InitialSeedApplies)
-        {
-            const FilterSnapshot result = RunInitialStationaryGyroBias();
-            const std::wstring message = std::wstring(L"seed_applied=") + BoolText(result.capturedFirstCertifiedCovariance) + L" " + ScenarioMessage(result.status);
-            Assert::IsTrue(result.capturedFirstCertifiedCovariance, message.c_str());
-        }
-
-        TEST_METHOD(InitialSeedKeepsYawRateNearZero)
-        {
-            const FilterSnapshot result = RunInitialStationaryGyroBias();
-            const std::wstring message = LimitMessage(L"yaw_rate_radps", result.state(5), L"magnitude <", kStationaryBiasSeedYawRateTolerance, ScenarioMessage(result.status).c_str());
-            Assert::IsTrue(std::fabs(result.state(5)) < kStationaryBiasSeedYawRateTolerance, message.c_str());
-        }
-
-        TEST_METHOD(InitialSeedMovesAboveLowValue)
-        {
-            const FilterSnapshot result = RunInitialStationaryGyroBias();
-            const std::wstring message = LimitMessage(L"gyro_bias_radps", result.gyroBiasRadps, L">", 0.04f, ScenarioMessage(result.status).c_str());
-            Assert::IsTrue(result.gyroBiasRadps > 0.04f, message.c_str());
-        }
-
-        TEST_METHOD(InitialSeedStaysBelowLaterSamples)
-        {
-            const FilterSnapshot result = RunInitialStationaryGyroBias();
-            const std::wstring message = LimitMessage(L"gyro_bias_radps", result.gyroBiasRadps, L"<", 0.08f, ScenarioMessage(result.status).c_str());
-            Assert::IsTrue(result.gyroBiasRadps < 0.08f, message.c_str());
-        }
-
-        TEST_METHOD(InitialSeedVarianceStaysFinite)
-        {
-            const FilterSnapshot result = RunInitialStationaryGyroBias();
-            const std::wstring message = ValueMessage(L"gyro_bias_variance_radps2", result.gyroBiasVarianceRadps2, ScenarioMessage(result.status).c_str());
-            Assert::IsTrue(std::isfinite(result.gyroBiasVarianceRadps2), message.c_str());
-        }
-
-        TEST_METHOD(VarianceStartsPositive)
-        {
-            const BiasVarianceResult result = RunStationaryGyroBiasVariance();
-            const std::wstring message = LimitMessage(L"before_bias_variance_radps2", result.beforeBiasVarianceRadps2, L">", 0.0f, ScenarioMessage(result.status).c_str());
-            Assert::IsTrue(result.beforeBiasVarianceRadps2 > 0.0f, message.c_str());
-        }
-
-        TEST_METHOD(VarianceStaysFinite)
-        {
-            const BiasVarianceResult result = RunStationaryGyroBiasVariance();
-            const std::wstring message = ValueMessage(L"after_bias_variance_radps2", result.afterBiasVarianceRadps2, ScenarioMessage(result.status).c_str());
-            Assert::IsTrue(std::isfinite(result.afterBiasVarianceRadps2), message.c_str());
-        }
-
-        TEST_METHOD(VarianceStaysPositive)
-        {
-            const BiasVarianceResult result = RunStationaryGyroBiasVariance();
-            const std::wstring message = LimitMessage(L"after_bias_variance_radps2", result.afterBiasVarianceRadps2, L">", 0.0f, ScenarioMessage(result.status).c_str());
-            Assert::IsTrue(result.afterBiasVarianceRadps2 > 0.0f, message.c_str());
-        }
-
-        TEST_METHOD(VarianceShrinks)
-        {
-            const BiasVarianceResult result = RunStationaryGyroBiasVariance();
-            const std::wstring message = LimitMessage(L"after_bias_variance_radps2", result.afterBiasVarianceRadps2, L"< before", result.beforeBiasVarianceRadps2, ScenarioMessage(result.status).c_str());
-            Assert::IsTrue(result.afterBiasVarianceRadps2 < result.beforeBiasVarianceRadps2, message.c_str());
         }
 
     };
@@ -1098,17 +909,21 @@ namespace MazeMap
             Assert::IsTrue(result.covariance(4, 4) < 1.0e-4f, message.c_str());
         }
 
-        TEST_METHOD(YawRateVarianceRetainsFloor)
+        TEST_METHOD(YawRateVarianceTracksCorrectedYawObservation)
         {
             const FilterSnapshot result = RunExactStationaryReference();
-            const float limit = 0.010f * 0.010f;
-            const std::wstring message = LimitMessage(L"covariance[5,5]", result.covariance(5, 5), L">=", limit, ScenarioMessage(result.status).c_str());
-            Assert::IsTrue(result.covariance(5, 5) >= limit, message.c_str());
+            const std::wstring finiteMessage = ValueMessage(L"covariance[5,5]", result.covariance(5, 5), ScenarioMessage(result.status).c_str());
+            Assert::IsTrue(std::isfinite(result.covariance(5, 5)), finiteMessage.c_str());
+            const std::wstring positiveMessage = LimitMessage(L"covariance[5,5]", result.covariance(5, 5), L">", 0.0f, ScenarioMessage(result.status).c_str());
+            Assert::IsTrue(result.covariance(5, 5) > 0.0f, positiveMessage.c_str());
+            const float correctedYawVarianceLimitRadps2 = 1.5f * kEstimatorTestImuYawRateVarianceRadps2;
+            const std::wstring boundedMessage = LimitMessage(L"covariance[5,5]", result.covariance(5, 5), L"<=", correctedYawVarianceLimitRadps2, ScenarioMessage(result.status).c_str());
+            Assert::IsTrue(result.covariance(5, 5) <= correctedYawVarianceLimitRadps2, boundedMessage.c_str());
         }
 
     };
 
-    TEST_CLASS(EstimatorGyroBiasTuningTest)
+    TEST_CLASS(EstimatorImuTuningTest)
     {
     public:
         TEST_METHOD(YawRateVarianceMatchesTuning)
@@ -1124,21 +939,6 @@ namespace MazeMap
         TEST_METHOD(AccelSigmaMatchesTuning)
         {
             Assert::AreEqual(0.569900f, kEstimatorTestImuAccelSigmaMps2, 1.0e-6f);
-        }
-
-        TEST_METHOD(MovingProcessVarianceIsZero)
-        {
-            Assert::AreEqual(0.0f, kEstimatorTestGyroBiasProcessVarianceMovingRadps2PerSample, 0.0f);
-        }
-
-        TEST_METHOD(StationaryProcessVarianceMatchesTuning)
-        {
-            Assert::AreEqual(3.0e-16f, kEstimatorTestGyroBiasProcessVarianceStationaryRadps2PerSample, 1.0e-20f);
-        }
-
-        TEST_METHOD(InitialVarianceMatchesTuning)
-        {
-            Assert::AreEqual(3.05e-4f, kEstimatorTestGyroBiasInitialVarianceUnseededRadps2, 1.0e-12f);
         }
 
     };
@@ -1337,13 +1137,6 @@ namespace MazeMap
             const FilterSnapshot result = RunRepeatedStationaryCycles();
             const std::wstring message = ScenarioMessage(result.status);
             Assert::AreEqual(0.0f, result.state(5), kStationaryMotionTolerance, message.c_str());
-        }
-
-        TEST_METHOD(ReseedsGyroBias)
-        {
-            const FilterSnapshot result = RunRepeatedStationaryCycles();
-            const std::wstring message = ScenarioMessage(result.status);
-            Assert::AreEqual(0.0f, result.gyroBiasRadps, kStationaryBiasWalkTolerance, message.c_str());
         }
 
         TEST_METHOD(PoseXVarianceDoesNotGrow)

@@ -10,53 +10,46 @@ using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 namespace MazeMap
 {
     using namespace EstimatorMotionUpdateSupport;
-    TEST_CLASS(EstimatorBiasedYawRateUpdateTest)
+    TEST_CLASS(EstimatorCorrectedYawRateUpdateTest)
     {
     public:
-        TEST_METHOD(BiasedYawRateUpdateAccepted)
+        TEST_METHOD(CorrectedYawRateUpdateAccepted)
         {
-            const YawRateUpdateScenario scenario = RunBiasedYawRateScenario();
+            const YawRateUpdateScenario scenario = RunCorrectedYawRateScenario();
 
-            Assert::IsTrue(scenario.updateReturnedAccepted, L"biased yaw update was rejected");
+            Assert::IsTrue(scenario.updateReturnedAccepted, L"corrected yaw update was rejected");
         }
 
-        TEST_METHOD(BiasedYawRateNisMatchesModel)
+        TEST_METHOD(CorrectedYawRateNisMatchesModel)
         {
-            const YawRateUpdateScenario scenario = RunBiasedYawRateScenario();
+            const YawRateUpdateScenario scenario = RunCorrectedYawRateScenario();
 
-            Assert::AreEqual(scenario.expectation.nis, scenario.actualNis, 1.0e-4f, L"biased yaw NIS");
+            Assert::AreEqual(scenario.expectation.nis, scenario.actualNis, 1.0e-4f, L"corrected yaw NIS");
         }
 
-        TEST_METHOD(BiasedYawRateMatchesModel)
+        TEST_METHOD(CorrectedYawRateMatchesModel)
         {
-            const YawRateUpdateScenario scenario = RunBiasedYawRateScenario();
+            const YawRateUpdateScenario scenario = RunCorrectedYawRateScenario();
 
-            Assert::AreEqual(scenario.expectation.yawRateRadps, scenario.afterState(5), 1.0e-6f, L"biased yaw rate");
+            Assert::AreEqual(scenario.expectation.yawRateRadps, scenario.afterState(5), 1.0e-6f, L"corrected yaw rate");
         }
 
-        TEST_METHOD(BiasedYawVarianceMatchesModel)
+        TEST_METHOD(CorrectedYawVarianceMatchesModel)
         {
-            const YawRateUpdateScenario scenario = RunBiasedYawRateScenario();
+            const YawRateUpdateScenario scenario = RunCorrectedYawRateScenario();
 
-            Assert::AreEqual(scenario.expectation.yawVarianceRadps2, scenario.afterCovariance(5, 5), 1.0e-7f, L"biased yaw variance");
+            Assert::AreEqual(scenario.expectation.yawVarianceRadps2, scenario.afterCovariance(5, 5), 1.0e-7f, L"corrected yaw variance");
         }
 
-        TEST_METHOD(BiasedYawKeepsGyroBias)
+        TEST_METHOD(CorrectedYawKeepsUnmeasuredState)
         {
-            const YawRateUpdateScenario scenario = RunBiasedYawRateScenario();
-
-            Assert::AreEqual(scenario.beforeGyroBiasRadps, scenario.afterGyroBiasRadps, 1.0e-6f, L"gyro bias after biased yaw update");
-        }
-
-        TEST_METHOD(BiasedYawKeepsUnmeasuredState)
-        {
-            const YawRateUpdateScenario scenario = RunBiasedYawRateScenario();
+            const YawRateUpdateScenario scenario = RunCorrectedYawRateScenario();
             constexpr int kUnmeasuredIndices[] = { 0, 1, 2, 3, 4, 6, 7, 8 };
             const IndexedDifference difference =
                 MaxStateDifference(scenario.beforeState, scenario.afterState, kUnmeasuredIndices);
             const IndexedDifference& messageDifference = difference;
             std::wstring message =
-                std::wstring(L"biased yaw unmeasured state") +
+                std::wstring(L"corrected yaw unmeasured state") +
                 L" max_abs=" +
                 std::to_wstring(messageDifference.maxAbs) +
                 L", limit=" +
@@ -80,14 +73,14 @@ namespace MazeMap
             Assert::IsTrue(difference.maxAbs <= 1.0e-6f, message.c_str());
         }
 
-        TEST_METHOD(BiasedYawClearsResidualCrossCovariance)
+        TEST_METHOD(CorrectedYawClearsResidualCrossCovariance)
         {
-            const YawRateUpdateScenario scenario = RunBiasedYawRateScenario();
+            const YawRateUpdateScenario scenario = RunCorrectedYawRateScenario();
             const IndexedDifference difference =
                 MaxYawResidualRowCovariance(scenario.afterCovariance);
             const IndexedDifference& messageDifference = difference;
             std::wstring message =
-                std::wstring(L"biased yaw/residual covariance") +
+                std::wstring(L"corrected yaw/residual covariance") +
                 L" max_abs=" +
                 std::to_wstring(messageDifference.maxAbs) +
                 L", limit=" +

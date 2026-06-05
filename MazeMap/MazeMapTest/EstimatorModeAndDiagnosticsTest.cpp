@@ -526,7 +526,7 @@ namespace MazeMap
             }
 
             result.stateBeforePivot = EstimatorModeAndDiagnosticsTest::WorkingState(core);
-            constexpr float pivotGyroRawYawRateRadps = 1.80f;
+            constexpr float pivotGyroCorrectedYawRateRadps = 1.80f;
             EncoderObs pivotEncoderObservation{};
             pivotEncoderObservation.SetLeftWheelSpeedRadps(18.0f);
             pivotEncoderObservation.SetRightWheelSpeedRadps(-18.0f);
@@ -566,8 +566,7 @@ namespace MazeMap
             result.stateAfterEncoder = EstimatorModeAndDiagnosticsTest::WorkingState(core);
             result.covarianceAfterEncoder = EstimatorModeAndDiagnosticsTest::WorkingCovariance(core);
 
-            result.gyroCorrectedYawRateRadps =
-                pivotGyroRawYawRateRadps - runtime.runtimeState.GetGyroBiasZ();
+            result.gyroCorrectedYawRateRadps = pivotGyroCorrectedYawRateRadps;
             const float gyroScaleRadpsPerLsb =
                 runtime.vehicle.BackLeftImu().GyroSensitivityMdpsPerLsb() * 0.001f * DEG_TO_RAD_F;
             const float gyroScaleToleranceSigmaRadps =
@@ -580,8 +579,7 @@ namespace MazeMap
                 result.covarianceAfterEncoder(5, 5) +
                 kEstimatorTestImuYawRateVarianceRadps2 +
                 ((gyroScaleRadpsPerLsb * gyroScaleRadpsPerLsb) / 12.0f) +
-                (gyroScaleToleranceSigmaRadps * gyroScaleToleranceSigmaRadps) +
-                runtime.runtimeState.GetGyroBiasZVar();
+                (gyroScaleToleranceSigmaRadps * gyroScaleToleranceSigmaRadps);
             const float yawGain = result.covarianceAfterEncoder(5, 5) / yawInnovationVariance;
             result.expectedYawRateRadps =
                 result.stateAfterEncoder(5) + (yawGain * yawInnovation);
@@ -590,7 +588,7 @@ namespace MazeMap
                 (yawGain * yawInnovationVariance * yawGain);
             result.expectedYawNis = (yawInnovation * yawInnovation) / yawInnovationVariance;
 
-            result.pivotYawAccepted = core.updateYawRate(pivotGyroRawYawRateRadps);
+            result.pivotYawAccepted = core.updateYawRate(pivotGyroCorrectedYawRateRadps);
             result.pivotYawAttempted = EstimatorModeAndDiagnosticsTest::LastUpdateAttempted(core);
             result.pivotYawLastAccepted = EstimatorModeAndDiagnosticsTest::LastUpdateAccepted(core);
             result.pivotYawNis = EstimatorModeAndDiagnosticsTest::LastUpdateNis(core);

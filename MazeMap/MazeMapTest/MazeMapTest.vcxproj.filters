@@ -173,7 +173,7 @@
     <ClCompile Include="EstimatorActiveCommandStorageTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="EstimatorBiasedYawRateUpdateTest.cpp">
+    <ClCompile Include="EstimatorCorrectedYawRateUpdateTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="EstimatorControlDirectionTrackingTest.cpp">
@@ -194,7 +194,7 @@
     <ClCompile Include="EstimatorMovingEncoderUpdateTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="EstimatorMovingPredictGyroBiasTest.cpp">
+    <ClCompile Include="EstimatorMovingPredictResidualTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="EstimatorOpposedControlUpdateTest.cpp">

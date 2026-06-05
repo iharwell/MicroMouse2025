@@ -102,7 +102,6 @@ namespace MazeMap
             stationaryState.SetYawRate(0.5f * (3.0f * kImuYawRateSigmaRadps));
             stationaryState.SetWheelSpeedLeft(0.5f * wheelSpeedThresholdRadps);
             stationaryState.SetWheelSpeedRight(-0.5f * wheelSpeedThresholdRadps);
-            stationaryState.SetGyroBiasZ(0.12f);
             Assert::IsTrue(stationaryState.IsStationary());
 
             VehicleState movingState = stationaryState;
@@ -186,7 +185,6 @@ namespace MazeMap
             state.SetForwardAccelerationResidual(7.875f);
             state.SetRightwardAccelerationResidual(-8.25f);
             state.SetYawAccelResidual(9.5f);
-            state.SetGyroBiasZ(-10.25f);
 
             VehicleStateLogTestRow projected{};
             projected.Set(state);
@@ -209,6 +207,9 @@ namespace MazeMap
                 "f32_ukf_state_delta_yaw_accel_radps2";
 
             Assert::AreEqual(expectedHeader, std::string(VehicleStateLogTestRow::header_cstr()));
+            Assert::IsTrue(
+                std::string(VehicleStateLogTestRow::header_cstr()).find("ukf_state_gyro_bias_z_radps") ==
+                std::string::npos);
             Assert::AreEqual(sizeof(flattened), sizeof(projected));
             Assert::AreEqual(
                 0,

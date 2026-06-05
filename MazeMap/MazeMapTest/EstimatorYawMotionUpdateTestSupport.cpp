@@ -13,8 +13,7 @@ namespace MazeMap
             const float observedYawRateRadps)
         {
             YawRateExpectation expectation;
-            const float correctedYawRateRadps =
-                observedYawRateRadps - runtime.runtimeState.GetGyroBiasZ();
+            const float correctedYawRateRadps = observedYawRateRadps;
             const float gyroScaleRadpsPerLsb =
                 runtime.vehicle.BackLeftImu().GyroSensitivityMdpsPerLsb() *
                 0.001f *
@@ -28,8 +27,7 @@ namespace MazeMap
                 beforeCovariance(5, 5) +
                 kEstimatorTestImuYawRateVarianceRadps2 +
                 ((gyroScaleRadpsPerLsb * gyroScaleRadpsPerLsb) / 12.0f) +
-                (gyroScaleToleranceSigmaRadps * gyroScaleToleranceSigmaRadps) +
-                runtime.runtimeState.GetGyroBiasZVar();
+                (gyroScaleToleranceSigmaRadps * gyroScaleToleranceSigmaRadps);
             const float yawGain =
                 beforeCovariance(5, 5) / yawInnovationVariance;
             expectation.yawRateRadps =
@@ -42,9 +40,9 @@ namespace MazeMap
             return expectation;
         }
 
-        MovingPredictGyroBiasScenario RunMovingPredictGyroBiasScenario()
+        MovingPredictResidualScenario RunMovingPredictResidualScenario()
         {
-            MovingPredictGyroBiasScenario scenario;
+            MovingPredictResidualScenario scenario;
             EstimatorTestRuntime runtime;
             Estimator core(runtime.vehicle, runtime.plantModel, runtime.runtimeState);
             scenario.initialState(0) = 0.02f;
@@ -59,12 +57,9 @@ namespace MazeMap
             scenario.resetAccepted =
                 EstimatorMotionUpdateTest::Reset(core, scenario.initialState, EstimatorMotionUpdateTest::BuildDefaultInitialCovariance());
 
-            scenario.beforeGyroBiasVarianceRadps2 = runtime.runtimeState.GetGyroBiasZVar();
-
             const CommandVector control = CommandVector(0.16f, 0.16f);
             scenario.predictAccepted = core.predict(0.002f, control);
 
-            scenario.afterGyroBiasVarianceRadps2 = runtime.runtimeState.GetGyroBiasZVar();
             scenario.predictedState = EstimatorMotionUpdateTest::WorkingState(core);
             return scenario;
         }
@@ -199,8 +194,8 @@ namespace MazeMap
                         runtime,
                         stateBeforeYaw,
                         covarianceBeforeYaw,
-                        sample.gyroRawRadps);
-                const bool yawAccepted = core.updateYawRate(sample.gyroRawRadps);
+                        sample.correctedYawRateRadps);
+                const bool yawAccepted = core.updateYawRate(sample.correctedYawRateRadps);
                 if (!EstimatorMotionUpdateTest::LastUpdateAttempted(core))
                 {
                     scenario.firstIncompleteOperation = L"yaw update not attempted";
@@ -301,11 +296,10 @@ namespace MazeMap
             return scenario;
         }
 
-        YawRateUpdateScenario RunBiasedYawRateScenario()
+        YawRateUpdateScenario RunCorrectedYawRateScenario()
         {
             YawRateUpdateScenario scenario;
             EstimatorTestRuntime runtime;
-            runtime.runtimeState.SetGyroBiasZ(0.08f);
             Estimator core(runtime.vehicle, runtime.plantModel, runtime.runtimeState);
             StateVector initialState = StateVector::Zero();
             initialState(0) = 0.02f;
@@ -327,8 +321,7 @@ namespace MazeMap
             scenario.resetAccepted = EstimatorMotionUpdateTest::Reset(core, initialState, initialCovariance);
             scenario.beforeState = EstimatorMotionUpdateTest::WorkingState(core);
             scenario.beforeCovariance = EstimatorMotionUpdateTest::WorkingCovariance(core);
-            scenario.beforeGyroBiasRadps = runtime.runtimeState.GetGyroBiasZ();
-            scenario.observedYawRateRadps = 0.27f;
+            scenario.observedYawRateRadps = 0.19f;
             scenario.expectation = ComputeYawRateExpectation(
                 runtime,
                 scenario.beforeState,
@@ -341,7 +334,6 @@ namespace MazeMap
             scenario.actualNis = EstimatorMotionUpdateTest::LastUpdateNis(core);
             scenario.afterState = EstimatorMotionUpdateTest::WorkingState(core);
             scenario.afterCovariance = EstimatorMotionUpdateTest::WorkingCovariance(core);
-            scenario.afterGyroBiasRadps = runtime.runtimeState.GetGyroBiasZ();
             return scenario;
         }
     }

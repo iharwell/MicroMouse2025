@@ -48,9 +48,7 @@ namespace MazeMap::App::Internal::Runtime
     FIELD(std::uint16_t, watchdog_flags) \
     FIELD(std::uint16_t, measurement_flags) \
     FIELD(std::uint8_t, ukf_mode_id) \
-    FIELD(std::uint8_t, bias_update_enabled) \
     FIELD(MazeMap::VehicleStateLogEntry, ukf_state) \
-    FIELD(float, gyro_bias_anchor_radps) \
     FIELD(float, yaw_consistency_lp_radps) \
     FIELD(float, yaw_window_mismatch_rad) \
     FIELD(float, nhc_sigma_mps) \
@@ -97,6 +95,14 @@ namespace MazeMap::App::Internal::Runtime
     FIELD(std::uint32_t, front_timestamp_us) \
     FIELD(std::uint32_t, left_timestamp_us) \
     FIELD(std::uint32_t, right_timestamp_us) \
+    FIELD(std::uint16_t, front_left_wall_ambient_adc) \
+    FIELD(std::uint16_t, front_left_wall_lit_adc) \
+    FIELD(std::uint16_t, front_right_wall_ambient_adc) \
+    FIELD(std::uint16_t, front_right_wall_lit_adc) \
+    FIELD(std::uint16_t, side_left_wall_ambient_adc) \
+    FIELD(std::uint16_t, side_left_wall_lit_adc) \
+    FIELD(std::uint16_t, side_right_wall_ambient_adc) \
+    FIELD(std::uint16_t, side_right_wall_lit_adc) \
     FIELD(std::uint8_t, front_left_obs_class) \
     FIELD(std::uint8_t, front_right_obs_class) \
     FIELD(std::uint8_t, left_obs_class) \

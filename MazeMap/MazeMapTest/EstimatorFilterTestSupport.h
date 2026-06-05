@@ -31,11 +31,6 @@ namespace MazeMap
     constexpr float kEstimatorTestEncoderPairNisThreshold = 13.81551f;
     constexpr float kEstimatorTestPivotScrubMinCommandAngularRadps = 1.0f;
     constexpr float kEstimatorTestStationaryCertificationDwellS = 0.150f;
-    constexpr float kEstimatorTestGyroBiasProcessVarianceStationaryRadps2PerSample = 3.0e-16f;
-    constexpr float kEstimatorTestGyroBiasProcessVarianceMovingRadps2PerSample = 0.0f;
-    constexpr float kEstimatorTestGyroBiasInitialVarianceUnseededRadps2 = 3.05e-4f;
-    constexpr std::uint16_t kEstimatorTestInitialStationaryGyroBiasSeedStartSample = 3U;
-    constexpr std::uint16_t kEstimatorTestInitialStationaryGyroBiasSeedEndSample = 8U;
 
     struct EstimatorTestRuntime final
     {
@@ -54,103 +49,6 @@ namespace MazeMap
     {
         EstimatorTestRuntime* const runtime = new EstimatorTestRuntime();
         return Estimator(runtime->vehicle, runtime->plantModel, runtime->runtimeState);
-    }
-
-    inline float StationaryGyroBiasMeasurementVarianceRadps2() noexcept
-    {
-        return kEstimatorTestImuYawRateVarianceRadps2;
-    }
-
-    struct InitialStationaryGyroBiasExpectation final
-    {
-        bool phaseExited = false;
-        bool seedApplied = false;
-        std::uint16_t sampleOrdinal = 0U;
-        std::uint16_t collectedSeedSamples = 0U;
-        double seedAccumRadps = 0.0;
-        float biasRadps = 0.0f;
-        float varianceRadps2 = 0.0f;
-    };
-
-    inline void AdvanceInitialStationaryGyroBiasExpectation(
-        InitialStationaryGyroBiasExpectation& expectation,
-        const float yawRateRadps,
-        const float dtSeconds,
-        const bool startupStationaryTick = true) noexcept
-    {
-        (void)dtSeconds;
-        if (expectation.phaseExited)
-        {
-            return;
-        }
-
-        if (!startupStationaryTick)
-        {
-            expectation.phaseExited = true;
-            return;
-        }
-
-        if (!std::isfinite(yawRateRadps))
-        {
-            return;
-        }
-
-        if (expectation.sampleOrdinal < (std::numeric_limits<std::uint16_t>::max)())
-        {
-            ++expectation.sampleOrdinal;
-        }
-
-        if ((expectation.sampleOrdinal >= kEstimatorTestInitialStationaryGyroBiasSeedStartSample) &&
-            (expectation.sampleOrdinal <= kEstimatorTestInitialStationaryGyroBiasSeedEndSample))
-        {
-            expectation.seedAccumRadps += static_cast<double>(yawRateRadps);
-            if (expectation.collectedSeedSamples < (std::numeric_limits<std::uint16_t>::max)())
-            {
-                ++expectation.collectedSeedSamples;
-            }
-        }
-
-        const float measurementVarianceRadps2 = StationaryGyroBiasMeasurementVarianceRadps2();
-        if (!expectation.seedApplied)
-        {
-            if ((expectation.sampleOrdinal >= kEstimatorTestInitialStationaryGyroBiasSeedEndSample) &&
-                (expectation.collectedSeedSamples > 0U))
-            {
-                expectation.biasRadps = static_cast<float>(
-                    expectation.seedAccumRadps /
-                    static_cast<double>(expectation.collectedSeedSamples));
-                expectation.varianceRadps2 = kEstimatorTestGyroBiasInitialVarianceUnseededRadps2;
-                if (!(std::isfinite(expectation.varianceRadps2) && (expectation.varianceRadps2 > 0.0f)))
-                {
-                    expectation.varianceRadps2 = kEstimatorTestGyroBiasInitialVarianceUnseededRadps2;
-                }
-                expectation.seedApplied = true;
-            }
-            return;
-        }
-
-        const float priorVarianceRadps2 =
-            (std::isfinite(expectation.varianceRadps2) && (expectation.varianceRadps2 > 0.0f)) ?
-            expectation.varianceRadps2 :
-            kEstimatorTestGyroBiasInitialVarianceUnseededRadps2;
-        const float predictedVarianceRadps2 =
-            priorVarianceRadps2 +
-            kEstimatorTestGyroBiasProcessVarianceStationaryRadps2PerSample;
-        const float innovationVarianceRadps2 = predictedVarianceRadps2 + measurementVarianceRadps2;
-        if (!(std::isfinite(predictedVarianceRadps2) && std::isfinite(innovationVarianceRadps2)) ||
-            !(innovationVarianceRadps2 > 0.0f))
-        {
-            return;
-        }
-
-        const float kalmanGain =
-            (std::clamp)(predictedVarianceRadps2 / innovationVarianceRadps2, 0.0f, 1.0f);
-        expectation.biasRadps += kalmanGain * (yawRateRadps - expectation.biasRadps);
-        expectation.varianceRadps2 = (1.0f - kalmanGain) * predictedVarianceRadps2;
-        if (!(std::isfinite(expectation.varianceRadps2) && (expectation.varianceRadps2 > 0.0f)))
-        {
-            expectation.varianceRadps2 = kEstimatorTestGyroBiasInitialVarianceUnseededRadps2;
-        }
     }
 
     inline std::vector<std::pair<std::string, std::string>> CollectDebugDumpLines(const Estimator& core)

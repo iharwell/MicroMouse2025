@@ -904,14 +904,6 @@ namespace MazeMap::App
             Assert::IsTrue(std::isfinite(actual), message.c_str());
         }
 
-        TEST_METHOD(TruthGyroBiasIsFinite)
-        {
-            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
-            const float actual = trace.truthState.GetGyroBiasZ();
-            const std::wstring message = BuildManeuverMessage(L"truth_gyro_bias", kCode, trace) +
-                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
-            Assert::IsTrue(std::isfinite(actual), message.c_str());
-        }
 
         TEST_METHOD(ShiftWithinTolerance)
         {
@@ -1141,14 +1133,6 @@ namespace MazeMap::App
             Assert::IsTrue(std::isfinite(actual), message.c_str());
         }
 
-        TEST_METHOD(TruthGyroBiasIsFinite)
-        {
-            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
-            const float actual = trace.truthState.GetGyroBiasZ();
-            const std::wstring message = BuildManeuverMessage(L"truth_gyro_bias", kCode, trace) +
-                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
-            Assert::IsTrue(std::isfinite(actual), message.c_str());
-        }
 
         TEST_METHOD(ShiftWithinTolerance)
         {
@@ -1378,14 +1362,6 @@ namespace MazeMap::App
             Assert::IsTrue(std::isfinite(actual), message.c_str());
         }
 
-        TEST_METHOD(TruthGyroBiasIsFinite)
-        {
-            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
-            const float actual = trace.truthState.GetGyroBiasZ();
-            const std::wstring message = BuildManeuverMessage(L"truth_gyro_bias", kCode, trace) +
-                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
-            Assert::IsTrue(std::isfinite(actual), message.c_str());
-        }
 
         TEST_METHOD(ShiftWithinTolerance)
         {
@@ -1615,14 +1591,6 @@ namespace MazeMap::App
             Assert::IsTrue(std::isfinite(actual), message.c_str());
         }
 
-        TEST_METHOD(TruthGyroBiasIsFinite)
-        {
-            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
-            const float actual = trace.truthState.GetGyroBiasZ();
-            const std::wstring message = BuildManeuverMessage(L"truth_gyro_bias", kCode, trace) +
-                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
-            Assert::IsTrue(std::isfinite(actual), message.c_str());
-        }
 
         TEST_METHOD(ShiftWithinTolerance)
         {
@@ -1852,14 +1820,6 @@ namespace MazeMap::App
             Assert::IsTrue(std::isfinite(actual), message.c_str());
         }
 
-        TEST_METHOD(TruthGyroBiasIsFinite)
-        {
-            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
-            const float actual = trace.truthState.GetGyroBiasZ();
-            const std::wstring message = BuildManeuverMessage(L"truth_gyro_bias", kCode, trace) +
-                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
-            Assert::IsTrue(std::isfinite(actual), message.c_str());
-        }
 
         TEST_METHOD(VelocityStable)
         {
@@ -2106,14 +2066,6 @@ namespace MazeMap::App
             Assert::IsTrue(std::isfinite(actual), message.c_str());
         }
 
-        TEST_METHOD(TruthGyroBiasIsFinite)
-        {
-            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
-            const float actual = trace.truthState.GetGyroBiasZ();
-            const std::wstring message = BuildManeuverMessage(L"truth_gyro_bias", kCode, trace) +
-                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
-            Assert::IsTrue(std::isfinite(actual), message.c_str());
-        }
 
         TEST_METHOD(VelocityStable)
         {
@@ -2360,14 +2312,6 @@ namespace MazeMap::App
             Assert::IsTrue(std::isfinite(actual), message.c_str());
         }
 
-        TEST_METHOD(TruthGyroBiasIsFinite)
-        {
-            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
-            const float actual = trace.truthState.GetGyroBiasZ();
-            const std::wstring message = BuildManeuverMessage(L"truth_gyro_bias", kCode, trace) +
-                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
-            Assert::IsTrue(std::isfinite(actual), message.c_str());
-        }
 
         TEST_METHOD(VelocityStable)
         {
@@ -2614,14 +2558,6 @@ namespace MazeMap::App
             Assert::IsTrue(std::isfinite(actual), message.c_str());
         }
 
-        TEST_METHOD(TruthGyroBiasIsFinite)
-        {
-            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
-            const float actual = trace.truthState.GetGyroBiasZ();
-            const std::wstring message = BuildManeuverMessage(L"truth_gyro_bias", kCode, trace) +
-                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
-            Assert::IsTrue(std::isfinite(actual), message.c_str());
-        }
 
         TEST_METHOD(VelocityStable)
         {
@@ -2868,14 +2804,6 @@ namespace MazeMap::App
             Assert::IsTrue(std::isfinite(actual), message.c_str());
         }
 
-        TEST_METHOD(TruthGyroBiasIsFinite)
-        {
-            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
-            const float actual = trace.truthState.GetGyroBiasZ();
-            const std::wstring message = BuildManeuverMessage(L"truth_gyro_bias", kCode, trace) +
-                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
-            Assert::IsTrue(std::isfinite(actual), message.c_str());
-        }
 
         TEST_METHOD(VelocityStable)
         {
@@ -3122,14 +3050,6 @@ namespace MazeMap::App
             Assert::IsTrue(std::isfinite(actual), message.c_str());
         }
 
-        TEST_METHOD(TruthGyroBiasIsFinite)
-        {
-            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
-            const float actual = trace.truthState.GetGyroBiasZ();
-            const std::wstring message = BuildManeuverMessage(L"truth_gyro_bias", kCode, trace) +
-                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
-            Assert::IsTrue(std::isfinite(actual), message.c_str());
-        }
 
         TEST_METHOD(VelocityStable)
         {
@@ -3376,14 +3296,6 @@ namespace MazeMap::App
             Assert::IsTrue(std::isfinite(actual), message.c_str());
         }
 
-        TEST_METHOD(TruthGyroBiasIsFinite)
-        {
-            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
-            const float actual = trace.truthState.GetGyroBiasZ();
-            const std::wstring message = BuildManeuverMessage(L"truth_gyro_bias", kCode, trace) +
-                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
-            Assert::IsTrue(std::isfinite(actual), message.c_str());
-        }
 
         TEST_METHOD(VelocityStable)
         {
@@ -3630,14 +3542,6 @@ namespace MazeMap::App
             Assert::IsTrue(std::isfinite(actual), message.c_str());
         }
 
-        TEST_METHOD(TruthGyroBiasIsFinite)
-        {
-            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
-            const float actual = trace.truthState.GetGyroBiasZ();
-            const std::wstring message = BuildManeuverMessage(L"truth_gyro_bias", kCode, trace) +
-                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
-            Assert::IsTrue(std::isfinite(actual), message.c_str());
-        }
 
         TEST_METHOD(VelocityStable)
         {
@@ -3884,14 +3788,6 @@ namespace MazeMap::App
             Assert::IsTrue(std::isfinite(actual), message.c_str());
         }
 
-        TEST_METHOD(TruthGyroBiasIsFinite)
-        {
-            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
-            const float actual = trace.truthState.GetGyroBiasZ();
-            const std::wstring message = BuildManeuverMessage(L"truth_gyro_bias", kCode, trace) +
-                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
-            Assert::IsTrue(std::isfinite(actual), message.c_str());
-        }
 
         TEST_METHOD(VelocityStable)
         {
@@ -4138,14 +4034,6 @@ namespace MazeMap::App
             Assert::IsTrue(std::isfinite(actual), message.c_str());
         }
 
-        TEST_METHOD(TruthGyroBiasIsFinite)
-        {
-            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
-            const float actual = trace.truthState.GetGyroBiasZ();
-            const std::wstring message = BuildManeuverMessage(L"truth_gyro_bias", kCode, trace) +
-                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
-            Assert::IsTrue(std::isfinite(actual), message.c_str());
-        }
 
         TEST_METHOD(VelocityStable)
         {
@@ -4392,14 +4280,6 @@ namespace MazeMap::App
             Assert::IsTrue(std::isfinite(actual), message.c_str());
         }
 
-        TEST_METHOD(TruthGyroBiasIsFinite)
-        {
-            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
-            const float actual = trace.truthState.GetGyroBiasZ();
-            const std::wstring message = BuildManeuverMessage(L"truth_gyro_bias", kCode, trace) +
-                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
-            Assert::IsTrue(std::isfinite(actual), message.c_str());
-        }
 
         TEST_METHOD(VelocityStable)
         {
@@ -4646,14 +4526,6 @@ namespace MazeMap::App
             Assert::IsTrue(std::isfinite(actual), message.c_str());
         }
 
-        TEST_METHOD(TruthGyroBiasIsFinite)
-        {
-            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
-            const float actual = trace.truthState.GetGyroBiasZ();
-            const std::wstring message = BuildManeuverMessage(L"truth_gyro_bias", kCode, trace) +
-                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
-            Assert::IsTrue(std::isfinite(actual), message.c_str());
-        }
 
         TEST_METHOD(VelocityStable)
         {
@@ -4900,14 +4772,6 @@ namespace MazeMap::App
             Assert::IsTrue(std::isfinite(actual), message.c_str());
         }
 
-        TEST_METHOD(TruthGyroBiasIsFinite)
-        {
-            const ManeuverExecutionTrace trace = SimulateDriveManeuver(kCode, kSmoothTurn);
-            const float actual = trace.truthState.GetGyroBiasZ();
-            const std::wstring message = BuildManeuverMessage(L"truth_gyro_bias", kCode, trace) +
-                L" actual=" + std::to_wstring(actual) + L" criterion=isfinite(actual)";
-            Assert::IsTrue(std::isfinite(actual), message.c_str());
-        }
 
         TEST_METHOD(VelocityStable)
         {

@@ -18,10 +18,11 @@ namespace
         float headingRad{};
         float forwardSpeedMps{};
         float rightwardSpeedMps{};
-        float yawRateRadps{};
+        float rawYawRateRadps{};
+        float yawRateBiasRadps{};
+        float correctedYawRateRadps{};
         float leftWheelSpeedRadps{};
         float rightWheelSpeedRadps{};
-        float gyroBiasZRadps{};
     };
 
 #define MMLOG_TEST_VECTOR_ENTRY_FIELDS(X) \
@@ -30,10 +31,11 @@ namespace
     X(float, heading_rad) \
     X(float, vf_mps) \
     X(float, vr_mps) \
+    X(float, yaw_rate_raw_radps) \
+    X(float, yaw_rate_bias_radps) \
     X(float, yaw_rate_radps) \
     X(float, left_wheel_speed_radps) \
-    X(float, right_wheel_speed_radps) \
-    X(float, gyro_bias_z_radps)
+    X(float, right_wheel_speed_radps)
 
     MMLOG_DEFINE_PRIVATE_ENTRY_WITH_BODY(
         MmLogTestVectorEntry,
@@ -45,10 +47,11 @@ namespace
             heading_rad = source.headingRad;
             vf_mps = source.forwardSpeedMps;
             vr_mps = source.rightwardSpeedMps;
-            yaw_rate_radps = source.yawRateRadps;
+            yaw_rate_raw_radps = source.rawYawRateRadps;
+            yaw_rate_bias_radps = source.yawRateBiasRadps;
+            yaw_rate_radps = source.correctedYawRateRadps;
             left_wheel_speed_radps = source.leftWheelSpeedRadps;
             right_wheel_speed_radps = source.rightWheelSpeedRadps;
-            gyro_bias_z_radps = source.gyroBiasZRadps;
         });
 
 #define MMLOG_TEST_HIERARCHICAL_ROW_FIELDS(X) \
@@ -73,10 +76,11 @@ namespace
     X(float, state_heading_rad) \
     X(float, state_vf_mps) \
     X(float, state_vr_mps) \
+    X(float, state_yaw_rate_raw_radps) \
+    X(float, state_yaw_rate_bias_radps) \
     X(float, state_yaw_rate_radps) \
     X(float, state_left_wheel_speed_radps) \
     X(float, state_right_wheel_speed_radps) \
-    X(float, state_gyro_bias_z_radps) \
     X(float, command_mps)
 
     MMLOG_DEFINE_ROW(MmLogTestFlattenedRow, MMLOG_TEST_FLATTENED_ROW_FIELDS);
@@ -96,12 +100,16 @@ namespace MazeMap
             const std::string expected =
                 "u32_tick_us,u8_mode_id,"
                 "f32_state_px_m,f32_state_py_m,f32_state_heading_rad,"
-                "f32_state_vf_mps,f32_state_vr_mps,f32_state_yaw_rate_radps,"
-                "f32_state_left_wheel_speed_radps,f32_state_right_wheel_speed_radps,"
-                "f32_state_gyro_bias_z_radps,"
+                "f32_state_vf_mps,f32_state_vr_mps,"
+                "f32_state_yaw_rate_raw_radps,f32_state_yaw_rate_bias_radps,"
+                "f32_state_yaw_rate_radps,f32_state_left_wheel_speed_radps,"
+                "f32_state_right_wheel_speed_radps,"
                 "f32_command_mps";
 
             Assert::AreEqual(expected, std::string(MmLogTestHierarchicalRow::header_cstr()));
+            Assert::IsTrue(
+                std::string(MmLogTestHierarchicalRow::header_cstr()).find("state_gyro_bias_z_radps") ==
+                std::string::npos);
         }
 
         TEST_METHOD(HierarchicalRowSizeMatchesFlattenedScalarWidth)
@@ -114,7 +122,7 @@ namespace MazeMap
             constexpr std::size_t expectedBytes =
                 sizeof(std::uint32_t) +
                 sizeof(std::uint8_t) +
-                (9U * sizeof(float)) +
+                (10U * sizeof(float)) +
                 sizeof(float);
 
             Assert::AreEqual(expectedBytes, sizeof(MmLogTestHierarchicalRow));
@@ -132,7 +140,8 @@ namespace MazeMap
                 -6.625f,
                 7.875f,
                 -8.25f,
-                9.5f
+                9.5f,
+                -10.75f
             };
 
             MmLogTestHierarchicalRow hierarchical{};
@@ -149,10 +158,11 @@ namespace MazeMap
             flattened.state_heading_rad = source.headingRad;
             flattened.state_vf_mps = source.forwardSpeedMps;
             flattened.state_vr_mps = source.rightwardSpeedMps;
-            flattened.state_yaw_rate_radps = source.yawRateRadps;
+            flattened.state_yaw_rate_raw_radps = source.rawYawRateRadps;
+            flattened.state_yaw_rate_bias_radps = source.yawRateBiasRadps;
+            flattened.state_yaw_rate_radps = source.correctedYawRateRadps;
             flattened.state_left_wheel_speed_radps = source.leftWheelSpeedRadps;
             flattened.state_right_wheel_speed_radps = source.rightWheelSpeedRadps;
-            flattened.state_gyro_bias_z_radps = source.gyroBiasZRadps;
             flattened.command_mps = -10.75f;
 
             Assert::AreEqual(sizeof(flattened), sizeof(hierarchical));

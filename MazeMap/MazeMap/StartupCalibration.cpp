@@ -751,12 +751,7 @@ namespace MazeMap::App::Internal
             return false;
         }
 
-        const float gyroBiasRadps = _vehicle->BackLeftImu().RuntimeGyroBiasRadps();
         _imuCalibrationComplete = true;
-        if (_runtime != nullptr)
-        {
-            (void)_runtime->Estimator().SetGyroBiasZ(gyroBiasRadps);
-        }
         RefreshSensorsCalibrated();
         return true;
     }

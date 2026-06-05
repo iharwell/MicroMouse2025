@@ -153,6 +153,31 @@ namespace MazeMap
 			Assert::IsTrue(combined.HasFrontRightWall());
 		}
 
+		TEST_METHOD(BuildEvidenceObservationSnapshotAveragesRawBiasAndCorrectedYawRates)
+		{
+			SensorSnapshot samples[3]{};
+			samples[0].SetRawYawRateRadps(0.30f);
+			samples[0].SetYawRateBiasRadps(0.10f);
+			samples[0].SetYawRateRadps(0.20f);
+			samples[1].SetRawYawRateRadps(0.36f);
+			samples[1].SetYawRateBiasRadps(0.12f);
+			samples[1].SetYawRateRadps(0.24f);
+			samples[2].SetRawYawRateRadps(0.42f);
+			samples[2].SetYawRateBiasRadps(0.14f);
+			samples[2].SetYawRateRadps(0.28f);
+
+			SensorSnapshot combined{};
+			Assert::IsTrue(combined.BuildEvidenceObservationSnapshot(samples, 3U));
+
+			Assert::AreEqual(0.36f, combined.RawYawRateRadps(), 1.0e-6f);
+			Assert::AreEqual(0.12f, combined.YawRateBiasRadps(), 1.0e-6f);
+			Assert::AreEqual(0.24f, combined.YawRateRadps(), 1.0e-6f);
+			Assert::AreEqual(
+				combined.RawYawRateRadps() - combined.YawRateBiasRadps(),
+				combined.YawRateRadps(),
+				1.0e-6f);
+		}
+
 		TEST_METHOD(WallBeliefMapConfirmsUnknownWallAndMirrorsNeighbor)
 		{
 			WallBeliefMap beliefs;

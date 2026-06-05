@@ -601,9 +601,9 @@ namespace MazeMap::App::Internal
 
         if (((_sensorWorkBits & (RuntimeSensorSuite::kGyroSensorBit | RuntimeSensorSuite::kAccelSensorBit)) != 0U) &&
             ((_sensorWorkBits & RuntimeSensorSuite::kGyroSensorBit) != 0U) &&
-            std::isfinite(snapshot.RawYawRateRadps()))
+            std::isfinite(snapshot.YawRateRadps()))
         {
-            if (!estimator.updateYawRate(snapshot.RawYawRateRadps()))
+            if (!estimator.updateYawRate(snapshot.YawRateRadps()))
             {
                 timing._estimatorUpdateEndUs = static_cast<std::uint32_t>(micros());
                 timing._estimatorUpdateDurationUs =

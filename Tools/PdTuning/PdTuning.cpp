@@ -1033,8 +1033,7 @@
             std::isfinite(state.GetRightwardVelocity()) &&
             std::isfinite(state.GetYawRate()) &&
             std::isfinite(state.GetWheelSpeedLeft()) &&
-            std::isfinite(state.GetWheelSpeedRight()) &&
-            std::isfinite(state.GetGyroBiasZ());
+            std::isfinite(state.GetWheelSpeedRight());
     }
 
     static float SignalValue(const MazeMap::VehicleState& state, SignalKind signal) noexcept
@@ -1111,7 +1110,6 @@
         runtimeState.SetYawRate(truth.GetYawRate());
         runtimeState.SetWheelSpeedLeft(truth.GetWheelSpeedLeft());
         runtimeState.SetWheelSpeedRight(truth.GetWheelSpeedRight());
-        runtimeState.SetGyroBiasZ(truth.GetGyroBiasZ());
         runtimeState.SetForwardAcceleration(0.0f);
         runtimeState.SetRightAcceleration(0.0f);
         runtimeState.SetYawAccel(0.0f);
@@ -1272,9 +1270,9 @@
             (void)estimator.updateEncoderPair(snapshot.EncoderObservation(), dtSeconds, false);
         }
 
-        if (std::isfinite(snapshot.RawYawRateRadps()))
+        if (std::isfinite(snapshot.YawRateRadps()))
         {
-            if (!estimator.updateYawRate(snapshot.RawYawRateRadps()))
+            if (!estimator.updateYawRate(snapshot.YawRateRadps()))
             {
                 return false;
             }

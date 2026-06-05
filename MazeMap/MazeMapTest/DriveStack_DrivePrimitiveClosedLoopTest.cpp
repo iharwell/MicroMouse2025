@@ -121,8 +121,7 @@ namespace MazeMap::App
                 std::isfinite(state.GetRightwardVelocity()) &&
                 std::isfinite(state.GetYawRate()) &&
                 std::isfinite(state.GetWheelSpeedLeft()) &&
-                std::isfinite(state.GetWheelSpeedRight()) &&
-                std::isfinite(state.GetGyroBiasZ());
+                std::isfinite(state.GetWheelSpeedRight());
         }
 
         void PublishTruthToRuntime(
@@ -153,7 +152,6 @@ namespace MazeMap::App
             state.SetYawRate(truth.GetYawRate());
             state.SetWheelSpeedLeft(truth.GetWheelSpeedLeft());
             state.SetWheelSpeedRight(truth.GetWheelSpeedRight());
-            state.SetGyroBiasZ(truth.GetGyroBiasZ());
             state.SetSensorSnapshot(snapshot);
         }
 

@@ -48,9 +48,9 @@ class BuildFeedforwardTensorTest(unittest.TestCase):
             self.assertEqual(len(samples), 1)
             sample = samples[0]
             self.assertAlmostEqual(sample.present_velocity_mps, 0.20, places=9)
-            self.assertAlmostEqual(sample.present_yaw_rate_radps, 0.10, places=9)
+            self.assertAlmostEqual(sample.present_yaw_rate_radps, 0.12, places=9)
             self.assertAlmostEqual(sample.desired_accel_mps2, 4.0, places=9)
-            self.assertAlmostEqual(sample.desired_alpha_radps2, -4.0, places=9)
+            self.assertAlmostEqual(sample.desired_alpha_radps2, -2.0, places=9)
             self.assertAlmostEqual(sample.left_raw_command, 0.30, places=9)
             self.assertAlmostEqual(sample.right_raw_command, 0.50, places=9)
 

@@ -23,8 +23,6 @@ namespace MazeMap
             int32_t rightEncoderCount = 0;
             float leftEncoderWheelSpeedRadps = 0.0f;
             float rightEncoderWheelSpeedRadps = 0.0f;
-            float gyroRawRadps = 0.0f;
-            float gyroBiasRadps = 0.0f;
             float accelBodyRightMps2 = 0.0f;
             float accelBodyForwardMps2 = 0.0f;
         };
@@ -37,7 +35,6 @@ namespace MazeMap
                 0.39405635f, -0.4572624862f,
                 144, 115,
                 0.9068602324f, 0.9068602324f,
-                -0.0280998014f, -0.0029914798f,
                 0.0326640718f, 0.1455999613f
             },
             {
@@ -46,7 +43,6 @@ namespace MazeMap
                 0.0f, 0.0f,
                 156, 97,
                 1.0090416670f, -0.5045208335f,
-                -0.0537561402f, -0.0029914798f,
                 0.1570908427f, 0.0690296590f
             },
             {
@@ -55,7 +51,6 @@ namespace MazeMap
                 -0.18f, -0.18f,
                 155, 98,
                 1.8268189430f, -2.8232655525f,
-                -0.0610865243f, -0.0029914798f,
                 -0.0486919172f, 0.3585612178f
             },
             {
@@ -64,7 +59,6 @@ namespace MazeMap
                 -0.18f, -0.18f,
                 150, 104,
                 -0.8989821672f, 0.4494910836f,
-                -0.1588249654f, -0.0029914798f,
                 -0.5057210326f, -0.3951779306f
             },
             {
@@ -73,7 +67,6 @@ namespace MazeMap
                 -0.18f, -0.18f,
                 151, 107,
                 -0.6795662045f, 1.1892408133f,
-                -0.1295034289f, -0.0029914798f,
                 -0.4315435290f, -0.8928850293f
             },
             {
@@ -82,7 +75,6 @@ namespace MazeMap
                 -0.18f, -0.18f,
                 156, 108,
                 0.9157773852f, 0.9157773852f,
-                -0.1123992056f, -0.0029914798f,
                 0.0661635697f, -1.0173118114f
             },
             {
@@ -91,7 +83,6 @@ namespace MazeMap
                 -0.18f, -0.18f,
                 158, 108,
                 1.0711276531f, 0.2677819133f,
-                -0.0781907514f, -0.0029914798f,
                 0.1259841472f, -1.0819180012f
             },
             {
@@ -100,7 +91,6 @@ namespace MazeMap
                 -0.18f, -0.18f,
                 159, 107,
                 0.9166785479f, 0.0f,
-                -0.0598647930f, -0.0029914798f,
                 0.3317668736f, -1.1082390547f
             }
         };
@@ -117,7 +107,6 @@ namespace MazeMap
             const LoggedOpenFloorPoseJumpSample& first = kLatestLoggedOpenFloorPoseJumpWindow[0];
 
             EstimatorTestRuntime runtime;
-            runtime.runtimeState.SetGyroBiasZ(first.gyroBiasRadps);
             runtime.runtimeState.SetWheelSpeedLeft(first.leftEncoderWheelSpeedRadps);
             runtime.runtimeState.SetWheelSpeedRight(first.rightEncoderWheelSpeedRadps);
             Estimator core(runtime.vehicle, runtime.plantModel, runtime.runtimeState);
@@ -127,7 +116,7 @@ namespace MazeMap
             initialState(2) = NormalizeAngle(first.poseYawRad);
             initialState(3) = first.measuredLinearSpeedMps;
             initialState(4) = 0.0f;
-            initialState(5) = first.gyroRawRadps - first.gyroBiasRadps;
+            initialState(5) = first.measuredAngularSpeedRadps;
             initialState(6) = 0.0f;
             initialState(7) = 0.0f;
             initialState(8) = 0.0f;
@@ -156,7 +145,7 @@ namespace MazeMap
                 (void)core.updateEncoderPair(encoderObservation, sample.dtSeconds, true);
                 Assert::IsTrue(core.LastUpdateAttempted());
 
-                (void)core.updateYawRate(sample.gyroRawRadps);
+                (void)core.updateYawRate(sample.measuredAngularSpeedRadps);
                 Assert::IsTrue(core.LastUpdateAttempted());
 
                 const bool accelObservationValid =

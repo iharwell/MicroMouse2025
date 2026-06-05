@@ -110,7 +110,9 @@ bool SensorSnapshot::BuildEvidenceObservationSnapshot(
     float corridorErrorSum = 0.0f;
     float frontSkewSum = 0.0f;
     float planarAccelSum = 0.0f;
-    float gyroSum = 0.0f;
+    float rawYawRateSum = 0.0f;
+    float yawRateBiasSum = 0.0f;
+    float yawRateOnlySum = 0.0f;
     uint8_t frontLeftDistanceCount = 0U;
     uint8_t frontRightDistanceCount = 0U;
     uint8_t frontLeftDifferentialLightCount = 0U;
@@ -122,7 +124,8 @@ bool SensorSnapshot::BuildEvidenceObservationSnapshot(
     uint8_t corridorErrorCount = 0U;
     uint8_t frontSkewCount = 0U;
     uint8_t planarAccelCount = 0U;
-    uint8_t gyroCount = 0U;
+    uint8_t yawRatePairCount = 0U;
+    uint8_t yawRateOnlyCount = 0U;
     float frontEvidenceScore = 0.0f;
     float leftEvidenceScore = 0.0f;
     float rightEvidenceScore = 0.0f;
@@ -261,10 +264,18 @@ bool SensorSnapshot::BuildEvidenceObservationSnapshot(
             planarAccelSum += sample.PlanarAccelerationMps2();
             ++planarAccelCount;
         }
-        if (std::isfinite(sample.YawRateRadps()))
+        const bool rawYawRateFinite = std::isfinite(sample.RawYawRateRadps());
+        const bool yawRateBiasFinite = std::isfinite(sample.YawRateBiasRadps());
+        if (rawYawRateFinite && yawRateBiasFinite)
         {
-            gyroSum += sample.YawRateRadps();
-            ++gyroCount;
+            rawYawRateSum += sample.RawYawRateRadps();
+            yawRateBiasSum += sample.YawRateBiasRadps();
+            ++yawRatePairCount;
+        }
+        else if (std::isfinite(sample.YawRateRadps()))
+        {
+            yawRateOnlySum += sample.YawRateRadps();
+            ++yawRateOnlyCount;
         }
         if (frontObservationValid && sample.FrontLeftWallSensorObservation().IsValid())
         {
@@ -313,8 +324,21 @@ bool SensorSnapshot::BuildEvidenceObservationSnapshot(
         AverageFiniteObservationValue(frontSkewSum, frontSkewCount, lastSample.FrontSkewM()));
     combinedSnapshot.SetPlanarAccelerationMps2(
         AverageFiniteObservationValue(planarAccelSum, planarAccelCount, lastSample.PlanarAccelerationMps2()));
-    combinedSnapshot.SetYawRateRadps(
-        AverageFiniteObservationValue(gyroSum, gyroCount, lastSample.YawRateRadps()));
+    if (yawRatePairCount > 0U)
+    {
+        const float rawYawRateRadps = rawYawRateSum / static_cast<float>(yawRatePairCount);
+        const float yawRateBiasRadps = yawRateBiasSum / static_cast<float>(yawRatePairCount);
+        combinedSnapshot.SetRawYawRateRadps(rawYawRateRadps);
+        combinedSnapshot.SetYawRateBiasRadps(yawRateBiasRadps);
+        combinedSnapshot.SetYawRateRadps(rawYawRateRadps - yawRateBiasRadps);
+    }
+    else
+    {
+        combinedSnapshot.SetRawYawRateRadps(lastSample.RawYawRateRadps());
+        combinedSnapshot.SetYawRateBiasRadps(lastSample.YawRateBiasRadps());
+        combinedSnapshot.SetYawRateRadps(
+            AverageFiniteObservationValue(yawRateOnlySum, yawRateOnlyCount, lastSample.YawRateRadps()));
+    }
     const MazeMap::WallSampleClassification frontDecision =
         FinalWallEvidenceClassification(
             frontEvidenceScore,

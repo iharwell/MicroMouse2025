@@ -40,8 +40,6 @@ namespace MazeMap
         VehicleState() noexcept
             : _state(Eigen::Matrix<float, kDimension, 1>::Zero())
             , _sqrtCovariance(Eigen::Matrix<float, kDimension, kDimension>::Zero())
-            , _gyroBiasZRadps(0.0f)
-            , _gyroBiasZVarianceRadps2(3.05e-4f)
             , _time(0.0f)
             , _timestampUs(0U)
         {
@@ -129,17 +127,6 @@ namespace MazeMap
         }
         float GetWheelSpeedRight() const noexcept { return _sensorSnapshot.EncoderObservation().RightWheelSpeedRadps(); }
         float GetWheelSpeedRight() noexcept { return const_cast<const VehicleState*>(this)->GetWheelSpeedRight(); }
-
-        void SetGyroBiasZ(float gyroBiasRadps) noexcept { _gyroBiasZRadps = gyroBiasRadps; }
-        float GetGyroBiasZ() const noexcept { return _gyroBiasZRadps; }
-        float GetGyroBiasZ() noexcept { return const_cast<const VehicleState*>(this)->GetGyroBiasZ(); }
-
-        void SetGyroBiasZVar(float gyroBiasVarianceRadps2) noexcept
-        {
-            _gyroBiasZVarianceRadps2 = (std::max)(0.0f, gyroBiasVarianceRadps2);
-        }
-        float GetGyroBiasZVar() const noexcept { return _gyroBiasZVarianceRadps2; }
-        float GetGyroBiasZVar() noexcept { return const_cast<const VehicleState*>(this)->GetGyroBiasZVar(); }
 
         void SetTime(float time) noexcept { _time = time; }
         float GetTime() const noexcept { return _time; }
@@ -300,8 +287,6 @@ namespace MazeMap
 
         Eigen::Matrix<float, kDimension, 1> _state;
         Eigen::Matrix<float, kDimension, kDimension> _sqrtCovariance;
-        float _gyroBiasZRadps;
-        float _gyroBiasZVarianceRadps2;
         float _forwardAccelerationMps2 = 0.0f;
         float _rightAccelerationMps2 = 0.0f;
         float _yawAccelRadps2 = 0.0f;
@@ -320,8 +305,7 @@ namespace MazeMap
     X(float, yaw_rate_radps) \
     X(float, delta_af_mps2) \
     X(float, delta_ar_mps2) \
-    X(float, delta_yaw_accel_radps2) \
-    X(float, gyro_bias_z_radps)
+    X(float, delta_yaw_accel_radps2)
 
     MMLOG_DEFINE_PRIVATE_ENTRY_WITH_BODY(
         VehicleStateLogEntry,
@@ -337,7 +321,6 @@ namespace MazeMap
             delta_af_mps2 = state.GetForwardAccelerationResidual();
             delta_ar_mps2 = state.GetRightwardAccelerationResidual();
             delta_yaw_accel_radps2 = state.GetYawAccelResidual();
-            gyro_bias_z_radps = state.GetGyroBiasZ();
         });
 
 #undef VEHICLE_STATE_LOG_FIELDS

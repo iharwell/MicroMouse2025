@@ -88,9 +88,7 @@ namespace MazeMap::App::Internal::Runtime
     X(std::uint16_t, repeat_index)                 \
     X(std::uint16_t, mode_flags)                   \
     X(std::uint8_t,  ukf_mode_id)                  \
-    X(std::uint8_t,  bias_update_enabled)          \
     X(MazeMap::VehicleStateLogEntry, ukf_state) \
-    X(float,         gyro_bias_anchor_radps)       \
     X(float,         yaw_consistency_lp_radps)     \
     X(float,         yaw_window_mismatch_rad)      \
     X(float,         nhc_sigma_mps)                \
@@ -135,7 +133,15 @@ namespace MazeMap::App::Internal::Runtime
     X(float,         planar_accel_mps2)            \
     X(std::uint32_t, front_timestamp_us)           \
     X(std::uint32_t, left_timestamp_us)            \
-    X(std::uint32_t, right_timestamp_us)
+    X(std::uint32_t, right_timestamp_us)           \
+    X(std::uint16_t, front_left_wall_ambient_adc)  \
+    X(std::uint16_t, front_left_wall_lit_adc)      \
+    X(std::uint16_t, front_right_wall_ambient_adc) \
+    X(std::uint16_t, front_right_wall_lit_adc)     \
+    X(std::uint16_t, side_left_wall_ambient_adc)   \
+    X(std::uint16_t, side_left_wall_lit_adc)       \
+    X(std::uint16_t, side_right_wall_ambient_adc)  \
+    X(std::uint16_t, side_right_wall_lit_adc)
 
     MMLOG_DEFINE_ROW_WITH_BODY(
         OpenFloorMainRow,

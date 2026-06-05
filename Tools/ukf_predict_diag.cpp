@@ -39,7 +39,6 @@ int main(int argc, char** argv)
         state.SetYawRate(0.0f);
         state.SetWheelSpeedLeft(0.0f);
         state.SetWheelSpeedRight(0.0f);
-        state.SetGyroBiasZ(0.0f);
         MazeMap::PlantModel plant(vehicle, state);
 
         const float previousVrMps = state.GetRightwardVelocity();
@@ -64,7 +63,6 @@ int main(int argc, char** argv)
     stationaryState.SetYawRate(0.0f);
     stationaryState.SetWheelSpeedLeft(0.0f);
     stationaryState.SetWheelSpeedRight(0.0f);
-    stationaryState.SetGyroBiasZ(0.0f);
     MazeMap::PlantModel stationaryPlant(stationaryVehicle, stationaryState);
     MazeMap::Estimator stationaryEstimator(stationaryVehicle, stationaryPlant, stationaryState);
 
@@ -159,15 +157,14 @@ int main(int argc, char** argv)
     yawOnlyState.SetYawRate(0.0f);
     yawOnlyState.SetWheelSpeedLeft(0.0f);
     yawOnlyState.SetWheelSpeedRight(0.0f);
-    yawOnlyState.SetGyroBiasZ(0.0f);
     MazeMap::PlantModel yawOnlyPlant(yawOnlyVehicle, yawOnlyState);
     MazeMap::Estimator yawOnlyEstimator(yawOnlyVehicle, yawOnlyPlant, yawOnlyState);
-    const bool yawAccepted = yawOnlyEstimator.updateYawRate(0.35f);
+    const float correctedYawRateRadps = 0.35f;
+    const bool yawAccepted = yawOnlyEstimator.updateYawRate(correctedYawRateRadps);
     std::cout
         << "yaw_only_update"
         << " accepted=" << yawAccepted
-        << " yaw_rate=" << yawOnlyState.GetYawRate()
-        << " yaw_rate_bias=" << yawOnlyState.GetGyroBiasZ()
+        << " corrected_yaw_rate=" << yawOnlyState.GetYawRate()
         << '\n';
 
     const float distancePerCountM = MazeMap::Vehicle::DriveEncoderDistanceFromCounts(1);
@@ -183,7 +180,6 @@ int main(int argc, char** argv)
     movingEncoderState.SetYawRate(0.0f);
     movingEncoderState.SetWheelSpeedLeft(measuredWheelSpeedRadps);
     movingEncoderState.SetWheelSpeedRight(measuredWheelSpeedRadps);
-    movingEncoderState.SetGyroBiasZ(0.0f);
     MazeMap::PlantModel movingEncoderPlant(movingEncoderVehicle, movingEncoderState);
     MazeMap::Estimator movingEncoderEstimator(movingEncoderVehicle, movingEncoderPlant, movingEncoderState);
     (void)movingEncoderEstimator.predict(kTickSeconds, zeroControl);
