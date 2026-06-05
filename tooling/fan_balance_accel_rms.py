@@ -26,6 +26,7 @@ from decode_mmlog_to_csv import resolve_sidecar_path
 DEFAULT_MMLOG_PATH = Path(r"D:\open_floor_main.mmlog")
 DEFAULT_ACCEL_FIELD = "imu_accel_x"
 DEFAULT_TIME_FIELD = "master_time_us"
+DEFAULT_IGNORE_TAIL_S = 1.0
 UINT32_MODULUS = 1 << 32
 
 
@@ -35,6 +36,8 @@ class RmsResult:
     sample_count: int
     elapsed_start_s: float
     elapsed_end_s: float
+    log_end_s: float
+    ignored_tail_s: float
 
 
 def field_index(spec: SidecarSpec, field_name: str) -> int:
@@ -57,17 +60,34 @@ def delta_u32_seconds(current_us: int, previous_us: int) -> float:
     return 1.0e-6 * (current_us + UINT32_MODULUS - previous_us)
 
 
+def log_duration_seconds(payload: bytes, spec: SidecarSpec, time_index: int, mmlog_path: Path) -> float:
+    first_time_us: int | None = None
+    last_time_us: int | None = None
+    for row in iter_rows(payload, spec):
+        current_time_us = int(row[time_index])
+        if first_time_us is None:
+            first_time_us = current_time_us
+        last_time_us = current_time_us
+
+    if first_time_us is None or last_time_us is None:
+        raise MMLogError(f"No rows found in {mmlog_path}")
+    return elapsed_u32_seconds(last_time_us, first_time_us)
+
+
 def high_pass_rms_from_mmlog(
     mmlog_path: Path,
     accel_field_name: str,
     time_field_name: str,
     cutoff_hz: float,
     start_s: float,
+    ignore_tail_s: float,
 ) -> RmsResult:
     if cutoff_hz <= 0.0:
         raise ValueError("cutoff_hz must be positive")
     if start_s < 0.0:
         raise ValueError("start_s must be non-negative")
+    if ignore_tail_s < 0.0:
+        raise ValueError("ignore_tail_s must be non-negative")
 
     sidecar_ref, payload = read_mmlog_header_and_payload(mmlog_path)
     sidecar_path = resolve_sidecar_path(mmlog_path, sidecar_ref)
@@ -81,6 +101,14 @@ def high_pass_rms_from_mmlog(
             f"Field {accel_field_name!r} is {accel_field.type_name}, expected i16 raw accelerometer data"
         )
 
+    log_end_s = log_duration_seconds(payload, spec, time_index, mmlog_path)
+    rms_end_s = log_end_s - ignore_tail_s
+    if rms_end_s < start_s:
+        raise MMLogError(
+            f"No RMS window remains after ignoring the last {ignore_tail_s:.6g} s; "
+            f"log duration is {log_end_s:.6g} s and start is {start_s:.6g} s"
+        )
+
     rc_s = 1.0 / (2.0 * math.pi * cutoff_hz)
     first_time_us: int | None = None
     previous_time_us: int | None = None
@@ -88,7 +116,6 @@ def high_pass_rms_from_mmlog(
     previous_output = 0.0
     sum_squares = 0.0
     rms_sample_count = 0
-    elapsed_end_s = 0.0
 
     for row in iter_rows(payload, spec):
         current_time_us = int(row[time_index])
@@ -98,7 +125,7 @@ def high_pass_rms_from_mmlog(
             first_time_us = current_time_us
             previous_time_us = current_time_us
             previous_input = current_input
-            if start_s <= 0.0:
+            if start_s <= 0.0 <= rms_end_s:
                 rms_sample_count = 1
             continue
 
@@ -114,9 +141,8 @@ def high_pass_rms_from_mmlog(
         alpha = rc_s / (rc_s + dt_s)
         current_output = alpha * (previous_output + current_input - previous_input)
         elapsed_s = elapsed_u32_seconds(current_time_us, first_time_us)
-        elapsed_end_s = elapsed_s
 
-        if elapsed_s >= start_s:
+        if start_s <= elapsed_s <= rms_end_s:
             sum_squares += current_output * current_output
             rms_sample_count += 1
 
@@ -128,14 +154,17 @@ def high_pass_rms_from_mmlog(
         raise MMLogError(f"No rows found in {mmlog_path}")
     if rms_sample_count == 0:
         raise MMLogError(
-            f"No samples at or after {start_s:.6g} s; log duration is {elapsed_end_s:.6g} s"
+            f"No samples from {start_s:.6g} s through {rms_end_s:.6g} s; "
+            f"log duration is {log_end_s:.6g} s"
         )
 
     return RmsResult(
         rms=math.sqrt(sum_squares / rms_sample_count),
         sample_count=rms_sample_count,
         elapsed_start_s=start_s,
-        elapsed_end_s=elapsed_end_s,
+        elapsed_end_s=rms_end_s,
+        log_end_s=log_end_s,
+        ignored_tail_s=ignore_tail_s,
     )
 
 
@@ -143,7 +172,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Print the RMS of raw accel-X after a 100 Hz high-pass filter, "
-            "using D:\\open_floor_main.mmlog by default."
+            "using D:\\open_floor_main.mmlog and ignoring the final second by default."
         )
     )
     parser.add_argument(
@@ -175,6 +204,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Elapsed log time where RMS accumulation starts. Default: 2.0",
     )
     parser.add_argument(
+        "--ignore-tail-s",
+        type=float,
+        default=DEFAULT_IGNORE_TAIL_S,
+        help="Seconds to ignore at the end of the log. Default: 1.0",
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="Print source and sample-count context in addition to the RMS value.",
@@ -191,6 +226,7 @@ def main(argv: list[str] | None = None) -> int:
             time_field_name=args.time_field,
             cutoff_hz=args.cutoff_hz,
             start_s=args.start_s,
+            ignore_tail_s=args.ignore_tail_s,
         )
     except (OSError, MMLogError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -200,6 +236,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"mmlog={args.mmlog}")
         print(f"field={args.field}")
         print(f"cutoff_hz={args.cutoff_hz:.6g}")
+        print(f"ignored_tail_s={result.ignored_tail_s:.6g}")
+        print(f"log_end_s={result.log_end_s:.6g}")
         print(f"rms_window_s={result.elapsed_start_s:.6g}..{result.elapsed_end_s:.6g}")
         print(f"samples={result.sample_count}")
         print(f"rms={result.rms:.6f}")
