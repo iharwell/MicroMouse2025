@@ -57,6 +57,27 @@
     <ClInclude Include="EstimatorRuntimeMotionUpdateTestSupport.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="DriveManeuverContractTestSupport.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="DriveStack_DriveBasePlantBoundaryTestSupport.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="DriveStack_EstimatorReplayTestSupport.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="DriveStack_PlantModelPhysicsTestSupport.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="EstimatorBiasAndStationaryTestSupport.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="EstimatorModeAndDiagnosticsTestSupport.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="PlantModelDynamicsTestSupport.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="CellTest.cpp">
@@ -68,7 +89,19 @@
     <ClCompile Include="DriveBaseTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="DriveManeuverTests.cpp">
+    <ClCompile Include="DriveManeuverInPlaceContractTests.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="DriveManeuverS135ContractTests.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="DriveManeuverS180ContractTests.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="DriveManeuverS45ContractTests.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="DriveManeuverS90ContractTests.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="DirectionTest.cpp">
@@ -83,7 +116,28 @@
     <ClCompile Include="FresnelTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="DriveStack_DriveBasePlantBoundaryTest.cpp">
+    <ClCompile Include="DriveStack_DriveBasePlantBoundaryAccelerationTargetLongRunTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="DriveStack_DriveBasePlantBoundaryClampEvidenceTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="DriveStack_DriveBasePlantBoundaryHeadingHoldLongRunTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="DriveStack_DriveBasePlantBoundarySnapshotTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="DriveStack_DriveBasePlantBoundarySolverFailureEvidenceTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="DriveStack_DriveBasePlantBoundaryVelocityFeedbackTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="DriveStack_DriveBasePlantBoundaryVelocityTargetLongRunTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="DriveStack_DriveBasePlantBoundaryYawRateTargetLongRunTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="DriveStack_DriveManeuverProfileTest.cpp">
@@ -92,13 +146,43 @@
     <ClCompile Include="DriveStack_DrivePrimitiveClosedLoopTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="DriveStack_EstimatorReplayTest.cpp">
+    <ClCompile Include="DriveStack_CombinedEncoderGyroReplayTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="DriveStack_DifferentialEncoderReplayTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="DriveStack_ForwardEncoderReplayTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="DriveStack_GyroOnlyReplayTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="DriveStack_ManeuverGeometryTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="DriveStack_PlantModelPhysicsTest.cpp">
+    <ClCompile Include="DriveStack_PlantModelAccelerationFeedforwardTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="DriveStack_PlantModelAxisConventionTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="DriveStack_PlantModelDirectIntegrationTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="DriveStack_PlantModelFanLoadTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="DriveStack_PlantModelNumericStabilityTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="DriveStack_PlantModelStictionTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="DriveStack_PlantModelSymmetricDriveTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="DriveStack_PlantModelWheelYawSignTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="DriveStack_VehiclePlantBoundaryTest.cpp">
@@ -155,7 +239,82 @@
     <ClCompile Include="PlantModelDriveCommandTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="PlantModelDynamicsTest.cpp">
+    <ClCompile Include="PlantModelContactContinuumAboveForwardTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PlantModelContactContinuumBelowForwardTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PlantModelContactContinuumForceTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PlantModelContactContinuumYawTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PlantModelContactContinuumZeroForwardTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PlantModelDriveBasicsTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PlantModelDynamicsTestSupport.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PlantModelFeedforwardTimingTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PlantModelFrictionAndSubthresholdTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PlantModelHeadingNormalizationTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PlantModelImuAccelerationTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PlantModelInPlaceSlipContactTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PlantModelInPlaceSlipDecayTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PlantModelLargeStepIntegrationTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PlantModelLateralAccelerationLimitTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PlantModelLowSpeedYawTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PlantModelMixedSlipBoundsTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PlantModelMixedSlipFiniteTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PlantModelMixedSlipStateTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PlantModelPositiveDriveTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PlantModelResidualDecayTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PlantModelRestHoldTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PlantModelStationaryPerturbationTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PlantModelTireSaturationTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PlantModelWheelSpinDecayTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PlantModelWheelSpinStateTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="RelativeDirectionalDistanceTest.cpp">
@@ -164,10 +323,61 @@
     <ClCompile Include="SearchRunPlannerTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="EstimatorBiasAndStationaryTest.cpp">
+    <ClCompile Include="EstimatorDefaultInitialCovarianceTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="EstimatorModeAndDiagnosticsTest.cpp">
+    <ClCompile Include="EstimatorDiagnosticDumpTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorEncoderNoiseTuningTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorExactStationaryLockTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorImuTuningTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorLaunchTransientTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorNonzeroStationaryEncoderCountsTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorPivotCommandTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorPivotConflictEncoderTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorPivotConflictYawTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorPlanarAccelChannelSensitivityTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorPlanarAccelCredibleGripTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorPlanarAccelNoncredibleGripTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorRepeatedStationaryCycleTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorRepeatedZeroMotionStabilityTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorStationaryReleaseCovarianceTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorStationaryYawConstraintTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorYawPlanarAccelSeparabilityTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorZeroEncoderStationaryVarianceTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="EstimatorActiveCommandStorageTest.cpp">

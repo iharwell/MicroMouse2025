@@ -1,5 +1,4 @@
-#include "pch.h"
-#include "CppUnitTest.h"
+#pragma once
 
 #include "EstimatorFilterTestSupport.h"
 #include "..\MazeMap\PlantModel.h"
@@ -9,11 +8,10 @@
 #include <string>
 #include <vector>
 
-using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
 namespace MazeMap
 {
-    namespace
+    namespace EstimatorModeAndDiagnosticsTestSupport
     {
         using StateVector = Eigen::Matrix<float, VehicleState::kDimension, 1>;
         using CovarianceMatrix = Eigen::Matrix<float, VehicleState::kDimension, VehicleState::kDimension>;
@@ -21,34 +19,34 @@ namespace MazeMap
 
         constexpr float kPlanarAccelUpdateTestDtSeconds = 0.001f;
 
-        const wchar_t* BoolText(const bool value) noexcept
+        inline const wchar_t* BoolText(const bool value) noexcept
         {
             return value ? L"true" : L"false";
         }
 
-        float NaN() noexcept
+        inline float NaN() noexcept
         {
             return std::numeric_limits<float>::quiet_NaN();
         }
 
-        StateVector NaNState()
+        inline StateVector NaNState()
         {
             return StateVector::Constant(NaN());
         }
 
-        CovarianceMatrix NaNCovariance()
+        inline CovarianceMatrix NaNCovariance()
         {
             return CovarianceMatrix::Constant(NaN());
         }
 
-        std::wstring StatusMessage(const bool completed, const int step, const wchar_t* operation)
+        inline std::wstring StatusMessage(const bool completed, const int step, const wchar_t* operation)
         {
             return std::wstring(L"setup_completed=") + BoolText(completed) +
                 L" operation=" + operation +
                 L" step=" + std::to_wstring(step);
         }
 
-        std::wstring ValueMessage(
+        inline std::wstring ValueMessage(
             const wchar_t* field,
             const float actual,
             const wchar_t* detail)
@@ -58,7 +56,7 @@ namespace MazeMap
                 L" detail=" + detail;
         }
 
-        std::wstring BoolMessage(
+        inline std::wstring BoolMessage(
             const wchar_t* field,
             const bool actual,
             const wchar_t* expected,
@@ -70,7 +68,7 @@ namespace MazeMap
                 L" detail=" + detail;
         }
 
-        std::wstring LimitMessage(
+        inline std::wstring LimitMessage(
             const wchar_t* field,
             const float actual,
             const wchar_t* relation,
@@ -90,7 +88,7 @@ namespace MazeMap
             const wchar_t* operation = L"complete";
         };
 
-        void RecordOperation(
+        inline void RecordOperation(
             ScenarioStatus& status,
             const bool accepted,
             const int step,
@@ -111,12 +109,12 @@ namespace MazeMap
             status.operation = operation;
         }
 
-        std::wstring ScenarioMessage(const ScenarioStatus& status)
+        inline std::wstring ScenarioMessage(const ScenarioStatus& status)
         {
             return StatusMessage(status.completed, status.step, status.operation);
         }
 
-        std::wstring ScenarioPairMessage(
+        inline std::wstring ScenarioPairMessage(
             const ScenarioStatus& first,
             const ScenarioStatus& second,
             const wchar_t* firstName,
@@ -126,7 +124,7 @@ namespace MazeMap
                 secondName + L"{" + ScenarioMessage(second) + L"}";
         }
 
-        std::wstring ScenarioTripleMessage(
+        inline std::wstring ScenarioTripleMessage(
             const ScenarioStatus& first,
             const ScenarioStatus& second,
             const ScenarioStatus& third,
@@ -140,18 +138,18 @@ namespace MazeMap
         }
 
         template <typename Matrix>
-        float MaxAbsCoeff(const Matrix& matrix)
+        inline float MaxAbsCoeff(const Matrix& matrix)
         {
             return matrix.cwiseAbs().maxCoeff();
         }
 
         template <typename Matrix>
-        float MaxAbsDelta(const Matrix& left, const Matrix& right)
+        inline float MaxAbsDelta(const Matrix& left, const Matrix& right)
         {
             return MaxAbsCoeff(left - right);
         }
 
-        StateVector BuildPlanarAccelUpdateTestState() noexcept
+        inline StateVector BuildPlanarAccelUpdateTestState() noexcept
         {
             StateVector state = StateVector::Zero();
             state(0) = 0.03f;
@@ -163,7 +161,7 @@ namespace MazeMap
             return state;
         }
 
-        CovarianceMatrix BuildPlanarAccelUpdateTestCovariance() noexcept
+        inline CovarianceMatrix BuildPlanarAccelUpdateTestCovariance() noexcept
         {
             CovarianceMatrix covariance = CovarianceMatrix::Zero();
             covariance(0, 0) = 0.02f * 0.02f;
@@ -178,7 +176,7 @@ namespace MazeMap
             return covariance;
         }
 
-        App::Internal::CommandVector BuildPlanarAccelUpdateTestControl() noexcept
+        inline App::Internal::CommandVector BuildPlanarAccelUpdateTestControl() noexcept
         {
             App::Internal::CommandVector control{};
             control.SetLeftCommand(0.26f);
@@ -186,7 +184,7 @@ namespace MazeMap
             return control;
         }
 
-        ImuAccelObs BuildPlanarAccelObservation(
+        inline ImuAccelObs BuildPlanarAccelObservation(
             EstimatorTestRuntime& runtime,
             const StateVector& state,
             const App::Internal::CommandVector& control,
@@ -228,7 +226,7 @@ namespace MazeMap
                 predicted.x() + rightAccelDeltaMps2);
         }
 
-        StateVector BuildPivotConflictInitialState() noexcept
+        inline StateVector BuildPivotConflictInitialState() noexcept
         {
             StateVector state = StateVector::Zero();
             state(1) = 0.09f;
@@ -237,7 +235,7 @@ namespace MazeMap
             return state;
         }
 
-        CovarianceMatrix BuildPivotConflictInitialCovariance() noexcept
+        inline CovarianceMatrix BuildPivotConflictInitialCovariance() noexcept
         {
             CovarianceMatrix covariance = CovarianceMatrix::Zero();
             covariance(0, 0) = 0.001f * 0.001f;
@@ -252,7 +250,7 @@ namespace MazeMap
             return covariance;
         }
 
-        StateVector BuildDefaultMovingState() noexcept
+        inline StateVector BuildDefaultMovingState() noexcept
         {
             StateVector state = StateVector::Zero();
             state(1) = 0.09f;
@@ -261,7 +259,7 @@ namespace MazeMap
             return state;
         }
 
-        CovarianceMatrix BuildDefaultMovingCovariance() noexcept
+        inline CovarianceMatrix BuildDefaultMovingCovariance() noexcept
         {
             CovarianceMatrix covariance = CovarianceMatrix::Zero();
             covariance(0, 0) = 0.01f * 0.01f;
@@ -276,7 +274,7 @@ namespace MazeMap
             return covariance;
         }
 
-        StateVector BuildLaunchTransientInitialState() noexcept
+        inline StateVector BuildLaunchTransientInitialState() noexcept
         {
             StateVector state = StateVector::Zero();
             state(1) = 0.09f;
@@ -286,7 +284,7 @@ namespace MazeMap
             return state;
         }
 
-        CovarianceMatrix BuildLaunchTransientInitialCovariance() noexcept
+        inline CovarianceMatrix BuildLaunchTransientInitialCovariance() noexcept
         {
             CovarianceMatrix covariance = BuildDefaultMovingCovariance();
             covariance(4, 4) = 0.30f * 0.30f;
@@ -294,7 +292,7 @@ namespace MazeMap
             return covariance;
         }
 
-        StateVector BuildGripInitialState(
+        inline StateVector BuildGripInitialState(
             const float forwardVelocityMps,
             const float yawRateRadps) noexcept
         {
@@ -307,7 +305,7 @@ namespace MazeMap
             return state;
         }
 
-        CovarianceMatrix BuildGripInitialCovariance(const float lateralVarianceMps2) noexcept
+        inline CovarianceMatrix BuildGripInitialCovariance(const float lateralVarianceMps2) noexcept
         {
             CovarianceMatrix covariance = BuildDefaultMovingCovariance();
             covariance(4, 4) = lateralVarianceMps2;
@@ -322,7 +320,7 @@ namespace MazeMap
             float expectedCovarianceRadps2 = NaN();
         };
 
-        EncoderPairNoiseResult RunEncoderPairNoiseScenario()
+        inline EncoderPairNoiseResult RunEncoderPairNoiseScenario()
         {
             EncoderPairNoiseResult result{};
             EstimatorTestRuntime runtime;
@@ -357,6 +355,9 @@ namespace MazeMap
     class EstimatorModeAndDiagnosticsTest final
     {
     public:
+        using StateVector = EstimatorModeAndDiagnosticsTestSupport::StateVector;
+        using CovarianceMatrix = EstimatorModeAndDiagnosticsTestSupport::CovarianceMatrix;
+
         static StateVector WorkingState(const Estimator& core) noexcept
         {
             return core.workingState();
@@ -396,9 +397,9 @@ namespace MazeMap
         }
     };
 
-    namespace
+    namespace EstimatorModeAndDiagnosticsTestSupport
     {
-        ScenarioStatus PrimeCoreForPlanarAccelUpdate(
+        inline ScenarioStatus PrimeCoreForPlanarAccelUpdate(
             Estimator& core,
             const StateVector& initialState,
             const CovarianceMatrix& initialCovariance,
@@ -467,7 +468,7 @@ namespace MazeMap
             bool pivotYawLastAccepted = false;
         };
 
-        PivotConflictResult RunPivotConflictScenario()
+        inline PivotConflictResult RunPivotConflictScenario()
         {
             PivotConflictResult result{};
             EstimatorTestRuntime runtime;
@@ -610,7 +611,7 @@ namespace MazeMap
             float measuredYawRateRadps = NaN();
         };
 
-        PivotCommandResult RunPivotCommandScenario()
+        inline PivotCommandResult RunPivotCommandScenario()
         {
             PivotCommandResult result{};
             EstimatorTestRuntime runtime;
@@ -667,7 +668,7 @@ namespace MazeMap
             bool pivotLineReportsInactive = false;
         };
 
-        DiagnosticResult RunDiagnosticScenario()
+        inline DiagnosticResult RunDiagnosticScenario()
         {
             DiagnosticResult result{};
             Estimator core = MakeDefaultEstimator();
@@ -744,7 +745,7 @@ namespace MazeMap
             float lateralVelocityMps = NaN();
         };
 
-        LaunchTransientResult RunLaunchTransientScenario()
+        inline LaunchTransientResult RunLaunchTransientScenario()
         {
             LaunchTransientResult result{};
             Estimator core = MakeDefaultEstimator();
@@ -808,7 +809,7 @@ namespace MazeMap
             bool planarAccelAccepted = false;
         };
 
-        PlanarAccelGripResult RunPlanarAccelGripScenario(
+        inline PlanarAccelGripResult RunPlanarAccelGripScenario(
             const float forwardVelocityMps,
             const float yawRateRadps,
             const float lateralVarianceMps2)
@@ -885,7 +886,7 @@ namespace MazeMap
             float covarianceMaxAbsDelta = NaN();
         };
 
-        YawPlanarAccelResult RunYawPlanarAccelScenario()
+        inline YawPlanarAccelResult RunYawPlanarAccelScenario()
         {
             YawPlanarAccelResult result{};
             EstimatorTestRuntime runtime;
@@ -955,7 +956,7 @@ namespace MazeMap
             float forwardCovarianceMaxAbsDelta = NaN();
         };
 
-        PlanarAccelChannelResult RunPlanarAccelChannelScenario()
+        inline PlanarAccelChannelResult RunPlanarAccelChannelScenario()
         {
             PlanarAccelChannelResult result{};
             EstimatorTestRuntime runtime;
@@ -1031,693 +1032,4 @@ namespace MazeMap
         }
 
     }
-
-    TEST_CLASS(EstimatorEncoderNoiseTuningTest)
-    {
-    public:
-        TEST_METHOD(GeneralSigmaLeftVarianceMatches)
-        {
-            const EncoderPairNoiseResult result = RunEncoderPairNoiseScenario();
-            Assert::AreEqual(result.expectedVarianceRadps2, result.covariance(0, 0), 1.0e-5f);
-        }
-
-        TEST_METHOD(GeneralSigmaRightVarianceMatches)
-        {
-            const EncoderPairNoiseResult result = RunEncoderPairNoiseScenario();
-            Assert::AreEqual(result.expectedVarianceRadps2, result.covariance(1, 1), 1.0e-5f);
-        }
-
-        TEST_METHOD(GeneralSigmaLeftRightCovarianceMatches)
-        {
-            const EncoderPairNoiseResult result = RunEncoderPairNoiseScenario();
-            Assert::AreEqual(result.expectedCovarianceRadps2, result.covariance(0, 1), 1.0e-5f);
-        }
-
-        TEST_METHOD(GeneralSigmaRightLeftCovarianceMatches)
-        {
-            const EncoderPairNoiseResult result = RunEncoderPairNoiseScenario();
-            Assert::AreEqual(result.expectedCovarianceRadps2, result.covariance(1, 0), 1.0e-5f);
-        }
-
-        TEST_METHOD(StationaryWheelSpeedSigmaUsesRequestedZeroSpeedSigma)
-        {
-            EstimatorTestRuntime runtime;
-            const float expectedWheelSpeedSigmaRadps =
-                Vehicle::WheelSpeedFromLinearVelocity(kEstimatorTestStationaryEncoderVelocitySigmaMps);
-            Assert::AreEqual(
-                expectedWheelSpeedSigmaRadps,
-                runtime.plantModel.stationaryEncoderWheelSpeedSigmaRadps(kEstimatorTestStationaryEncoderVelocitySigmaMps),
-                1.0e-6f);
-        }
-
-    };
-
-    TEST_CLASS(EstimatorDefaultInitialCovarianceTest)
-    {
-    public:
-        TEST_METHOD(PoseXMatchesReset)
-        {
-            const CovarianceMatrix covariance =
-                EstimatorModeAndDiagnosticsTest::BuildDefaultInitialCovariance();
-            Assert::AreEqual(1.0e-5f, covariance(0, 0), 1.0e-9f);
-        }
-
-        TEST_METHOD(PoseYMatchesReset)
-        {
-            const CovarianceMatrix covariance =
-                EstimatorModeAndDiagnosticsTest::BuildDefaultInitialCovariance();
-            Assert::AreEqual(1.0e-5f, covariance(1, 1), 1.0e-9f);
-        }
-
-        TEST_METHOD(HeadingMatchesReset)
-        {
-            const CovarianceMatrix covariance =
-                EstimatorModeAndDiagnosticsTest::BuildDefaultInitialCovariance();
-            Assert::AreEqual(1.0e-3f, covariance(2, 2), 1.0e-9f);
-        }
-
-        TEST_METHOD(ForwardVelocityMatchesReset)
-        {
-            const CovarianceMatrix covariance =
-                EstimatorModeAndDiagnosticsTest::BuildDefaultInitialCovariance();
-            Assert::AreEqual(1.0e-3f, covariance(3, 3), 1.0e-9f);
-        }
-
-        TEST_METHOD(LateralVelocityMatchesReset)
-        {
-            const CovarianceMatrix covariance =
-                EstimatorModeAndDiagnosticsTest::BuildDefaultInitialCovariance();
-            Assert::AreEqual(1.0e-3f, covariance(4, 4), 1.0e-9f);
-        }
-
-        TEST_METHOD(YawRateMatchesReset)
-        {
-            const CovarianceMatrix covariance =
-                EstimatorModeAndDiagnosticsTest::BuildDefaultInitialCovariance();
-            Assert::AreEqual(1.0e-3f, covariance(5, 5), 1.0e-9f);
-        }
-
-        TEST_METHOD(ForwardAccelResidualMatchesReset)
-        {
-            const CovarianceMatrix covariance =
-                EstimatorModeAndDiagnosticsTest::BuildDefaultInitialCovariance();
-            Assert::AreEqual(0.25f, covariance(6, 6), 1.0e-9f);
-        }
-
-        TEST_METHOD(RightwardAccelResidualMatchesReset)
-        {
-            const CovarianceMatrix covariance =
-                EstimatorModeAndDiagnosticsTest::BuildDefaultInitialCovariance();
-            Assert::AreEqual(0.25f, covariance(7, 7), 1.0e-9f);
-        }
-
-        TEST_METHOD(YawAccelResidualMatchesReset)
-        {
-            const CovarianceMatrix covariance =
-                EstimatorModeAndDiagnosticsTest::BuildDefaultInitialCovariance();
-            Assert::AreEqual(0.25f, covariance(8, 8), 1.0e-9f);
-        }
-
-    };
-
-    TEST_CLASS(EstimatorPivotConflictEncoderTest)
-    {
-    public:
-        TEST_METHOD(CopiesLeftWheelSpeedToRuntime)
-        {
-            const PivotConflictResult result = RunPivotConflictScenario();
-            const std::wstring message = ScenarioMessage(result.status);
-            Assert::AreEqual(result.pivotEncoderLeftWheelSpeedRadps, result.runtimeLeftWheelSpeedRadps, 1.0e-6f, message.c_str());
-        }
-
-        TEST_METHOD(CopiesRightWheelSpeedToRuntime)
-        {
-            const PivotConflictResult result = RunPivotConflictScenario();
-            const std::wstring message = ScenarioMessage(result.status);
-            Assert::AreEqual(result.pivotEncoderRightWheelSpeedRadps, result.runtimeRightWheelSpeedRadps, 1.0e-6f, message.c_str());
-        }
-
-        TEST_METHOD(UpdateIsAttempted)
-        {
-            const PivotConflictResult result = RunPivotConflictScenario();
-            const std::wstring message = BoolMessage(L"pivot_encoder_attempted", result.pivotEncoderAttempted, L"true", ScenarioMessage(result.status).c_str());
-            Assert::IsTrue(result.pivotEncoderAttempted, message.c_str());
-        }
-
-        TEST_METHOD(UpdateIsAccepted)
-        {
-            const PivotConflictResult result = RunPivotConflictScenario();
-            const std::wstring message = BoolMessage(L"pivot_encoder_accepted", result.pivotEncoderAccepted, L"true", ScenarioMessage(result.status).c_str());
-            Assert::IsTrue(result.pivotEncoderAccepted, message.c_str());
-        }
-
-        TEST_METHOD(NisIsZero)
-        {
-            const PivotConflictResult result = RunPivotConflictScenario();
-            const std::wstring message = ScenarioMessage(result.status);
-            Assert::AreEqual(0.0f, result.pivotEncoderNis, 1.0e-6f, message.c_str());
-        }
-
-        TEST_METHOD(LeavesPoseXUnchanged)
-        {
-            const PivotConflictResult result = RunPivotConflictScenario();
-            const std::wstring message = ScenarioMessage(result.status);
-            Assert::AreEqual(result.stateAfterPredict(0), result.stateAfterEncoder(0), 1.0e-6f, message.c_str());
-        }
-
-        TEST_METHOD(LeavesPoseYUnchanged)
-        {
-            const PivotConflictResult result = RunPivotConflictScenario();
-            const std::wstring message = ScenarioMessage(result.status);
-            Assert::AreEqual(result.stateAfterPredict(1), result.stateAfterEncoder(1), 1.0e-6f, message.c_str());
-        }
-
-        TEST_METHOD(LeavesHeadingUnchanged)
-        {
-            const PivotConflictResult result = RunPivotConflictScenario();
-            const std::wstring message = ScenarioMessage(result.status);
-            Assert::AreEqual(result.stateAfterPredict(2), result.stateAfterEncoder(2), 1.0e-6f, message.c_str());
-        }
-
-        TEST_METHOD(LeavesForwardVelocityUnchanged)
-        {
-            const PivotConflictResult result = RunPivotConflictScenario();
-            const std::wstring message = ScenarioMessage(result.status);
-            Assert::AreEqual(result.stateAfterPredict(3), result.stateAfterEncoder(3), 1.0e-6f, message.c_str());
-        }
-
-        TEST_METHOD(LeavesLateralVelocityUnchanged)
-        {
-            const PivotConflictResult result = RunPivotConflictScenario();
-            const std::wstring message = ScenarioMessage(result.status);
-            Assert::AreEqual(result.stateAfterPredict(4), result.stateAfterEncoder(4), 1.0e-6f, message.c_str());
-        }
-
-        TEST_METHOD(LeavesYawRateUnchanged)
-        {
-            const PivotConflictResult result = RunPivotConflictScenario();
-            const std::wstring message = ScenarioMessage(result.status);
-            Assert::AreEqual(result.stateAfterPredict(5), result.stateAfterEncoder(5), 1.0e-6f, message.c_str());
-        }
-
-        TEST_METHOD(LeavesForwardAccelResidualUnchanged)
-        {
-            const PivotConflictResult result = RunPivotConflictScenario();
-            const std::wstring message = ScenarioMessage(result.status);
-            Assert::AreEqual(result.stateAfterPredict(6), result.stateAfterEncoder(6), 1.0e-6f, message.c_str());
-        }
-
-        TEST_METHOD(LeavesRightwardAccelResidualUnchanged)
-        {
-            const PivotConflictResult result = RunPivotConflictScenario();
-            const std::wstring message = ScenarioMessage(result.status);
-            Assert::AreEqual(result.stateAfterPredict(7), result.stateAfterEncoder(7), 1.0e-6f, message.c_str());
-        }
-
-        TEST_METHOD(LeavesYawAccelResidualUnchanged)
-        {
-            const PivotConflictResult result = RunPivotConflictScenario();
-            const std::wstring message = ScenarioMessage(result.status);
-            Assert::AreEqual(result.stateAfterPredict(8), result.stateAfterEncoder(8), 1.0e-6f, message.c_str());
-        }
-
-        TEST_METHOD(LeavesCovarianceUnchanged)
-        {
-            const PivotConflictResult result = RunPivotConflictScenario();
-            const float delta = MaxAbsDelta(result.covarianceAfterPredict, result.covarianceAfterEncoder);
-            const std::wstring message = LimitMessage(L"covariance_max_abs_delta", delta, L"<=", 1.0e-7f, ScenarioMessage(result.status).c_str());
-            Assert::IsTrue(delta <= 1.0e-7f, message.c_str());
-        }
-
-    };
-
-    TEST_CLASS(EstimatorPivotConflictYawTest)
-    {
-    public:
-        TEST_METHOD(UpdateIsAttempted)
-        {
-            const PivotConflictResult result = RunPivotConflictScenario();
-            const std::wstring message = BoolMessage(L"pivot_yaw_attempted", result.pivotYawAttempted, L"true", ScenarioMessage(result.status).c_str());
-            Assert::IsTrue(result.pivotYawAttempted, message.c_str());
-        }
-
-        TEST_METHOD(UpdateIsAccepted)
-        {
-            const PivotConflictResult result = RunPivotConflictScenario();
-            const std::wstring message = BoolMessage(L"pivot_yaw_accepted", result.pivotYawAccepted, L"true", ScenarioMessage(result.status).c_str());
-            Assert::IsTrue(result.pivotYawAccepted, message.c_str());
-        }
-
-        TEST_METHOD(NisMatchesOracle)
-        {
-            const PivotConflictResult result = RunPivotConflictScenario();
-            const std::wstring message = ScenarioMessage(result.status);
-            Assert::AreEqual(result.expectedYawNis, result.pivotYawNis, 1.0e-4f, message.c_str());
-        }
-
-        TEST_METHOD(KeepsPoseX)
-        {
-            const PivotConflictResult result = RunPivotConflictScenario();
-            const std::wstring message = ScenarioMessage(result.status);
-            Assert::AreEqual(result.stateAfterEncoder(0), result.stateAfterPivot(0), 1.0e-6f, message.c_str());
-        }
-
-        TEST_METHOD(KeepsPoseY)
-        {
-            const PivotConflictResult result = RunPivotConflictScenario();
-            const std::wstring message = ScenarioMessage(result.status);
-            Assert::AreEqual(result.stateAfterEncoder(1), result.stateAfterPivot(1), 1.0e-6f, message.c_str());
-        }
-
-        TEST_METHOD(KeepsHeading)
-        {
-            const PivotConflictResult result = RunPivotConflictScenario();
-            const std::wstring message = ScenarioMessage(result.status);
-            Assert::AreEqual(result.stateAfterEncoder(2), result.stateAfterPivot(2), 1.0e-6f, message.c_str());
-        }
-
-        TEST_METHOD(KeepsForwardVelocity)
-        {
-            const PivotConflictResult result = RunPivotConflictScenario();
-            const std::wstring message = ScenarioMessage(result.status);
-            Assert::AreEqual(result.stateAfterEncoder(3), result.stateAfterPivot(3), 1.0e-6f, message.c_str());
-        }
-
-        TEST_METHOD(KeepsLateralVelocity)
-        {
-            const PivotConflictResult result = RunPivotConflictScenario();
-            const std::wstring message = ScenarioMessage(result.status);
-            Assert::AreEqual(result.stateAfterEncoder(4), result.stateAfterPivot(4), 1.0e-6f, message.c_str());
-        }
-
-        TEST_METHOD(RateUsesGyro)
-        {
-            const PivotConflictResult result = RunPivotConflictScenario();
-            const std::wstring message = ScenarioMessage(result.status);
-            Assert::AreEqual(result.expectedYawRateRadps, result.stateAfterPivot(5), 1.0e-5f, message.c_str());
-        }
-
-        TEST_METHOD(VarianceMatchesOracle)
-        {
-            const PivotConflictResult result = RunPivotConflictScenario();
-            const std::wstring message = ScenarioMessage(result.status);
-            Assert::AreEqual(result.expectedYawVarianceRadps2, result.covarianceAfterPivot(5, 5), 1.0e-7f, message.c_str());
-        }
-
-        TEST_METHOD(CovarianceForwardAccelCrossTermIsZero)
-        {
-            const PivotConflictResult result = RunPivotConflictScenario();
-            const std::wstring message = ScenarioMessage(result.status);
-            Assert::AreEqual(0.0f, result.covarianceAfterPivot(5, 6), 1.0e-8f, message.c_str());
-        }
-
-        TEST_METHOD(CovarianceRightwardAccelCrossTermIsZero)
-        {
-            const PivotConflictResult result = RunPivotConflictScenario();
-            const std::wstring message = ScenarioMessage(result.status);
-            Assert::AreEqual(0.0f, result.covarianceAfterPivot(5, 7), 1.0e-8f, message.c_str());
-        }
-
-        TEST_METHOD(CovarianceYawAccelCrossTermIsZero)
-        {
-            const PivotConflictResult result = RunPivotConflictScenario();
-            const std::wstring message = ScenarioMessage(result.status);
-            Assert::AreEqual(0.0f, result.covarianceAfterPivot(5, 8), 1.0e-8f, message.c_str());
-        }
-
-        TEST_METHOD(RateIsCloserToGyroThanEncoder)
-        {
-            const PivotConflictResult result = RunPivotConflictScenario();
-            const float gyroError = std::fabs(result.stateAfterPivot(5) - result.gyroCorrectedYawRateRadps);
-            const float encoderError = std::fabs(result.stateAfterPivot(5) - result.encoderDerivedYawRateRadps);
-            const std::wstring message = LimitMessage(L"gyro_error_radps", gyroError, L"< encoder_error", encoderError, ScenarioMessage(result.status).c_str());
-            Assert::IsTrue(gyroError < encoderError, message.c_str());
-        }
-
-    };
-
-    TEST_CLASS(EstimatorPivotCommandTest)
-    {
-    public:
-        TEST_METHOD(KeepsPoseX)
-        {
-            const PivotCommandResult result = RunPivotCommandScenario();
-            const std::wstring message = ScenarioMessage(result.status);
-            Assert::AreEqual(result.stateBeforeEncoder(0), result.stateAfterEncoder(0), 1.0e-6f, message.c_str());
-        }
-
-        TEST_METHOD(KeepsPoseY)
-        {
-            const PivotCommandResult result = RunPivotCommandScenario();
-            const std::wstring message = ScenarioMessage(result.status);
-            Assert::AreEqual(result.stateBeforeEncoder(1), result.stateAfterEncoder(1), 1.0e-6f, message.c_str());
-        }
-
-        TEST_METHOD(KeepsHeading)
-        {
-            const PivotCommandResult result = RunPivotCommandScenario();
-            const std::wstring message = ScenarioMessage(result.status);
-            Assert::AreEqual(result.stateBeforeEncoder(2), result.stateAfterEncoder(2), 1.0e-6f, message.c_str());
-        }
-
-        TEST_METHOD(KeepsLateralVelocity)
-        {
-            const PivotCommandResult result = RunPivotCommandScenario();
-            const std::wstring message = ScenarioMessage(result.status);
-            Assert::AreEqual(result.stateBeforeEncoder(4), result.stateAfterEncoder(4), 1.0e-6f, message.c_str());
-        }
-
-        TEST_METHOD(MovesForwardVelocityTowardEncoder)
-        {
-            const PivotCommandResult result = RunPivotCommandScenario();
-            const float afterError = std::fabs(result.stateAfterEncoder(3) - result.measuredForwardSpeedMps);
-            const float beforeError = std::fabs(result.stateBeforeEncoder(3) - result.measuredForwardSpeedMps);
-            const std::wstring message = LimitMessage(L"forward_velocity_error_mps", afterError, L"< before", beforeError, ScenarioMessage(result.status).c_str());
-            Assert::IsTrue(afterError < beforeError, message.c_str());
-        }
-
-        TEST_METHOD(MovesYawRateTowardEncoder)
-        {
-            const PivotCommandResult result = RunPivotCommandScenario();
-            const float afterError = std::fabs(result.stateAfterEncoder(5) - result.measuredYawRateRadps);
-            const float beforeError = std::fabs(result.stateBeforeEncoder(5) - result.measuredYawRateRadps);
-            const std::wstring message = LimitMessage(L"yaw_rate_error_radps", afterError, L"< before", beforeError, ScenarioMessage(result.status).c_str());
-            Assert::IsTrue(afterError < beforeError, message.c_str());
-        }
-
-    };
-
-    TEST_CLASS(EstimatorDiagnosticDumpTest)
-    {
-    public:
-        TEST_METHOD(ReportsPivotScrubInactive)
-        {
-            const DiagnosticResult result = RunDiagnosticScenario();
-            const std::wstring message = BoolMessage(L"pivot_scrub_mode", result.pivotScrubMode, L"false", ScenarioMessage(result.status).c_str());
-            Assert::IsFalse(result.pivotScrubMode, message.c_str());
-        }
-
-        TEST_METHOD(ReportsEncoderBodyUpdateNotSkipped)
-        {
-            const DiagnosticResult result = RunDiagnosticScenario();
-            const std::wstring message = BoolMessage(L"encoder_body_update_skipped", result.encoderBodyUpdateSkipped, L"false", ScenarioMessage(result.status).c_str());
-            Assert::IsFalse(result.encoderBodyUpdateSkipped, message.c_str());
-        }
-
-        TEST_METHOD(ReportsZeroUSoftNotApplied)
-        {
-            const DiagnosticResult result = RunDiagnosticScenario();
-            const std::wstring message = BoolMessage(L"zero_u_soft_applied", result.zeroUSoftApplied, L"false", ScenarioMessage(result.status).c_str());
-            Assert::IsFalse(result.zeroUSoftApplied, message.c_str());
-        }
-
-        TEST_METHOD(EncoderMaskedDeltaIsZero)
-        {
-            const DiagnosticResult result = RunDiagnosticScenario();
-            const std::wstring message = ScenarioMessage(result.status);
-            Assert::AreEqual(0.0f, result.encoderMaskedDeltaNorm, 1.0e-6f, message.c_str());
-        }
-
-        TEST_METHOD(ZeroUInnovationIsZero)
-        {
-            const DiagnosticResult result = RunDiagnosticScenario();
-            const std::wstring message = ScenarioMessage(result.status);
-            Assert::AreEqual(0.0f, result.zeroUInnovationMps, 1.0e-6f, message.c_str());
-        }
-
-        TEST_METHOD(GyroMaskedDeltaIsZero)
-        {
-            const DiagnosticResult result = RunDiagnosticScenario();
-            const std::wstring message = ScenarioMessage(result.status);
-            Assert::AreEqual(0.0f, result.gyroMaskedDeltaNorm, 1.0e-6f, message.c_str());
-        }
-
-        TEST_METHOD(ContainsPivotScrubLine)
-        {
-            const DiagnosticResult result = RunDiagnosticScenario();
-            const std::wstring message = LimitMessage(L"pivot_mode_index", static_cast<float>(result.pivotModeIndex), L"< dump_line_count", static_cast<float>(result.dumpLineCount), ScenarioMessage(result.status).c_str());
-            Assert::IsTrue(result.pivotModeIndex < result.dumpLineCount, message.c_str());
-        }
-
-        TEST_METHOD(PivotScrubLineReportsInactive)
-        {
-            const DiagnosticResult result = RunDiagnosticScenario();
-            const std::wstring message = BoolMessage(L"pivot_line_reports_inactive", result.pivotLineReportsInactive, L"true", ScenarioMessage(result.status).c_str());
-            Assert::IsTrue(result.pivotLineReportsInactive, message.c_str());
-        }
-
-    };
-
-    TEST_CLASS(EstimatorLaunchTransientTest)
-    {
-    public:
-        TEST_METHOD(KeepsLateralVelocityNonzero)
-        {
-            const LaunchTransientResult result = RunLaunchTransientScenario();
-            const std::wstring message = LimitMessage(L"lateral_velocity_mps", std::fabs(result.lateralVelocityMps), L">", 0.10f, ScenarioMessage(result.status).c_str());
-            Assert::IsTrue(std::fabs(result.lateralVelocityMps) > 0.10f, message.c_str());
-        }
-
-    };
-
-    TEST_CLASS(EstimatorPlanarAccelCredibleGripTest)
-    {
-    public:
-        TEST_METHOD(AttemptsUpdate)
-        {
-            const PlanarAccelGripResult result = RunPlanarAccelGripScenario(1.0f, 1.0f, 0.30f * 0.30f);
-            const std::wstring message = BoolMessage(L"planar_accel_attempted", result.planarAccelAttempted, L"true", ScenarioMessage(result.status).c_str());
-            Assert::IsTrue(result.planarAccelAttempted, message.c_str());
-        }
-
-        TEST_METHOD(AcceptsUpdate)
-        {
-            const PlanarAccelGripResult result = RunPlanarAccelGripScenario(1.0f, 1.0f, 0.30f * 0.30f);
-            const std::wstring message = BoolMessage(L"planar_accel_accepted", result.planarAccelAccepted, L"true", ScenarioMessage(result.status).c_str());
-            Assert::IsTrue(result.planarAccelAccepted, message.c_str());
-        }
-
-        TEST_METHOD(LateralVelocityIsFinite)
-        {
-            const PlanarAccelGripResult result = RunPlanarAccelGripScenario(1.0f, 1.0f, 0.30f * 0.30f);
-            const std::wstring message = ValueMessage(L"lateral_velocity_mps", result.finalLateralVelocityMps, ScenarioMessage(result.status).c_str());
-            Assert::IsTrue(std::isfinite(result.finalLateralVelocityMps), message.c_str());
-        }
-
-        TEST_METHOD(DampsLateralVelocityBelowThreshold)
-        {
-            const PlanarAccelGripResult result = RunPlanarAccelGripScenario(1.0f, 1.0f, 0.30f * 0.30f);
-            const float actual = std::fabs(result.finalLateralVelocityMps);
-            const std::wstring message = LimitMessage(L"abs_lateral_velocity_mps", actual, L"<", 0.05f, ScenarioMessage(result.status).c_str());
-            Assert::IsTrue(actual < 0.05f, message.c_str());
-        }
-
-        TEST_METHOD(ReducesLateralVelocityMagnitude)
-        {
-            const PlanarAccelGripResult result = RunPlanarAccelGripScenario(1.0f, 1.0f, 0.30f * 0.30f);
-            const float actual = std::fabs(result.finalLateralVelocityMps);
-            const float limit = std::fabs(result.initialLateralVelocityMps);
-            const std::wstring message = LimitMessage(L"abs_lateral_velocity_mps", actual, L"< initial", limit, ScenarioMessage(result.status).c_str());
-            Assert::IsTrue(actual < limit, message.c_str());
-        }
-
-        TEST_METHOD(LateralVarianceIsFinite)
-        {
-            const PlanarAccelGripResult result = RunPlanarAccelGripScenario(1.0f, 1.0f, 0.30f * 0.30f);
-            const std::wstring message = ValueMessage(L"lateral_velocity_variance_mps2", result.finalLateralVarianceMps2, ScenarioMessage(result.status).c_str());
-            Assert::IsTrue(std::isfinite(result.finalLateralVarianceMps2), message.c_str());
-        }
-
-        TEST_METHOD(ReducesLateralVariance)
-        {
-            const PlanarAccelGripResult result = RunPlanarAccelGripScenario(1.0f, 1.0f, 0.30f * 0.30f);
-            const std::wstring message = LimitMessage(L"lateral_velocity_variance_mps2", result.finalLateralVarianceMps2, L"< initial", result.initialLateralVarianceMps2, ScenarioMessage(result.status).c_str());
-            Assert::IsTrue(result.finalLateralVarianceMps2 < result.initialLateralVarianceMps2, message.c_str());
-        }
-
-    };
-
-    TEST_CLASS(EstimatorPlanarAccelNoncredibleGripTest)
-    {
-    public:
-        TEST_METHOD(AttemptsUpdate)
-        {
-            const PlanarAccelGripResult result = RunPlanarAccelGripScenario(2.0f, 8.0f, 0.001f * 0.001f);
-            const std::wstring message = BoolMessage(L"planar_accel_attempted", result.planarAccelAttempted, L"true", ScenarioMessage(result.status).c_str());
-            Assert::IsTrue(result.planarAccelAttempted, message.c_str());
-        }
-
-        TEST_METHOD(KeepsLateralVelocityLarge)
-        {
-            const PlanarAccelGripResult result = RunPlanarAccelGripScenario(2.0f, 8.0f, 0.001f * 0.001f);
-            const float actual = std::fabs(result.finalLateralVelocityMps);
-            const std::wstring message = LimitMessage(L"abs_lateral_velocity_mps", actual, L">", 0.10f, ScenarioMessage(result.status).c_str());
-            Assert::IsTrue(actual > 0.10f, message.c_str());
-        }
-
-        TEST_METHOD(LateralVarianceIsFinite)
-        {
-            const PlanarAccelGripResult result = RunPlanarAccelGripScenario(2.0f, 8.0f, 0.001f * 0.001f);
-            const std::wstring message = ValueMessage(L"lateral_velocity_variance_mps2", result.finalLateralVarianceMps2, ScenarioMessage(result.status).c_str());
-            Assert::IsTrue(std::isfinite(result.finalLateralVarianceMps2), message.c_str());
-        }
-
-        TEST_METHOD(KeepsLateralVarianceLoose)
-        {
-            const PlanarAccelGripResult result = RunPlanarAccelGripScenario(2.0f, 8.0f, 0.001f * 0.001f);
-            const float limit = 0.020f * 0.020f;
-            const std::wstring message = LimitMessage(L"lateral_velocity_variance_mps2", result.finalLateralVarianceMps2, L">=", limit, ScenarioMessage(result.status).c_str());
-            Assert::IsTrue(result.finalLateralVarianceMps2 >= limit, message.c_str());
-        }
-
-    };
-
-    TEST_CLASS(EstimatorYawPlanarAccelSeparabilityTest)
-    {
-    public:
-        TEST_METHOD(SequentialYawUpdateIsAttempted)
-        {
-            const YawPlanarAccelResult result = RunYawPlanarAccelScenario();
-            const std::wstring message = BoolMessage(L"sequential_yaw_attempted", result.sequentialYawAttempted, L"true", ScenarioPairMessage(result.mergedPrimeStatus, result.sequentialPrimeStatus, L"merged", L"sequential").c_str());
-            Assert::IsTrue(result.sequentialYawAttempted, message.c_str());
-        }
-
-        TEST_METHOD(SequentialYawUpdateIsAccepted)
-        {
-            const YawPlanarAccelResult result = RunYawPlanarAccelScenario();
-            const std::wstring message = BoolMessage(L"sequential_yaw_accepted", result.sequentialYawAccepted, L"true", ScenarioPairMessage(result.mergedPrimeStatus, result.sequentialPrimeStatus, L"merged", L"sequential").c_str());
-            Assert::IsTrue(result.sequentialYawAccepted, message.c_str());
-        }
-
-        TEST_METHOD(SequentialPlanarAccelUpdateIsAttempted)
-        {
-            const YawPlanarAccelResult result = RunYawPlanarAccelScenario();
-            const std::wstring message = BoolMessage(L"sequential_accel_attempted", result.sequentialAccelAttempted, L"true", ScenarioPairMessage(result.mergedPrimeStatus, result.sequentialPrimeStatus, L"merged", L"sequential").c_str());
-            Assert::IsTrue(result.sequentialAccelAttempted, message.c_str());
-        }
-
-        TEST_METHOD(SequentialPlanarAccelUpdateIsAccepted)
-        {
-            const YawPlanarAccelResult result = RunYawPlanarAccelScenario();
-            const std::wstring message = BoolMessage(L"sequential_accel_accepted", result.sequentialAccelAccepted, L"true", ScenarioPairMessage(result.mergedPrimeStatus, result.sequentialPrimeStatus, L"merged", L"sequential").c_str());
-            Assert::IsTrue(result.sequentialAccelAccepted, message.c_str());
-        }
-
-        TEST_METHOD(MergedYawUpdateIsAttempted)
-        {
-            const YawPlanarAccelResult result = RunYawPlanarAccelScenario();
-            const std::wstring message = BoolMessage(L"merged_yaw_attempted", result.mergedYawAttempted, L"true", ScenarioPairMessage(result.mergedPrimeStatus, result.sequentialPrimeStatus, L"merged", L"sequential").c_str());
-            Assert::IsTrue(result.mergedYawAttempted, message.c_str());
-        }
-
-        TEST_METHOD(MergedYawUpdateIsAccepted)
-        {
-            const YawPlanarAccelResult result = RunYawPlanarAccelScenario();
-            const std::wstring message = BoolMessage(L"merged_yaw_accepted", result.mergedYawAccepted, L"true", ScenarioPairMessage(result.mergedPrimeStatus, result.sequentialPrimeStatus, L"merged", L"sequential").c_str());
-            Assert::IsTrue(result.mergedYawAccepted, message.c_str());
-        }
-
-        TEST_METHOD(MergedPlanarAccelUpdateIsAttempted)
-        {
-            const YawPlanarAccelResult result = RunYawPlanarAccelScenario();
-            const std::wstring message = BoolMessage(L"merged_accel_attempted", result.mergedAccelAttempted, L"true", ScenarioPairMessage(result.mergedPrimeStatus, result.sequentialPrimeStatus, L"merged", L"sequential").c_str());
-            Assert::IsTrue(result.mergedAccelAttempted, message.c_str());
-        }
-
-        TEST_METHOD(MergedPlanarAccelUpdateIsAccepted)
-        {
-            const YawPlanarAccelResult result = RunYawPlanarAccelScenario();
-            const std::wstring message = BoolMessage(L"merged_accel_accepted", result.mergedAccelAccepted, L"true", ScenarioPairMessage(result.mergedPrimeStatus, result.sequentialPrimeStatus, L"merged", L"sequential").c_str());
-            Assert::IsTrue(result.mergedAccelAccepted, message.c_str());
-        }
-
-        TEST_METHOD(SequentialAndMergedUpdatesProduceSameState)
-        {
-            const YawPlanarAccelResult result = RunYawPlanarAccelScenario();
-            const std::wstring message = LimitMessage(L"state_max_abs_delta", result.stateMaxAbsDelta, L"<=", 1.0e-6f, ScenarioPairMessage(result.mergedPrimeStatus, result.sequentialPrimeStatus, L"merged", L"sequential").c_str());
-            Assert::IsTrue(result.stateMaxAbsDelta <= 1.0e-6f, message.c_str());
-        }
-
-        TEST_METHOD(SequentialAndMergedUpdatesProduceSameCovariance)
-        {
-            const YawPlanarAccelResult result = RunYawPlanarAccelScenario();
-            const std::wstring message = LimitMessage(L"covariance_max_abs_delta", result.covarianceMaxAbsDelta, L"<=", 1.0e-6f, ScenarioPairMessage(result.mergedPrimeStatus, result.sequentialPrimeStatus, L"merged", L"sequential").c_str());
-            Assert::IsTrue(result.covarianceMaxAbsDelta <= 1.0e-6f, message.c_str());
-        }
-
-    };
-
-    TEST_CLASS(EstimatorPlanarAccelChannelSensitivityTest)
-    {
-    public:
-        TEST_METHOD(BaselineUpdateIsAttempted)
-        {
-            const PlanarAccelChannelResult result = RunPlanarAccelChannelScenario();
-            const std::wstring message = BoolMessage(L"baseline_attempted", result.baselineAttempted, L"true", ScenarioTripleMessage(result.baselinePrimeStatus, result.rightPrimeStatus, result.forwardPrimeStatus, L"baseline", L"right", L"forward").c_str());
-            Assert::IsTrue(result.baselineAttempted, message.c_str());
-        }
-
-        TEST_METHOD(BaselineUpdateIsAccepted)
-        {
-            const PlanarAccelChannelResult result = RunPlanarAccelChannelScenario();
-            const std::wstring message = BoolMessage(L"baseline_accepted", result.baselineAccepted, L"true", ScenarioTripleMessage(result.baselinePrimeStatus, result.rightPrimeStatus, result.forwardPrimeStatus, L"baseline", L"right", L"forward").c_str());
-            Assert::IsTrue(result.baselineAccepted, message.c_str());
-        }
-
-        TEST_METHOD(RightPerturbedUpdateIsAttempted)
-        {
-            const PlanarAccelChannelResult result = RunPlanarAccelChannelScenario();
-            const std::wstring message = BoolMessage(L"right_attempted", result.rightAttempted, L"true", ScenarioTripleMessage(result.baselinePrimeStatus, result.rightPrimeStatus, result.forwardPrimeStatus, L"baseline", L"right", L"forward").c_str());
-            Assert::IsTrue(result.rightAttempted, message.c_str());
-        }
-
-        TEST_METHOD(RightPerturbedUpdateIsAccepted)
-        {
-            const PlanarAccelChannelResult result = RunPlanarAccelChannelScenario();
-            const std::wstring message = BoolMessage(L"right_accepted", result.rightAccepted, L"true", ScenarioTripleMessage(result.baselinePrimeStatus, result.rightPrimeStatus, result.forwardPrimeStatus, L"baseline", L"right", L"forward").c_str());
-            Assert::IsTrue(result.rightAccepted, message.c_str());
-        }
-
-        TEST_METHOD(ForwardPerturbedUpdateIsAttempted)
-        {
-            const PlanarAccelChannelResult result = RunPlanarAccelChannelScenario();
-            const std::wstring message = BoolMessage(L"forward_attempted", result.forwardAttempted, L"true", ScenarioTripleMessage(result.baselinePrimeStatus, result.rightPrimeStatus, result.forwardPrimeStatus, L"baseline", L"right", L"forward").c_str());
-            Assert::IsTrue(result.forwardAttempted, message.c_str());
-        }
-
-        TEST_METHOD(ForwardPerturbedUpdateIsAccepted)
-        {
-            const PlanarAccelChannelResult result = RunPlanarAccelChannelScenario();
-            const std::wstring message = BoolMessage(L"forward_accepted", result.forwardAccepted, L"true", ScenarioTripleMessage(result.baselinePrimeStatus, result.rightPrimeStatus, result.forwardPrimeStatus, L"baseline", L"right", L"forward").c_str());
-            Assert::IsTrue(result.forwardAccepted, message.c_str());
-        }
-
-        TEST_METHOD(RightPerturbationChangesState)
-        {
-            const PlanarAccelChannelResult result = RunPlanarAccelChannelScenario();
-            const std::wstring message = LimitMessage(L"right_state_max_abs_delta", result.rightStateMaxAbsDelta, L">", 1.0e-6f, ScenarioTripleMessage(result.baselinePrimeStatus, result.rightPrimeStatus, result.forwardPrimeStatus, L"baseline", L"right", L"forward").c_str());
-            Assert::IsTrue(result.rightStateMaxAbsDelta > 1.0e-6f, message.c_str());
-        }
-
-        TEST_METHOD(RightPerturbationKeepsCovarianceSame)
-        {
-            const PlanarAccelChannelResult result = RunPlanarAccelChannelScenario();
-            const std::wstring message = LimitMessage(L"right_covariance_max_abs_delta", result.rightCovarianceMaxAbsDelta, L"<=", 1.0e-6f, ScenarioTripleMessage(result.baselinePrimeStatus, result.rightPrimeStatus, result.forwardPrimeStatus, L"baseline", L"right", L"forward").c_str());
-            Assert::IsTrue(result.rightCovarianceMaxAbsDelta <= 1.0e-6f, message.c_str());
-        }
-
-        TEST_METHOD(ForwardPerturbationChangesState)
-        {
-            const PlanarAccelChannelResult result = RunPlanarAccelChannelScenario();
-            const std::wstring message = LimitMessage(L"forward_state_max_abs_delta", result.forwardStateMaxAbsDelta, L">", 1.0e-6f, ScenarioTripleMessage(result.baselinePrimeStatus, result.rightPrimeStatus, result.forwardPrimeStatus, L"baseline", L"right", L"forward").c_str());
-            Assert::IsTrue(result.forwardStateMaxAbsDelta > 1.0e-6f, message.c_str());
-        }
-
-        TEST_METHOD(ForwardPerturbationKeepsCovarianceSame)
-        {
-            const PlanarAccelChannelResult result = RunPlanarAccelChannelScenario();
-            const std::wstring message = LimitMessage(L"forward_covariance_max_abs_delta", result.forwardCovarianceMaxAbsDelta, L"<=", 1.0e-6f, ScenarioTripleMessage(result.baselinePrimeStatus, result.rightPrimeStatus, result.forwardPrimeStatus, L"baseline", L"right", L"forward").c_str());
-            Assert::IsTrue(result.forwardCovarianceMaxAbsDelta <= 1.0e-6f, message.c_str());
-        }
-    };
 }
