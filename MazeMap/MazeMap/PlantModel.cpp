@@ -1417,6 +1417,48 @@ namespace MazeMap
         float desiredAccelMps2,
         float desiredYawAccelRadps2) const noexcept
     {
+        const bool hasForwardAccelObjective = !std::isnan(desiredAccelMps2);
+        const bool hasYawAccelObjective = !std::isnan(desiredYawAccelRadps2);
+        const bool maximizeForwardAccel =
+            hasForwardAccelObjective && std::isinf(desiredAccelMps2);
+        const bool maximizeYawAccel =
+            hasYawAccelObjective && std::isinf(desiredYawAccelRadps2);
+        if (maximizeForwardAccel || maximizeYawAccel)
+        {
+            float maxLongitudinalAccelMps2 = 0.0f;
+            float maxYawAccelRadps2 = 0.0f;
+            velocityTargetTechnicalLimits(maxLongitudinalAccelMps2, maxYawAccelRadps2);
+
+            if (maximizeForwardAccel)
+            {
+                const float resolvedLimit =
+                    (std::isfinite(maxLongitudinalAccelMps2) && (maxLongitudinalAccelMps2 > 0.0f)) ?
+                    maxLongitudinalAccelMps2 :
+                    0.0f;
+                desiredAccelMps2 = std::signbit(desiredAccelMps2) ? -resolvedLimit : resolvedLimit;
+            }
+
+            if (maximizeYawAccel)
+            {
+                const float resolvedLimit =
+                    (std::isfinite(maxYawAccelRadps2) && (maxYawAccelRadps2 > 0.0f)) ?
+                    maxYawAccelRadps2 :
+                    0.0f;
+                desiredYawAccelRadps2 = std::signbit(desiredYawAccelRadps2) ? -resolvedLimit : resolvedLimit;
+            }
+        }
+
+        // NaN is the caller's "no objective for this axis" token. The neutral
+        // feedforward component is the minimum-commitment solution for that unconstrained axis.
+        if (!hasForwardAccelObjective)
+        {
+            desiredAccelMps2 = 0.0f;
+        }
+        if (!hasYawAccelObjective)
+        {
+            desiredYawAccelRadps2 = 0.0f;
+        }
+
         const float wheelRadiusM = Vehicle::GetDriveWheelRadiusM();
         const float invWheelRadiusM = (wheelRadiusM > 0.0f) ? (1.0f / wheelRadiusM) : 0.0f;
         const float trackWidthM = std::fabs(_vehicle.GetTrackWidth());

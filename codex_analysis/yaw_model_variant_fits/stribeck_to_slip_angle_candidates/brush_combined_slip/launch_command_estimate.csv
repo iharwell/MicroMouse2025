@@ -1,2 +1,0 @@
-total_opposing_yaw_torque_nm,left_command,right_command,lr_delta_command,max_abs_command,passes_abs_0p6_gate,launch_lock_policy
-0.0071913208123168485,0.5218450095444638,-0.5218450095444638,1.0436900190889276,0.5218450095444638,False,diagnostic_only

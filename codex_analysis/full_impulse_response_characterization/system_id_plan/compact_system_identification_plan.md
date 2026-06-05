@@ -8,7 +8,9 @@ Scope: scratch report only. No production code or tests were modified.
 
 Do not promote a runtime impulse-response table, response kernel table, residual `Vf/yaw` map, maneuver branch, or wrapper. The Teensy-consumable output of this work must be a compact physical/dynamic model owned by `PlantModel`.
 
-Impulse and step responses are evidence, not deployment artifacts. They are useful because these logs are structured measurement protocols: amplitude sweeps, repeated CW/CCW signs, stationary fan/noise baselines, delay-calibrated command edges, sustained-versus-twitch launch cases, and open-floor motion sections. The identification plan should exploit that protocol structure to infer a small set of equations and, if justified, one or two internal PlantModel states.
+Impulse and step responses are diagnostic identification evidence, not deployment artifacts or production acceptance evidence. They are useful because these logs are structured measurement protocols: amplitude sweeps, repeated CW/CCW signs, stationary fan/noise baselines, delay-calibrated command edges, sustained-versus-twitch launch cases, and open-floor motion sections. The identification plan should exploit that protocol structure to infer a small set of equations and, if justified, one or two internal PlantModel states. For model tuning, Python model investigations, and data-driven traction/model/control acceptance, valid evidence still requires full-run adherence over complete eligible runs using raw sensors, centralized independent gyro/accelerometer bias evaluation, and current source/build constants. Any diagnostic window used as tuning evidence must span at least `500 ms`; smaller onset snippets are smoke/debug timing visualization only.
+
+The `500 ms` minimum diagnostic-window rule is scoped to that model-tuning and data-driven model-acceptance work. It does not constrain ordinary unit tests, small deterministic unit tests, or code-level behavior tests.
 
 The current single-term contact-yaw scalar should be treated as a failed low-dimensional proxy. It can improve broad aggregate replay in some alignments, but it does not explain the low-speed launch/breakaway behavior where the response changes from arrested twitch to sustained yaw. The next model must explain the measured response shape and threshold structure, not merely reduce a global residual by a few percent.
 
@@ -226,9 +228,9 @@ This is used to align, filter, and weight samples. It is not a deployable PlantM
    - Hold out entire open-floor runs, including at least one moving-yaw-heavy and one low-speed/in-place-heavy run.
    - Score raw and filtered signals, but select using filtered protocol-consistent targets.
 
-## Scoring And Acceptance Criteria
+## Scoring And Diagnostic Promotion Criteria
 
-Primary acceptance target: the compact model must explain more than half of the reliable prediction error that remains after timing/filter handling.
+Primary diagnostic promotion target: the compact model must explain more than half of the reliable prediction error that remains after timing/filter handling. This section screens candidates for possible PlantModel work; it is not standalone production acceptance.
 
 Use normalized error reduction:
 

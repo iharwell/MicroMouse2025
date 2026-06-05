@@ -1999,14 +1999,13 @@ namespace MazeMap
 
         TEST_METHOD(FinalForwardVelocityStaysWithinPlausibleBounds)
         {
-            TestRuntime runtime;
             VehicleState state = MakeRollingState(1.25f, 4.0f, 0.15f, 0.30f);
+			Vehicle vehicle = Vehicle();
+			PlantModel plant = PlantModel(vehicle, state);
             const App::Internal::CommandVector command = MakeCommand(0.85f, 0.20f);
             for (int tick = 0; tick < 250; ++tick)
             {
-                runtime.runtimeState = state;
-                runtime.plant.integrate(command, kDirectDtSeconds);
-                state = runtime.runtimeState;
+                plant.integrate(command, kDirectDtSeconds);
             }
             const float actual = state.GetForwardVelocity();
             std::wstringstream message;

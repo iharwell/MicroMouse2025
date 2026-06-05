@@ -7,6 +7,7 @@
 #include "..\MazeMap\VehicleState.h"
 
 #include <cmath>
+#include <limits>
 #include <sstream>
 
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
@@ -16,6 +17,8 @@ namespace MazeMap
     namespace
     {
         constexpr float kPi = 3.14159265358979323846f;
+        constexpr float kInf = (std::numeric_limits<float>::infinity)();
+        constexpr float kNaN = (std::numeric_limits<float>::quiet_NaN)();
         constexpr float kAccelerationToleranceMps2 = 0.10f;
         constexpr float kYawAccelerationToleranceRadps2 = 10.0f * kPi / 180.0f;
 
@@ -546,6 +549,54 @@ namespace MazeMap
                     L"criterion=actual > 0";
                 Assert::IsTrue(maxYawAccelRadps2 > 0.0f, message.str().c_str());
             }
+        }
+
+        TEST_METHOD(PlantModelFeedforwardResolvesInfiniteAccelerationObjectivesThroughTechnicalLimits)
+        {
+            Vehicle vehicle;
+            vehicle.SetFanDuty(0.80f);
+            VehicleState runtimeState;
+            PlantModel plant(vehicle, runtimeState);
+            float maxLongitudinalAccelMps2 = 0.0f;
+            float maxYawAccelRadps2 = 0.0f;
+            plant.velocityTargetTechnicalLimits(maxLongitudinalAccelMps2, maxYawAccelRadps2);
+
+            const auto forwardPositive = plant.ComputeFeedforward(kInf, 0.0f);
+            const auto forwardExpected = plant.ComputeFeedforward(maxLongitudinalAccelMps2, 0.0f);
+            Assert::AreEqual(forwardExpected.LeftCommand(), forwardPositive.LeftCommand(), 1.0e-6f);
+            Assert::AreEqual(forwardExpected.RightCommand(), forwardPositive.RightCommand(), 1.0e-6f);
+
+            const auto forwardNegative = plant.ComputeFeedforward(-kInf, 0.0f);
+            const auto forwardNegativeExpected = plant.ComputeFeedforward(-maxLongitudinalAccelMps2, 0.0f);
+            Assert::AreEqual(forwardNegativeExpected.LeftCommand(), forwardNegative.LeftCommand(), 1.0e-6f);
+            Assert::AreEqual(forwardNegativeExpected.RightCommand(), forwardNegative.RightCommand(), 1.0e-6f);
+
+            const auto yawNegative = plant.ComputeFeedforward(0.0f, -kInf);
+            const auto yawNegativeExpected = plant.ComputeFeedforward(0.0f, -maxYawAccelRadps2);
+            Assert::AreEqual(yawNegativeExpected.LeftCommand(), yawNegative.LeftCommand(), 1.0e-6f);
+            Assert::AreEqual(yawNegativeExpected.RightCommand(), yawNegative.RightCommand(), 1.0e-6f);
+        }
+
+        TEST_METHOD(PlantModelFeedforwardUsesNeutralComponentForInactiveAccelerationObjective)
+        {
+            Vehicle vehicle;
+            VehicleState runtimeState;
+            PlantModel plant(vehicle, runtimeState);
+
+            const auto yawOnly = plant.ComputeFeedforward(kNaN, 8.0f);
+            const auto yawOnlyExpected = plant.ComputeFeedforward(0.0f, 8.0f);
+            Assert::AreEqual(yawOnlyExpected.LeftCommand(), yawOnly.LeftCommand(), 1.0e-6f);
+            Assert::AreEqual(yawOnlyExpected.RightCommand(), yawOnly.RightCommand(), 1.0e-6f);
+
+            const auto forwardOnly = plant.ComputeFeedforward(1.0f, kNaN);
+            const auto forwardOnlyExpected = plant.ComputeFeedforward(1.0f, 0.0f);
+            Assert::AreEqual(forwardOnlyExpected.LeftCommand(), forwardOnly.LeftCommand(), 1.0e-6f);
+            Assert::AreEqual(forwardOnlyExpected.RightCommand(), forwardOnly.RightCommand(), 1.0e-6f);
+
+            const auto noObjective = plant.ComputeFeedforward(kNaN, kNaN);
+            const auto noObjectiveExpected = plant.ComputeFeedforward(0.0f, 0.0f);
+            Assert::AreEqual(noObjectiveExpected.LeftCommand(), noObjective.LeftCommand(), 1.0e-6f);
+            Assert::AreEqual(noObjectiveExpected.RightCommand(), noObjective.RightCommand(), 1.0e-6f);
         }
 
     };

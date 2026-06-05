@@ -1,2 +1,0 @@
-variant,vf_mps,yaw_rate_radps,predicted_opposing_support_nm,total_opposing_yaw_torque_nm,left_command,right_command,lr_delta_command,max_abs_command
-standard_shifted_peak,0.0,1.0,0.009977896932549917,0.009977896932549917,0.23351812674113584,-0.23351812674113584,0.4670362534822717,0.23351812674113584

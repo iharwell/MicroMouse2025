@@ -1,2 +1,0 @@
-role,k1_rad_per_m,k2_rad_per_m,k3_radps,stribeck_speed_mps,yaw_fade_mps,sliding_ratio,load_power,linear_gain_nm_per_radps,peak_yield_nm,weighted_train_rmse_nm,primary_corrected_rmse_nm,validation_corrected_rmse_nm,in_place_opposing_nm,in_place_left_command,in_place_right_command,in_place_max_abs_command,score
-latest_weighted_shifted_peak,0.2,1.6,0.4,0.16,0.05,0.0,1.0,0.024257431428660863,0.011830131019831446,0.03131001213408094,0.036290383093250715,0.05321453092849518,0.011435776026989442,0.24206191130641563,-0.24206191130641563,0.24206191130641563,0.042048154794888465

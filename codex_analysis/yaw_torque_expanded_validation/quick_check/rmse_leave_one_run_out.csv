@@ -1,4 +1,0 @@
-holdout_run_id,kind,samples,surface_bins_from_other_runs,samples_with_surface_bin,current_rmse_radps,surface_corrected_rmse_radps
-2026-04-10_18-08-20,decoded_open_floor,1407,8,154,0.313847862,0.278297653
-2026-04-10_18-33-52,decoded_open_floor,886,14,516,0.305921833,0.307530818
-2026-04-11_06-58-25,decoded_open_floor,862,13,461,0.144449220,0.343599765

@@ -18,12 +18,29 @@ the command once, then applies ten `0.0001 s` `PlantModel::integrate(...)`
 substeps with that same command. JSON output also reports the outer command
 cadence as `tick_seconds`.
 
-The evaluator also runs release-test-style acceptance scenarios through
+The evaluator also runs release-test-style scenario coverage through
 `SharedRobotRuntime`, `Drive`, `DriveBase`, `PlantModel::integrate(...)`, and
 sensor snapshot publication. Completion and command-evidence checks report
 blocker flags for release-test contract visibility. Tolerance-style maneuver
 rows are informational during this tuning pass, and optimizer ranking uses the
 continuous `maneuver_tracking_rms` row instead of weighted pass/fail penalties.
+
+For model tuning, Python model investigations, and data-driven traction/model/
+control acceptance, valid evidence must evaluate full-run adherence over
+complete eligible runs. Do not accept or reject a controller, traction model,
+plant model, or tuning change from isolated samples, one-row checks, short
+windows, first-N tick metrics, launch snippets, quick checks, sampled feature
+tables, binned short-window summaries, or UKF/estimator-derived targets. Those
+outputs are useful diagnostics only. If a diagnostic window is used for tuning
+evidence at all, it must cover at least `500 ticks` at the current command tick
+length; smaller first-sample or first-N snippets are valid only for smoke/debug
+visualization.
+
+This minimum diagnostic-window rule does not constrain ordinary unit tests,
+small deterministic unit tests, release-test-style code behavior checks, or
+scenario fixtures that verify a specific code path. Those tests may stay as
+small as the behavior under test requires; they simply are not standalone
+data-driven model-acceptance evidence.
 
 Build:
 
@@ -72,8 +89,9 @@ Stdout is JSON. The output includes baseline metrics, candidate metrics, and,
 when `--search` is used, the best candidate and top candidate list.
 
 Each evaluation includes `acceptance_scenarios`. A blocking acceptance scenario
-sets `acceptance_blocked=true` and makes the process return failure, but only
-the `maneuver_tracking_rms` row contributes acceptance score.
+sets `acceptance_blocked=true` and makes the process return failure, but the
+numeric ranking score remains a tuning heuristic, not standalone acceptance
+evidence.
 
 ## Scenario Envelope
 
@@ -102,8 +120,12 @@ cannot beat an active controller.
 
 ## Step-Response Metrics
 
-Each scenario reports a `step_response` object. These metrics are normalized and
-heavily weighted in the scalar score, not just emitted for inspection:
+Each scenario reports a `step_response` object. Step responses can take multiple
+samples to appear on sensors, so first-sample, first-window, and short-window
+metrics are diagnostic only and cannot be used as model-acceptance evidence.
+These metrics are not promoted to release acceptance, and any metric used as
+model-tuning evidence must span at least `500 ticks` at the current command tick
+length:
 
 - `velocity_error_first_500_ticks`: RMS of `targetForwardMps - state.u` over the
   first 500 ticks after a forward velocity step.
@@ -114,18 +136,21 @@ heavily weighted in the scalar score, not just emitted for inspection:
   first 100 ticks after a forward velocity step when `DriveTelemetry` publishes
   a finite composed forward-acceleration objective. If the objective is inactive
   or non-finite, fallback samples use RMS of `(nextU - prevU) / 0.001` as
-  undesired forward acceleration/roughness.
+  undesired forward acceleration/roughness. This legacy first-100 field is
+  smoke/debug-only under the minimum diagnostic-window rule.
 - `yaw_accel_error_first_100_ticks`: RMS of
   `(nextR - prevR) / 0.001 - DriveTelemetry.composedYawAccelRadps2` over the
   first 100 ticks after a yaw-rate or heading step when `DriveTelemetry`
   publishes a finite composed yaw-acceleration objective. If the objective is
   inactive or non-finite, fallback samples use RMS of `(nextR - prevR) / 0.001`
-  as undesired yaw acceleration/roughness.
+  as undesired yaw acceleration/roughness. This legacy first-100 field is
+  smoke/debug-only under the minimum diagnostic-window rule.
 
-The score weights for these normalized terms are 60 for early velocity RMS, 60
-for early yaw-rate RMS, 40 for early forward-acceleration RMS, and 40 for early
-yaw-acceleration RMS. Existing high-performance envelope, response failure, and
-oscillation penalties remain part of the score.
+The tuning-score weights for valid diagnostic terms are 60 for early velocity
+RMS and 60 for early yaw-rate RMS. Existing high-performance envelope, response
+failure, and oscillation penalties remain part of the diagnostic tuning score.
+First-100 acceleration snippets must not be used as tuning evidence until the
+tool is updated to emit a minimum `500 tick` diagnostic acceleration window.
 
 ## Acceptance Scenarios
 
@@ -154,9 +179,9 @@ envelope alone does not see:
 The maneuver checks use the same smooth-entry and sensor publication path as
 `DriveManeuverTests`, without importing the test harness. `PdTuning` records one
 tracking sample per outer command tick after the plant substeps finish. The
-scored maneuver row is `maneuver_tracking_rms`: the sum of squared RMS error
-ratios for cumulative distance, instantaneous heading, forward velocity, yaw
-rate, forward acceleration, and yaw acceleration.
+diagnostic tuning row is `maneuver_tracking_rms`: the full-run sum of squared
+RMS error ratios for cumulative distance, instantaneous heading, forward
+velocity, yaw rate, forward acceleration, and yaw acceleration.
 Smooth maneuver variation rows also report `ripple_oscillatory`. Any normalized
 velocity, yaw-acceleration, or yaw-rate variation above `0.001` is treated as
 real ripple for tuning and contributes to the aggregate `oscillation_flagged`

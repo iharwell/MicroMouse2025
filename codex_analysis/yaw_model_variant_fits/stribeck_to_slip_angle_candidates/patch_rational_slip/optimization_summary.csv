@@ -1,2 +1,0 @@
-scipy_available,optimizer,de_generations,de_population,de_best_score,nelder_mead_iterations,nelder_mead_stop,final_objective,trace_rows,de_sample_rows,nelder_mead_weighted_rows
-False,custom differential_evolution plus bounded nelder_mead,64,56,0.028999702711816545,120,max_iter,0.0316293451352689,184,18000,78482

@@ -1,7 +1,6 @@
 #include "pch.h"
 #include "DriveBase.h"
 
-#include <algorithm>
 #include <cmath>
 #include <limits>
 
@@ -98,16 +97,10 @@ namespace MazeMap
                 yawFeedbackAccelRadps2,
                 hasYawFeedbackAccel);
 
-        float maxLongitudinalAccelMps2 = 0.0f;
-        float maxYawAccelRadps2 = 0.0f;
-        _plant.velocityTargetTechnicalLimits(maxLongitudinalAccelMps2, maxYawAccelRadps2);
-
-        const float feedforwardForwardAccelMps2 =
-            ResolveComposedAccelerationObjective(telemetry.composedForwardAccelMps2, maxLongitudinalAccelMps2);
-        const float feedforwardYawAccelRadps2 =
-            ResolveComposedAccelerationObjective(telemetry.composedYawAccelRadps2, maxYawAccelRadps2);
         const CommandVector plantCommand =
-            _plant.ComputeFeedforward(feedforwardForwardAccelMps2, feedforwardYawAccelRadps2);
+            _plant.ComputeFeedforward(
+                telemetry.composedForwardAccelMps2,
+                telemetry.composedYawAccelRadps2);
 
         telemetry.leftPlantCommand = plantCommand.LeftCommand();
         telemetry.rightPlantCommand = plantCommand.RightCommand();
@@ -183,21 +176,6 @@ namespace MazeMap
         // Heading PD contributes acceleration-domain correction directly before PlantModel
         // inverse dynamics. The derivative term is the requested minus observed yaw rate.
         return feedbackTuning.HeadingStatePD.Compute(headingErrorRad, headingErrorRateRadps);
-    }
-
-    float DriveBase::ResolveComposedAccelerationObjective(float composedAccel, float maximizeLimit) noexcept
-    {
-        if (std::isnan(composedAccel))
-        {
-            return 0.0f;
-        }
-        if (std::isinf(composedAccel))
-        {
-            const float resolvedLimit =
-                (std::isfinite(maximizeLimit) && (maximizeLimit > 0.0f)) ? maximizeLimit : 0.0f;
-            return std::signbit(composedAccel) ? -resolvedLimit : resolvedLimit;
-        }
-        return std::isfinite(composedAccel) ? composedAccel : 0.0f;
     }
 
     DriveTelemetry DriveBase::BuildBaseTelemetry(

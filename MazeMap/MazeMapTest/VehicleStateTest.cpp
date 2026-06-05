@@ -42,8 +42,7 @@ namespace MazeMap
     X(float, ukf_state_yaw_rate_radps) \
     X(float, ukf_state_delta_af_mps2) \
     X(float, ukf_state_delta_ar_mps2) \
-    X(float, ukf_state_delta_yaw_accel_radps2) \
-    X(float, ukf_state_gyro_bias_z_radps)
+    X(float, ukf_state_delta_yaw_accel_radps2)
 
         MMLOG_DEFINE_ROW(
             VehicleStateLogTestFlattenedRow,
@@ -202,13 +201,12 @@ namespace MazeMap
             flattened.ukf_state_delta_af_mps2 = state.GetForwardAccelerationResidual();
             flattened.ukf_state_delta_ar_mps2 = state.GetRightwardAccelerationResidual();
             flattened.ukf_state_delta_yaw_accel_radps2 = state.GetYawAccelResidual();
-            flattened.ukf_state_gyro_bias_z_radps = state.GetGyroBiasZ();
 
             const std::string expectedHeader =
                 "f32_ukf_state_px_m,f32_ukf_state_py_m,f32_ukf_state_heading_rad,"
                 "f32_ukf_state_vf_mps,f32_ukf_state_vr_mps,f32_ukf_state_yaw_rate_radps,"
                 "f32_ukf_state_delta_af_mps2,f32_ukf_state_delta_ar_mps2,"
-                "f32_ukf_state_delta_yaw_accel_radps2,f32_ukf_state_gyro_bias_z_radps";
+                "f32_ukf_state_delta_yaw_accel_radps2";
 
             Assert::AreEqual(expectedHeader, std::string(VehicleStateLogTestRow::header_cstr()));
             Assert::AreEqual(sizeof(flattened), sizeof(projected));

@@ -1,8 +1,36 @@
 # Tooling
 
+## Acceptance Evidence Boundary
+
+For model tuning, Python model investigations, and data-driven traction/model/
+control acceptance, valid evidence must evaluate full-run adherence over
+complete eligible runs. Do not use isolated samples, one-row checks, short
+windows, first-N tick metrics, launch snippets, quick checks, sampled feature
+tables, binned short-window summaries, or UKF/estimator-derived targets as
+acceptance evidence for that purpose.
+
+Step responses can take multiple samples to appear on sensors. First-sample and
+short-window metrics are diagnostic only; they can guide investigation, but they
+cannot accept or reject a traction, model, control, or tuning change. Any
+diagnostic window used as model-tuning evidence must cover at least `500 ms`;
+smaller first-sample or first-N snippets are invalid except for smoke/debug
+visualization.
+
+This boundary does not constrain ordinary unit tests, small deterministic unit
+tests, or code-level behavior tests. Short fixtures are fine for verifying a
+specific code path; they simply are not data-driven model-acceptance evidence.
+
+Valid traction/model comparisons must use raw sensor data, centralized
+independent gyro and accelerometer bias evaluation, centralized constants pulled
+from the current source/build state, and must preserve the core logs needed to
+repeat the comparison. Existing per-sample exports, launch-window summaries,
+feature tables, replay snippets, and quick checks remain useful diagnostic
+tooling, not acceptance validation. Diagnostic summaries shorter than `500 ms`
+are smoke/debug visualization only and are not model-tuning evidence.
+
 ## `analyze_open_floor.py`
 
-Purpose: summarize `open_floor_main.csv` and `open_floor_timing.csv` captures so the team can ground UKF and plant-tuning discussions in the same numbers.
+Purpose: summarize `open_floor_main.csv` and `open_floor_timing.csv` captures so the team can ground UKF and plant-tuning discussions in the same diagnostic numbers.
 
 What it does:
 
@@ -37,7 +65,7 @@ Method notes:
 - Per-sample effective track width is evaluated inside the detected turn window as `abs((v_r - v_l) / gyro)` on samples with `abs(gyro) >= 0.25 rad/s`.
 - If encoder-implied yaw at the logged nominal track width diverges strongly from gyro yaw, treat the reported track width as slip-inflated rather than geometric.
 - The yaw-inertia output is intentionally conservative: it is a torque-only upper bound from the recovery spin-up, not a full plant-identification solve.
-- Launch-derived tire-plant outputs are labeled `apparent` on purpose: they use the current card only and absorb unmodeled drive efficiency, launch deadband, and the lack of an external body-speed reference.
+- Launch-derived tire-plant outputs are labeled `apparent` on purpose: they use the current card only and absorb unmodeled drive efficiency, launch deadband, and the lack of an external body-speed reference. They are diagnostic, not acceptance validation.
 - Feedforward-alignment output uses the logged plant constants directly, including wheel-bank inertia and any logged static/rolling friction terms, then inverts the same normalized motor-command model shape used by the runtime plant.
 - If the current card lacks completed `SEC_40_YAW`, `SEC_50_SMOOTH`, `SEC_60_LOOP_CW`, or `SEC_70_LOOP_CCW` sections, the tool reports lateral tire parameters as not identifiable from that run rather than fabricating fits.
 - The script uses only the Python standard library.
@@ -59,7 +87,7 @@ Typical use:
 1. Run the script on a fresh capture.
 2. Compare the suggested sigmas to the canonical owners in `MazeMap/MazeMap/Estimator.h`.
 3. Use the recovery-turn summary to check the actual raw-sensor turn angle before trusting any nominal `180 deg` assumption.
-4. Use the per-command launch summary to decide whether a plant feedforward change is actually supported, or whether the run only justifies estimator-noise changes.
+4. Use the per-command launch summary to decide whether a plant feedforward change merits deeper full-run testing, or whether the run only justifies estimator-noise investigation.
 5. Use the launch-floor section when you need a backlash-safe breakaway estimate; if the tool flags nonmonotonic clear motion, treat the reported floor as provisional and prefer another clean card before retuning plant breakaway.
 6. Use the tire-plant section only to update parameters that the current card actually excites; treat any output marked unstable or not identifiable as diagnostic-only.
 
@@ -171,13 +199,14 @@ Notes:
 - `-FeedforwardSampleCsv` exports the per-sample feedforward-path audit matrix for the selected `-RunId`.
 - `-Metrics` accepts comma-separated metric names or aliases. Current aliases are `context`, `accel_compare`, and `speed_compare`.
 - The default sample-export metric set is the accel comparison layout shown above if you pass `-SampleCsv` without `-Metrics`.
+- Per-sample replay exports and accel/speed comparison layouts are diagnostic artifacts only. They are not model-acceptance validation and must not replace full-run raw-sensor model-acceptance evidence. A diagnostic sample window used as model-tuning evidence must span at least `500 ms`; smaller snippets are smoke/debug visualization only. This does not set a minimum size for unit tests or code-level behavior tests.
 - Unless you pass `-SkipCompetitionArchive`, the runner also invokes `tooling\analyze_competition_feedforward.py` against `TestResults\Competition Testing Data` by default and writes `competition_feedforward_report.txt` under the replay output directory.
 - `-CompetitionArchiveRoot` overrides the default archival competition log root used by that additional check.
 
 Caveats:
 
 - The script reports what the data says; it does not edit firmware.
-- A single open-floor run is good evidence for measurement-noise tuning, but weak evidence for geometry changes.
+- A single open-floor run is useful diagnostic evidence for measurement-noise tuning, but weak evidence for geometry changes and not acceptance evidence for traction/model/control changes.
 - If recovery phases enter the next launch with residual motion, treat plant fits cautiously even if the repeatability numbers are still useful.
 - If a recovery section times out, treat its track-width and inertia numbers as diagnostic-only and prefer watchdog-clean repeats for parameter updates.
 
@@ -209,6 +238,7 @@ Method notes:
 - The competition analyzer intentionally uses the current repo setup, not the old `# meta` feedforward constants in the legacy logs.
 - `forward_*_probe` phases are split by the actual logged drive command so the steady hold segment is analyzed separately from the kickoff pulse and zero-command settle.
 - The current static-friction torque used by the inverse model is derived from the current plant breakaway command in `PlantModel.cpp`.
+- The launch and hold-command summaries are diagnostic comparisons. Acceptance must come from full eligible runs using raw sensor data and current centralized constants, not from probe snippets or binned summaries.
 
 ## `build_feedforward_tensor.py`
 
@@ -251,3 +281,4 @@ Method notes:
 - Yaw-rate input is taken from `gyro_raw_radps - gyro_bias_radps` when available, otherwise from the schema's corrected yaw-rate field.
 - Tensor axes are fit from a deterministic reservoir sample using quantile centers so the grid stays compact even though the raw corpus is large.
 - Evaluation first tries multilinear interpolation across populated neighboring cells and falls back to the nearest populated cell when the local neighborhood is empty.
+- Tensor cells, sampled transitions, and interpolation output are diagnostic feedforward aids. They are not acceptance evidence for model or control changes.

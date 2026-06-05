@@ -50,7 +50,6 @@ namespace MazeMap
             const MazeMap::PDCluster& feedbackTuning,
             float headingErrorRad,
             float headingErrorRateRadps) noexcept;
-        static float ResolveComposedAccelerationObjective(float composedAccel, float maximizeLimit) noexcept;
 
         DriveTelemetry BuildBaseTelemetry(
             std::uint16_t commandKindFlags,

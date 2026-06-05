@@ -1,3 +1,0 @@
-variant,accepted_selected,search_status,reason
-standard,False,unresolved_boundary_after_expansion,"Continuous optimizer repeatedly pushed k1 and delta_k toward smaller lower bounds; best constrained diagnostic candidate is not accepted as selected."
-latest_weighted,False,unresolved_boundary_after_expansion,"Sensitivity branch also pushed k1 and delta_k toward smaller lower bounds; reported for diagnostics only."

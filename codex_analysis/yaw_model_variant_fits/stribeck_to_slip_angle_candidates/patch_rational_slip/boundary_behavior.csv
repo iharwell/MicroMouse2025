@@ -1,5 +1,0 @@
-quantity,value,boundary,at_boundary
-speed_gate_v0_mps,0.020040969730668073,lower bound 0.020 m/s,True
-high_front_mu_per_beta,0.0,zero lower bound,True
-high_rear_mu_per_beta,0.0,zero lower bound,True
-static_peak_nm,0.24999285556885198,0.25 Nm regularization knee,True

@@ -11,6 +11,7 @@
 /tooling/tmp*/
 
 /codex_verify/arduino_build/
+/codex_analysis/
 /codex_verify/arduino_build_work_*/
 /codex_verify/build_state/
 /codex_verify/arduino_data/

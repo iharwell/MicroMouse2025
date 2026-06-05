@@ -1,5 +1,0 @@
-run_id,g_style_moving_yaw_rows,g_style_saturation_rows,g_style_saturation_fraction,g_style_cmd_angular_zero_rows,g_style_cmd_angular_zero_fraction,g_style_max_abs_vf_mps,g_style_max_abs_raw_gyro_radps,worker_i_extracted_samples,worker_i_nonzero_forward_yaw_rows,worker_i_status
-2026-04-20_08-38-39,115165,39520,0.343160,440,0.003821,0.860267,17.385223,41332,84906,included
-2026-04-21_00-16-10,54069,1971,0.036453,3849,0.071187,1.177363,18.219667,44880,47193,included
-2026-04-20_04-54-09,45721,14432,0.315654,45721,1.000000,0.898436,15.302175,19376,34901,included
-2026-04-21_05-32-06,36420,1261,0.034624,736,0.020209,0.607766,9.239947,20317,21572,included

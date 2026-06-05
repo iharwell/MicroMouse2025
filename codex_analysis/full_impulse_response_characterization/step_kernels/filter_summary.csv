@@ -1,2 +1,0 @@
-filter_status,cutoff_hz,static_bias_radps,static_samples,static_raw_std_radps,static_filtered_std_radps,static_removed_high_frequency_std_radps
-provisional_replaceable_no_IR_A_output_found,160.000,0.001231439,15605,0.027680149,0.010630718,0.017153244

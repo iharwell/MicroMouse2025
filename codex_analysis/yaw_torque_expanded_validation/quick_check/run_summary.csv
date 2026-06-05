@@ -1,4 +1,0 @@
-run_id,kind,path,input_rows,stationary_bias_rows,gyro_bias_radps,adjacent_pairs,active_pairs,extracted_samples,max_abs_forward_mps,max_abs_yaw_radps,nonzero_forward_sample_count,nonzero_forward_yaw_sample_count,status
-2026-04-10_18-08-20,decoded_open_floor,TestResults\mmlog_decode_2026-04-10_18-08-20\open_floor_main.csv,20703,15839,-0.000000000,20428,3024,1407,0.432376,8.783021,1534,1533,included
-2026-04-10_18-33-52,decoded_open_floor,TestResults\mmlog_decode_2026-04-10_18-33-52\open_floor_main.csv,143869,32785,-0.000000000,143569,87842,886,0.235001,0.985937,2381,888,included
-2026-04-11_06-58-25,decoded_open_floor,TestResults\mmlog_decode_2026-04-11_06-58-25\open_floor_main.csv,84697,33378,-0.003665191,84134,1740,862,0.489830,1.251052,40740,988,included

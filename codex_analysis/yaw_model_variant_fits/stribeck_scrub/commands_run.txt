@@ -1,1 +1,0 @@
-& 'C:\Users\thene\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' codex_analysis\yaw_model_variant_fits\stribeck_scrub\fit_stribeck_scrub.py

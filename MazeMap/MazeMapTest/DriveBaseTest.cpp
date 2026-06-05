@@ -64,36 +64,14 @@ namespace MazeMap
             Assert::AreEqual(telemetry.rightDriveCommand, command.RightCommand(), 1.0e-6f);
         }
 
-        float ResolveFeedforwardObjective(
-            const PlantModel& plant,
-            const float composedAccel,
-            const bool yawObjective) noexcept
-        {
-            if (std::isnan(composedAccel))
-            {
-                return 0.0f;
-            }
-
-            if (std::isinf(composedAccel))
-            {
-                float maxLongitudinalAccelMps2 = 0.0f;
-                float maxYawAccelRadps2 = 0.0f;
-                plant.velocityTargetTechnicalLimits(maxLongitudinalAccelMps2, maxYawAccelRadps2);
-                const float limit = yawObjective ? maxYawAccelRadps2 : maxLongitudinalAccelMps2;
-                return std::signbit(composedAccel) ? -limit : limit;
-            }
-
-            return composedAccel;
-        }
-
         void AssertMatchesPlantFeedforward(
             const DriveBaseHarness& harness,
             const DriveTelemetry& telemetry)
         {
             const CommandVector expected =
                 harness.plant.ComputeFeedforward(
-                    ResolveFeedforwardObjective(harness.plant, telemetry.composedForwardAccelMps2, false),
-                    ResolveFeedforwardObjective(harness.plant, telemetry.composedYawAccelRadps2, true));
+                    telemetry.composedForwardAccelMps2,
+                    telemetry.composedYawAccelRadps2);
 
             AssertFlagSet(telemetry.telemetryValidFlags, DriveTelemetry::kTelemetryPlantCommandValid);
             Assert::AreEqual(expected.LeftCommand(), telemetry.leftPlantCommand, 1.0e-6f);

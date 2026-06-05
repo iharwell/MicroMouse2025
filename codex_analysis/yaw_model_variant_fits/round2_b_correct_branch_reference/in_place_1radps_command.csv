@@ -1,2 +1,0 @@
-variant,extra_opposing_yaw_torque_nm,total_opposing_yaw_torque_nm,required_applied_bank_torque_nm,left_command,right_command,left_command_torque_nm,right_command_torque_nm,caveat
-Variant B Stribeck scrub,0.06501335920678508,0.07980760920678508,0.011890753850033197,0.6427496056765714,-0.6427496056765714,0.015610753850033198,-0.015610753850033198,Fixed point through request-only activation.
