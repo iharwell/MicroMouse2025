@@ -386,7 +386,7 @@ namespace MazeMap::App::Internal
                 return false;
             }
 
-            const float cellDimensionM = MazeMap::Maze::GetCellDimension();
+			constexpr float cellDimensionM = MazeMap::Maze::GetCellDimension();
             if (!(cellDimensionM > 0.0f))
             {
                 return false;
@@ -566,7 +566,7 @@ namespace MazeMap::App::Internal
                 sensors,
                 maze,
                 operationMode);
-            const float nominalRadiusM = 0.5f * MazeMap::Maze::GetCellDimension();
+			constexpr float nominalRadiusM = 0.5f * MazeMap::Maze::GetCellDimension();
             const bool hasNominalRadius = nominalRadiusM > 0.0f;
 
             if (hasDistanceDescriptor)

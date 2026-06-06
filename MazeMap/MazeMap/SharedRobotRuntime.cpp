@@ -972,10 +972,10 @@ namespace MazeMap::App::Internal
         return ok;
     }
 
-    bool SharedRobotRuntime::WriteUtilityDataLogAccelBiasMetadata(const RuntimeSensorSuite& sensors)
+    bool SharedRobotRuntime::WriteUtilityDataLogAccelBiasMetadata(const RuntimeSensorSuite& sensorsuite)
     {
         ClearLastRuntimeLogError();
-        const bool ok = Runtime::WriteMmLogAccelBiasMetadata(UtilityDataLogger(), sensors);
+        const bool ok = Runtime::WriteMmLogAccelBiasMetadata(UtilityDataLogger(), sensorsuite);
         if (!ok)
         {
             SetLastRuntimeLogErrorFromUtilityDataLogger("Failed to write utility data log metadata.");

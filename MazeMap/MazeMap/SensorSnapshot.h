@@ -298,7 +298,7 @@ public:
     {
         if (!inertialObserved)
         {
-            const float noInertialObservation = std::numeric_limits<float>::quiet_NaN();
+			constexpr float noInertialObservation = std::numeric_limits<float>::quiet_NaN();
             _bodyRightAccelerationMps2 = 0.0f;
             _bodyForwardAccelerationMps2 = 0.0f;
             _planarAccelerationMps2 = 0.0f;

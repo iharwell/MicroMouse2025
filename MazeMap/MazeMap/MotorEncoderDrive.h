@@ -321,24 +321,12 @@ namespace MazeMap
             float wheelBankSpeedRadps,
             float batteryVoltageV = 0.0f) const noexcept
         {
-            if (!((_resistance > 0.0f) &&
-                (_speedConstant > 0.0f) &&
-                (_torqueConstant > 0.0f) &&
-                (_gearRatio > 0.0f)))
-            {
-                return 0.0f;
-            }
-
             const float resolvedBatteryVoltageV =
                 (std::isfinite(batteryVoltageV) && (batteryVoltageV > 0.0f)) ?
                 batteryVoltageV :
                 _voltage;
-            if (!(resolvedBatteryVoltageV > 0.0f))
-            {
-                return 0.0f;
-            }
 
-            constexpr float kSignEpsilon = 1.0e-6f;
+            constexpr float kSignEpsilon = 1.0e-7f;
             if (MazeMap::Math::Absf(driveCommand) <= kSignEpsilon)
             {
                 return 0.0f;
@@ -475,28 +463,34 @@ namespace MazeMap
             Platform::DrivePinHigh(_motorOutPinB);
         }
 
-        void setDriveCommand(float driveCommand) noexcept
-        {
-            _lastDriveCommand = driveCommand;
+		void setDriveCommand(float driveCommand) noexcept
+		{
+			_lastDriveCommand = driveCommand;
 
-            assert(Platform::IsAssignedPin(_motorOutPinA) && Platform::IsAssignedPin(_motorOutPinB));
+			assert(Platform::IsAssignedPin(_motorOutPinA) && Platform::IsAssignedPin(_motorOutPinB));
 
-            float hardwareCommand = _invertMotorDirection ? -_lastDriveCommand : _lastDriveCommand;
-            if (hardwareCommand > 0.0f)
-            {
-                Platform::DrivePinLow(_motorOutPinB);
-                Platform::WriteMotorPwmCode(_motorOutPinA, DriveCommandToPwmCode(hardwareCommand));
-                return;
-            }
+			float hardwareCommand = _invertMotorDirection ? -_lastDriveCommand : _lastDriveCommand;
 
-            if (hardwareCommand < 0.0f)
-            {
-                Platform::DrivePinLow(_motorOutPinA);
-                Platform::WriteMotorPwmCode(_motorOutPinB, DriveCommandToPwmCode(hardwareCommand));
-                return;
-            }
-
-            coast();
+			if (hardwareCommand > 0.0f) // Forward
+			{
+				Platform::DrivePinLow(_motorOutPinB);
+				Platform::WriteMotorPwmCode(_motorOutPinA, DriveCommandToPwmCode(hardwareCommand));
+			}
+			else if (hardwareCommand < 0.0f) // Reverse
+			{
+				Platform::DrivePinLow(_motorOutPinA);
+				Platform::WriteMotorPwmCode(_motorOutPinB, DriveCommandToPwmCode(hardwareCommand));
+			}
+			else if (std::isnan(hardwareCommand)) //brake
+			{
+				Platform::DrivePinHigh(_motorOutPinA);
+				Platform::DrivePinHigh(_motorOutPinB);
+			}
+			else //coast
+			{
+				Platform::DrivePinLow(_motorOutPinA);
+				Platform::DrivePinLow(_motorOutPinB);
+			}
         }
 
         float getDriveCommand() const noexcept

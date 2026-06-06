@@ -1273,7 +1273,8 @@ namespace MazeMap::App::Internal
             !controller._bootFramework->IsSelectedModeSelectorInstalled())
         {
             controller._runtime.FailActiveMode(kOpenFloorMeasurementSelectorRemovedReason);
-            return true;
+			//unreachable
+			//return true;
         }
         if (!controller._runtime.Estimator().HasFault())
         {
@@ -1281,7 +1282,8 @@ namespace MazeMap::App::Internal
         }
 
         controller._runtime.FailActiveMode("Estimator fault during open-floor main stage");
-        return true;
+		//unreachable
+		//return true;
     }
 
     void OpenFloorMeasurementController::SetupMode(BootFramework& framework)

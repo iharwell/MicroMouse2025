@@ -11,10 +11,6 @@
 #include <cstdarg>
 #include <cstdio>
 
-#ifndef MAZEMAP_PLANTMODEL_VALIDATE_INVERSE
-#define MAZEMAP_PLANTMODEL_VALIDATE_INVERSE 0
-#endif
-
 namespace MazeMap
 {
     bool PlantModel::WriteDebugTextLine(
@@ -50,7 +46,7 @@ namespace MazeMap
 
     float PlantModel::PositivePart(const float value) noexcept
     {
-        return (std::isfinite(value) && (value > 0.0f)) ? value : 0.0f;
+        return (value <= 0.0f) ? 0.0f : value;
     }
 
     float PlantModel::PositiveFiniteOrDefault(const float value, const float fallback) noexcept
@@ -60,12 +56,11 @@ namespace MazeMap
 
     float PlantModel::RationalSquareGate(const float value, const float knee) noexcept
     {
-        const float resolvedValue = std::isfinite(value) ? value : 0.0f;
-        const float resolvedKnee = PositiveFiniteOrDefault(knee, 1.0e-6f);
-        const float value2 = resolvedValue * resolvedValue;
+        const float resolvedKnee = (knee <= 0.0f) ? 1.0e-6f : knee;
+        const float value2 = value * value;
         const float knee2 = resolvedKnee * resolvedKnee;
         const float denominator = value2 + knee2;
-        return (denominator > 0.0f) ? (value2 / denominator) : 0.0f;
+        return (denominator <= 0.0f) ? 0.0f : (value2 / denominator);
     }
 
     float PlantModel::loadWeightedContactRelativeSpeedMps(
@@ -73,7 +68,7 @@ namespace MazeMap
         const std::array<float, 4>& contactNormalLoadN,
         const float totalNormalLoadN) noexcept
     {
-        const float normalSum = (totalNormalLoadN > kForceEpsilonN) ? totalNormalLoadN : kForceEpsilonN;
+        const float normalSum = (totalNormalLoadN <= kForceEpsilonN) ? kForceEpsilonN : totalNormalLoadN;
         float weightedSpeed2 = 0.0f;
         for (uint8_t contactIndex = 0U; contactIndex < 4U; ++contactIndex)
         {
@@ -81,10 +76,10 @@ namespace MazeMap
             const float rightSpeed = contactKinematics._rightRelativeVelocityMps;
             const float forwardSpeed = contactKinematics._forwardRelativeVelocityMps;
             weightedSpeed2 +=
-                (std::max)(0.0f, contactNormalLoadN[contactIndex]) *
+                PositivePart(contactNormalLoadN[contactIndex]) *
                 ((rightSpeed * rightSpeed) + (forwardSpeed * forwardSpeed));
         }
-        return MazeMap::Math::Sqrtf((std::max)(0.0f, weightedSpeed2 / normalSum));
+        return MazeMap::Math::Sqrtf(PositivePart(weightedSpeed2 / normalSum));
     }
 
     float PlantModel::aggregateContactYawMomentCorrectionAlongYawNm(
@@ -94,33 +89,25 @@ namespace MazeMap
         const float yawMomentYieldNm,
         const float variantCContactYawMomentCorrectionAlongYawNm) const noexcept
     {
-        const float relWeight = PositiveFiniteOrDefault(
-            _aggregateContactYawMomentCorrectionForceRelWeight,
-            kDefaultAggregateContactYawMomentCorrectionForceRelWeight);
+        const float relWeight = _aggregateContactYawMomentCorrectionForceRelWeight;
         const float speedV2 =
             (forwardVelocityMps * forwardVelocityMps) +
             ((relWeight * contactRelativeSpeedMps) * (relWeight * contactRelativeSpeedMps));
-        const float speedKnee = PositiveFiniteOrDefault(
-            _aggregateContactYawMomentCorrectionBlendSpeedKneeMps,
-            kDefaultAggregateContactYawMomentCorrectionBlendSpeedKneeMps);
+        const float speedKnee = _aggregateContactYawMomentCorrectionBlendSpeedKneeMps;
         const float speedKnee2 = speedKnee * speedKnee;
         const float speedLow =
-            (speedKnee2 > 0.0f) ? (speedKnee2 / (speedKnee2 + (std::max)(0.0f, speedV2))) : 0.0f;
-        const float resolvedYieldNm = PositiveFiniteOrDefault(yawMomentYieldNm, kForceEpsilonN);
+            (speedKnee2 > 0.0f) ? (speedKnee2 / (speedKnee2 + PositivePart(speedV2))) : 0.0f;
+        const float resolvedYieldNm =
+            (yawMomentYieldNm <= kForceEpsilonN) ? kForceEpsilonN : yawMomentYieldNm;
         const float utilization = PositivePart(projectedYawMomentAlongYawNm) / resolvedYieldNm;
         const float forceGate =
             RationalSquareGate(utilization, _aggregateContactYawMomentCorrectionBlendForceKnee);
-        const float speedFade = PositiveFiniteOrDefault(
-            _aggregateContactYawMomentCorrectionForceSpeedFadeMps,
-            kDefaultAggregateContactYawMomentCorrectionForceSpeedFadeMps);
+        const float speedFade = _aggregateContactYawMomentCorrectionForceSpeedFadeMps;
         const float speedFade2 = speedFade * speedFade;
         const float speedRelief =
-            (speedFade2 > 0.0f) ? (speedFade2 / (speedFade2 + (std::max)(0.0f, speedV2))) : 0.0f;
+            (speedFade2 > 0.0f) ? (speedFade2 / (speedFade2 + PositivePart(speedV2))) : 0.0f;
         const float forceBranchContactYawMomentCorrectionAlongYawNm =
-            speedRelief *
-            PositiveFiniteOrDefault(
-                _aggregateContactYawMomentCorrectionForceSlidingMomentNm,
-                kDefaultAggregateContactYawMomentCorrectionForceSlidingMomentNm);
+            speedRelief * _aggregateContactYawMomentCorrectionForceSlidingMomentNm;
         const float blend = (std::clamp)(speedLow * forceGate, 0.0f, 1.0f);
         const float contactYawMomentCorrectionAlongYawNm =
             variantCContactYawMomentCorrectionAlongYawNm +
@@ -197,12 +184,8 @@ namespace MazeMap
                 kinematics,
                 contactNormalLoadN,
                 totalNormalLoadN);
-        const float relKnee = PositiveFiniteOrDefault(
-            _aggregateContactYawMomentCorrectionVariantCRelativeSpeedKneeMps,
-            kDefaultAggregateContactYawMomentCorrectionVariantCRelativeSpeedKneeMps);
-        const float forwardKnee = PositiveFiniteOrDefault(
-            _aggregateContactYawMomentCorrectionVariantCForwardSpeedKneeMps,
-            kDefaultAggregateContactYawMomentCorrectionVariantCForwardSpeedKneeMps);
+        const float relKnee = _aggregateContactYawMomentCorrectionVariantCRelativeSpeedKneeMps;
+        const float forwardKnee = _aggregateContactYawMomentCorrectionVariantCForwardSpeedKneeMps;
         const float lowRel =
             1.0f /
             (1.0f + ((contactRelativeSpeedMps * contactRelativeSpeedMps) / (relKnee * relKnee)));
@@ -212,7 +195,7 @@ namespace MazeMap
         const float highForward = 1.0f - lowForward;
         const float utilization =
             (std::clamp)(
-                std::isfinite(maxProjectedContactUtilization) ? maxProjectedContactUtilization : 0.0f,
+                maxProjectedContactUtilization,
                 0.0f,
                 5.0f);
         const float utilSmooth = utilization / (1.0f + utilization);
@@ -242,7 +225,7 @@ namespace MazeMap
 
     float PlantModel::residualDecayAlpha(const float dtS, const float tauS) noexcept
     {
-        if (!std::isfinite(dtS) || !(dtS > 0.0f) || !std::isfinite(tauS) || !(tauS > 0.0f))
+        if (!(dtS > 0.0f) || !(tauS > 0.0f))
         {
             return 1.0f;
         }
@@ -468,27 +451,20 @@ namespace MazeMap
     {
         const float wheelRadiusM = Vehicle::GetDriveWheelRadiusM();
         const Eigen::Vector2f wheelLinearVelocityMps = wheelLinearVelocityFromBodyState(currentState);
-        const bool useEncoderInput =
-            (encoderInput != nullptr) &&
-            std::isfinite(encoderInput->LeftWheelSpeedRadps()) &&
-            std::isfinite(encoderInput->RightWheelSpeedRadps());
+        const bool useEncoderInput = (encoderInput != nullptr);
         const float leftWheelSpeedRadps =
             useEncoderInput ?
             encoderInput->LeftWheelSpeedRadps() :
-            ((std::isfinite(wheelRadiusM) && (wheelRadiusM > 0.0f)) ?
-            (wheelLinearVelocityMps.x() / wheelRadiusM) :
-            0.0f);
+            (wheelLinearVelocityMps.x() / wheelRadiusM);
         const float rightWheelSpeedRadps =
             useEncoderInput ?
             encoderInput->RightWheelSpeedRadps() :
-            ((std::isfinite(wheelRadiusM) && (wheelRadiusM > 0.0f)) ?
-            (wheelLinearVelocityMps.y() / wheelRadiusM) :
-            0.0f);
+            (wheelLinearVelocityMps.y() / wheelRadiusM);
         const bool activeBrakeCommand = !control.IsFinite();
         const float leftMotorCommand =
-            (!activeBrakeCommand && std::isfinite(control.LeftCommand())) ? control.LeftCommand() : 0.0f;
+            activeBrakeCommand ? 0.0f : control.LeftCommand();
         const float rightMotorCommand =
-            (!activeBrakeCommand && std::isfinite(control.RightCommand())) ? control.RightCommand() : 0.0f;
+            activeBrakeCommand ? 0.0f : control.RightCommand();
         const float batteryVoltageV = _vehicle.GetBatteryVoltage();
         const float staticLaunchTorqueNm = staticFrictionTorqueNm();
 
@@ -533,22 +509,14 @@ namespace MazeMap
             std::exp(-(leftSlowLaunchRatio * leftSlowLaunchRatio));
         const float leftLaunchDirection =
             SignedDirection(leftCurrentLimitedTorqueNm, leftWheelSpeedRadps);
-        leftAppliedBankTorqueNm = 0.0f;
-        if (std::fabs(leftCurrentLimitedTorqueNm) > leftLaunchTorqueNm)
-        {
-            leftAppliedBankTorqueNm =
-                leftCurrentLimitedTorqueNm -
-                (leftLaunchDirection * leftLaunchTorqueNm);
-        }
+        const float leftLaunchExcessTorqueNm =
+            PositivePart(std::fabs(leftCurrentLimitedTorqueNm) - leftLaunchTorqueNm);
+        leftAppliedBankTorqueNm = leftLaunchDirection * leftLaunchExcessTorqueNm;
         const float leftLossDirection = SignedDirection(leftWheelSpeedRadps, leftAppliedBankTorqueNm);
         const float leftRollingLossTorqueNm =
             (kRollingFrictionTorqueNm * leftLossDirection) +
             (kViscousFrictionNmPerRadps * leftWheelSpeedRadps);
         leftAppliedBankTorqueNm -= leftRollingLossTorqueNm;
-        if (!std::isfinite(leftAppliedBankTorqueNm))
-        {
-            leftAppliedBankTorqueNm = 0.0f;
-        }
 
         const float rightDirectTorqueNm =
             activeBrakeCommand ?
@@ -591,22 +559,14 @@ namespace MazeMap
             std::exp(-(rightSlowLaunchRatio * rightSlowLaunchRatio));
         const float rightLaunchDirection =
             SignedDirection(rightCurrentLimitedTorqueNm, rightWheelSpeedRadps);
-        rightAppliedBankTorqueNm = 0.0f;
-        if (std::fabs(rightCurrentLimitedTorqueNm) > rightLaunchTorqueNm)
-        {
-            rightAppliedBankTorqueNm =
-                rightCurrentLimitedTorqueNm -
-                (rightLaunchDirection * rightLaunchTorqueNm);
-        }
+        const float rightLaunchExcessTorqueNm =
+            PositivePart(std::fabs(rightCurrentLimitedTorqueNm) - rightLaunchTorqueNm);
+        rightAppliedBankTorqueNm = rightLaunchDirection * rightLaunchExcessTorqueNm;
         const float rightLossDirection = SignedDirection(rightWheelSpeedRadps, rightAppliedBankTorqueNm);
         const float rightRollingLossTorqueNm =
             (kRollingFrictionTorqueNm * rightLossDirection) +
             (kViscousFrictionNmPerRadps * rightWheelSpeedRadps);
         rightAppliedBankTorqueNm -= rightRollingLossTorqueNm;
-        if (!std::isfinite(rightAppliedBankTorqueNm))
-        {
-            rightAppliedBankTorqueNm = 0.0f;
-        }
     }
 
     PlantModel::PlantDerivatives PlantModel::forwardStep(
@@ -655,40 +615,26 @@ namespace MazeMap
     {
         PlantDerivatives derivatives{};
         const float wheelRadiusM = Vehicle::GetDriveWheelRadiusM();
-        const float massKg =
-            (std::isfinite(_vehicle.GetMass()) && (_vehicle.GetMass() > 0.0f)) ?
-            _vehicle.GetMass() :
-            1.0f;
+        const float massKg = _vehicle.GetMass();
         const float invMassKg = 1.0f / massKg;
-        const float yawInertiaKgM2 =
-            (std::isfinite(_vehicle.GetYawInertia()) && (_vehicle.GetYawInertia() > 0.0f)) ?
-            _vehicle.GetYawInertia() :
-            1.0f;
+        const float yawInertiaKgM2 = _vehicle.GetYawInertia();
         const float wheelSpinupMassKg =
-            (wheelRadiusM > kForceEpsilonN) ?
-            (((std::max)(0.0f, _leftDrive.getEquivalentWheelInertiaKgM2()) +
-              (std::max)(0.0f, _rightDrive.getEquivalentWheelInertiaKgM2())) / (wheelRadiusM * wheelRadiusM)) :
-            0.0f;
+            (_leftDrive.getEquivalentWheelInertiaKgM2() +
+             _rightDrive.getEquivalentWheelInertiaKgM2()) /
+            (wheelRadiusM * wheelRadiusM);
 
-        const float forwardVelocityMps =
-            std::isfinite(state(VehicleState::kVf)) ? state(VehicleState::kVf) : 0.0f;
-        const float rightVelocityMps =
-            std::isfinite(state(VehicleState::kVr)) ? state(VehicleState::kVr) : 0.0f;
-        const float heading =
-            std::isfinite(state(VehicleState::kHeading)) ? state(VehicleState::kHeading) : 0.0f;
-        const float yawRateRadps =
-            std::isfinite(state(VehicleState::kYawRate)) ? state(VehicleState::kYawRate) : 0.0f;
-        const float forwardAccelResidualMps2 =
-            std::isfinite(state(VehicleState::kDeltaAf)) ? state(VehicleState::kDeltaAf) : 0.0f;
-        const float rightAccelResidualMps2 =
-            std::isfinite(state(VehicleState::kDeltaAr)) ? state(VehicleState::kDeltaAr) : 0.0f;
-        const float yawAccelResidualRadps2 =
-            std::isfinite(state(VehicleState::kDeltaYawAccel)) ? state(VehicleState::kDeltaYawAccel) : 0.0f;
+        const float forwardVelocityMps = state(VehicleState::kVf);
+        const float rightVelocityMps = state(VehicleState::kVr);
+        const float heading = state(VehicleState::kHeading);
+        const float yawRateRadps = state(VehicleState::kYawRate);
+        const float forwardAccelResidualMps2 = state(VehicleState::kDeltaAf);
+        const float rightAccelResidualMps2 = state(VehicleState::kDeltaAr);
+        const float yawAccelResidualRadps2 = state(VehicleState::kDeltaYawAccel);
         derivatives._wheelKinematics = wheelKinematics(state, encoderInput);
 
         const float totalNormalLoadN =
             (massKg * GRAVITY_MPS2) +
-            ((std::clamp)(_vehicle.GetFanDuty(), 0.0f, 1.0f) * _vehicle.GetFanDownforceAtFullDuty());
+            (_vehicle.GetFanDuty() * _vehicle.GetFanDownforceAtFullDuty());
         const float frontWheelNormalLoadN = 0.5f * kFrontLoadFraction * totalNormalLoadN;
         const float rearWheelNormalLoadN = 0.5f * (1.0f - kFrontLoadFraction) * totalNormalLoadN;
         ContactForces contactForces{};
@@ -739,42 +685,22 @@ namespace MazeMap
         const float rearRightRightContactForceGainNPerMps =
             _rightDrive.getRearRightContactForceGainNPerMps();
         const float frontLeftLongitudinalStiffnessNPerMps =
-            (std::isfinite(leftLongitudinalStiffnessN) && (leftLongitudinalStiffnessN > 0.0f)) ?
-            (0.5f * leftLongitudinalStiffnessN) :
-            0.0f;
+            0.5f * leftLongitudinalStiffnessN;
         const float frontRightLongitudinalStiffnessNPerMps =
-            (std::isfinite(rightLongitudinalStiffnessN) && (rightLongitudinalStiffnessN > 0.0f)) ?
-            (0.5f * rightLongitudinalStiffnessN) :
-            0.0f;
+            0.5f * rightLongitudinalStiffnessN;
         const float rearLeftLongitudinalStiffnessNPerMps = frontLeftLongitudinalStiffnessNPerMps;
         const float rearRightLongitudinalStiffnessNPerMps = frontRightLongitudinalStiffnessNPerMps;
         const float frontLeftRightContactForceGainNPerMpsResolved =
-            (std::isfinite(frontLeftRightContactForceGainNPerMps) &&
-             (frontLeftRightContactForceGainNPerMps > 0.0f)) ?
-            frontLeftRightContactForceGainNPerMps :
-            0.0f;
+            frontLeftRightContactForceGainNPerMps;
         const float frontRightRightContactForceGainNPerMpsResolved =
-            (std::isfinite(frontRightRightContactForceGainNPerMps) &&
-             (frontRightRightContactForceGainNPerMps > 0.0f)) ?
-            frontRightRightContactForceGainNPerMps :
-            0.0f;
+            frontRightRightContactForceGainNPerMps;
         const float rearLeftRightContactForceGainNPerMpsResolved =
-            (std::isfinite(rearLeftRightContactForceGainNPerMps) &&
-             (rearLeftRightContactForceGainNPerMps > 0.0f)) ?
-            rearLeftRightContactForceGainNPerMps :
-            0.0f;
+            rearLeftRightContactForceGainNPerMps;
         const float rearRightRightContactForceGainNPerMpsResolved =
-            (std::isfinite(rearRightRightContactForceGainNPerMps) &&
-             (rearRightRightContactForceGainNPerMps > 0.0f)) ?
-            rearRightRightContactForceGainNPerMps :
-            0.0f;
+            rearRightRightContactForceGainNPerMps;
 
         const float sustainedContactMu =
-            (std::isfinite(Vehicle::GetSustainedLateralAccelerationReferenceMps2()) &&
-             (Vehicle::GetSustainedLateralAccelerationReferenceMps2() > 0.0f) &&
-             (totalNormalLoadN > kForceEpsilonN)) ?
-            ((Vehicle::GetSustainedLateralAccelerationReferenceMps2() * massKg) / totalNormalLoadN) :
-            0.0f;
+            (Vehicle::GetSustainedLateralAccelerationReferenceMps2() * massKg) / totalNormalLoadN;
         const float peakFrontMu = (sustainedContactMu > 0.0f) ? sustainedContactMu : kMuFront;
         const float peakRearMu = (sustainedContactMu > 0.0f) ? sustainedContactMu : kMuRear;
 
@@ -887,7 +813,7 @@ namespace MazeMap
             MazeMap::Math::Sqrtf(
                 (frontLeftRawForwardForceN * frontLeftRawForwardForceN) +
                 (frontLeftRawRightForceN * frontLeftRawRightForceN));
-        const float frontLeftMaxForceN = (std::max)(0.0f, peakFrontMu * frontLeftContact._normalForceN);
+        const float frontLeftMaxForceN = PositivePart(peakFrontMu * frontLeftContact._normalForceN);
         const float frontLeftScale =
             (frontLeftRawMagnitudeN > frontLeftMaxForceN && frontLeftRawMagnitudeN > kForceEpsilonN) ?
             (frontLeftMaxForceN / frontLeftRawMagnitudeN) :
@@ -902,7 +828,7 @@ namespace MazeMap
             MazeMap::Math::Sqrtf(
                 (frontRightRawForwardForceN * frontRightRawForwardForceN) +
                 (frontRightRawRightForceN * frontRightRawRightForceN));
-        const float frontRightMaxForceN = (std::max)(0.0f, peakFrontMu * frontRightContact._normalForceN);
+        const float frontRightMaxForceN = PositivePart(peakFrontMu * frontRightContact._normalForceN);
         const float frontRightScale =
             (frontRightRawMagnitudeN > frontRightMaxForceN && frontRightRawMagnitudeN > kForceEpsilonN) ?
             (frontRightMaxForceN / frontRightRawMagnitudeN) :
@@ -917,7 +843,7 @@ namespace MazeMap
             MazeMap::Math::Sqrtf(
                 (rearLeftRawForwardForceN * rearLeftRawForwardForceN) +
                 (rearLeftRawRightForceN * rearLeftRawRightForceN));
-        const float rearLeftMaxForceN = (std::max)(0.0f, peakRearMu * rearLeftContact._normalForceN);
+        const float rearLeftMaxForceN = PositivePart(peakRearMu * rearLeftContact._normalForceN);
         const float rearLeftScale =
             (rearLeftRawMagnitudeN > rearLeftMaxForceN && rearLeftRawMagnitudeN > kForceEpsilonN) ?
             (rearLeftMaxForceN / rearLeftRawMagnitudeN) :
@@ -932,7 +858,7 @@ namespace MazeMap
             MazeMap::Math::Sqrtf(
                 (rearRightRawForwardForceN * rearRightRawForwardForceN) +
                 (rearRightRawRightForceN * rearRightRawRightForceN));
-        const float rearRightMaxForceN = (std::max)(0.0f, peakRearMu * rearRightContact._normalForceN);
+        const float rearRightMaxForceN = PositivePart(peakRearMu * rearRightContact._normalForceN);
         const float rearRightScale =
             (rearRightRawMagnitudeN > rearRightMaxForceN && rearRightRawMagnitudeN > kForceEpsilonN) ?
             (rearRightMaxForceN / rearRightRawMagnitudeN) :
@@ -1015,7 +941,7 @@ namespace MazeMap
                 contactNormalLoadN,
                 totalNormalLoadN);
         const float yawMomentYieldNm =
-            (std::max)(0.0f, sustainedContactMu * contactYawHalfTrackWidthM * totalNormalLoadN);
+            PositivePart(sustainedContactMu * contactYawHalfTrackWidthM * totalNormalLoadN);
         const float contactYawMomentCorrectionAlongYawNm =
             aggregateContactYawMomentCorrectionAlongYawNm(
                 forwardVelocityMps,
@@ -1038,31 +964,17 @@ namespace MazeMap
         const float rawYawAccelRadps2 =
             yawMomentNm /
             (yawInertiaKgM2 + (wheelSpinupMassKg * contactYawHalfTrackWidthM * contactYawHalfTrackWidthM));
-        const float finiteRawForwardAccelMps2 =
-            std::isfinite(rawForwardAccelMps2) ? rawForwardAccelMps2 : 0.0f;
-        const float finiteRawRightAccelMps2 =
-            std::isfinite(rawRightAccelMps2) ? rawRightAccelMps2 : 0.0f;
-        const float finiteRawYawAccelRadps2 =
-            std::isfinite(rawYawAccelRadps2) ? rawYawAccelRadps2 : 0.0f;
-        const float maxForwardAccelMps2 =
-            (std::isfinite(_vehicle.GetMaxForwardAcceleration()) &&
-             (_vehicle.GetMaxForwardAcceleration() > 0.0f)) ?
-            _vehicle.GetMaxForwardAcceleration() :
-            0.0f;
-        const float maxYawAccelRadps2 =
-            (std::isfinite(_vehicle.GetMaxYawAccel()) &&
-             (_vehicle.GetMaxYawAccel() > 0.0f)) ?
-            _vehicle.GetMaxYawAccel() :
-            0.0f;
+        const float maxForwardAccelMps2 = _vehicle.GetMaxForwardAcceleration();
+        const float maxYawAccelRadps2 = _vehicle.GetMaxYawAccel();
         const float forwardAccelMps2 =
             (maxForwardAccelMps2 > 0.0f) ?
-            (std::clamp)(finiteRawForwardAccelMps2, -maxForwardAccelMps2, maxForwardAccelMps2) :
-            finiteRawForwardAccelMps2;
-        const float rightAccelMps2 = finiteRawRightAccelMps2;
+            (std::clamp)(rawForwardAccelMps2, -maxForwardAccelMps2, maxForwardAccelMps2) :
+            rawForwardAccelMps2;
+        const float rightAccelMps2 = rawRightAccelMps2;
         const float yawAccelRadps2 =
             (maxYawAccelRadps2 > 0.0f) ?
-            (std::clamp)(finiteRawYawAccelRadps2, -maxYawAccelRadps2, maxYawAccelRadps2) :
-            finiteRawYawAccelRadps2;
+            (std::clamp)(rawYawAccelRadps2, -maxYawAccelRadps2, maxYawAccelRadps2) :
+            rawYawAccelRadps2;
         const float resolvedForwardAccelMps2 = forwardAccelMps2 + forwardAccelResidualMps2;
         const float resolvedRightAccelMps2 = rightAccelMps2 + rightAccelResidualMps2;
         const float resolvedYawAccelRadps2 = yawAccelRadps2 + yawAccelResidualRadps2;
@@ -1106,7 +1018,7 @@ namespace MazeMap
         float dtS,
         const SensorSnapshot::EncoderObs* const encoderInput) const noexcept
     {
-        if (!(std::isfinite(dtS) && (dtS > 0.0f)))
+        if (!(dtS > 0.0f))
         {
             return state;
         }
@@ -1150,7 +1062,7 @@ namespace MazeMap
         const float dtS,
         const SensorSnapshot::EncoderObs* const encoderInput) const noexcept
     {
-        if (!(std::isfinite(dtS) && (dtS > 0.0f)))
+        if (!(dtS > 0.0f))
         {
             return state;
         }
@@ -1158,12 +1070,9 @@ namespace MazeMap
         const float forwardDecayAlpha = forwardAccelerationResidualDecayAlpha(dtS);
         const float rightDecayAlpha = rightAccelerationResidualDecayAlpha(dtS);
         const float yawAccelDecayAlpha = yawAccelerationResidualDecayAlpha(dtS);
-        const float forwardAccelerationResidualMps2 =
-            std::isfinite(state(VehicleState::kDeltaAf)) ? state(VehicleState::kDeltaAf) : 0.0f;
-        const float rightAccelerationResidualMps2 =
-            std::isfinite(state(VehicleState::kDeltaAr)) ? state(VehicleState::kDeltaAr) : 0.0f;
-        const float yawAccelerationResidualRadps2 =
-            std::isfinite(state(VehicleState::kDeltaYawAccel)) ? state(VehicleState::kDeltaYawAccel) : 0.0f;
+        const float forwardAccelerationResidualMps2 = state(VehicleState::kDeltaAf);
+        const float rightAccelerationResidualMps2 = state(VehicleState::kDeltaAr);
+        const float yawAccelerationResidualRadps2 = state(VehicleState::kDeltaYawAccel);
 
         Eigen::Matrix<float, VehicleState::kDimension, 1> propagationState = state;
         propagationState(VehicleState::kDeltaAf) =
@@ -1219,7 +1128,7 @@ namespace MazeMap
         for (const ContactForce& contact : derivatives._contactForces._contacts)
         {
             maxContactSaturation = (std::max)(maxContactSaturation, contact._saturation);
-            totalNormalLoadN += (std::max)(0.0f, contact._normalForceN);
+            totalNormalLoadN += PositivePart(contact._normalForceN);
         }
 
         maxContactUtilization = derivatives._maxContactUtilization;
@@ -1239,36 +1148,23 @@ namespace MazeMap
         float dtS) noexcept
     {
         Eigen::Matrix<float, VehicleState::kDimension, 1> nextState = currentState;
-        if (!(std::isfinite(dtS) && (dtS > 0.0f)))
+        if (!(dtS > 0.0f))
         {
             return nextState;
         }
 
-        const auto finiteValueOrZero = [](const float value) noexcept -> float
-        {
-            return std::isfinite(value) ? value : 0.0f;
-        };
-
-        const float currentForwardVelocityMps =
-            finiteValueOrZero(currentState(VehicleState::kVf));
-        const float currentRightVelocityMps =
-            finiteValueOrZero(currentState(VehicleState::kVr));
-        const float currentYawRateRadps =
-            finiteValueOrZero(currentState(VehicleState::kYawRate));
-        const float forwardAccelMps2 =
-            finiteValueOrZero(evaluatedStep._forwardAccelMps2);
-        const float rightAccelMps2 =
-            finiteValueOrZero(evaluatedStep._rightAccelMps2);
-        const float yawAccelRadps2 =
-            finiteValueOrZero(evaluatedStep._yawAccelRadps2);
+        const float currentForwardVelocityMps = currentState(VehicleState::kVf);
+        const float currentRightVelocityMps = currentState(VehicleState::kVr);
+        const float currentYawRateRadps = currentState(VehicleState::kYawRate);
+        const float forwardAccelMps2 = evaluatedStep._forwardAccelMps2;
+        const float rightAccelMps2 = evaluatedStep._rightAccelMps2;
+        const float yawAccelRadps2 = evaluatedStep._yawAccelRadps2;
         const float nextYawRateRadps =
             currentYawRateRadps + (dtS * yawAccelRadps2);
         const float midpointYawRateRadps =
             currentYawRateRadps + (0.5f * dtS * yawAccelRadps2);
-        const float rotationRad =
-            finiteValueOrZero(midpointYawRateRadps * dtS);
-        const float normalizedRotationRad =
-            std::isfinite(rotationRad) ? std::remainder(rotationRad, TWO_PI_F) : 0.0f;
+        const float rotationRad = midpointYawRateRadps * dtS;
+        const float normalizedRotationRad = std::remainder(rotationRad, TWO_PI_F);
         float rotationSin = 0.0f;
         float rotationCos = 1.0f;
         sin_cosf(normalizedRotationRad, rotationSin, rotationCos);
@@ -1299,21 +1195,18 @@ namespace MazeMap
         }
 
         nextState(VehicleState::kYawRate) =
-            finiteValueOrZero(nextYawRateRadps);
+            nextYawRateRadps;
         nextState(VehicleState::kDeltaAf) =
-            finiteValueOrZero(currentState(VehicleState::kDeltaAf)) *
+            currentState(VehicleState::kDeltaAf) *
             std::exp(-dtS / kForwardAccelerationResidualDecayTauS);
         nextState(VehicleState::kDeltaAr) =
-            finiteValueOrZero(currentState(VehicleState::kDeltaAr)) *
+            currentState(VehicleState::kDeltaAr) *
             std::exp(-dtS / kRightAccelerationResidualDecayTauS);
         nextState(VehicleState::kDeltaYawAccel) =
-            finiteValueOrZero(currentState(VehicleState::kDeltaYawAccel)) *
+            currentState(VehicleState::kDeltaYawAccel) *
             std::exp(-dtS / kYawAccelResidualDecayTauS);
 
-        const float currentHeadingRad =
-            std::isfinite(currentState(VehicleState::kHeading)) ?
-            NormalizeAngle(currentState(VehicleState::kHeading)) :
-            0.0f;
+        const float currentHeadingRad = NormalizeAngle(currentState(VehicleState::kHeading));
         nextState(VehicleState::kHeading) = NormalizeAngle(currentHeadingRad + rotationRad);
 
         float currentSineHeading = 0.0f;
@@ -1335,10 +1228,10 @@ namespace MazeMap
             (-nextState(VehicleState::kVr) * nextSineHeading) +
             (nextState(VehicleState::kVf) * nextCosineHeading);
         nextState(VehicleState::kPx) =
-            finiteValueOrZero(currentState(VehicleState::kPx)) +
+            currentState(VehicleState::kPx) +
             (0.5f * dtS * (currentWorldRightVelocityMps + nextWorldRightVelocityMps));
         nextState(VehicleState::kPy) =
-            finiteValueOrZero(currentState(VehicleState::kPy)) +
+            currentState(VehicleState::kPy) +
             (0.5f * dtS * (currentWorldForwardVelocityMps + nextWorldForwardVelocityMps));
 
         nextState(VehicleState::kHeading) = NormalizeAngle(nextState(VehicleState::kHeading));
@@ -1350,22 +1243,13 @@ namespace MazeMap
         const SensorSnapshot::EncoderObs* const encoderInput) const noexcept
     {
         WheelKinematics kinematics{};
-        const float forwardVelocityMps =
-            std::isfinite(state(VehicleState::kVf)) ? state(VehicleState::kVf) : 0.0f;
-        const float rightVelocityMps =
-            std::isfinite(state(VehicleState::kVr)) ? state(VehicleState::kVr) : 0.0f;
-        const float yawRateRadps =
-            std::isfinite(state(VehicleState::kYawRate)) ? state(VehicleState::kYawRate) : 0.0f;
+        const float forwardVelocityMps = state(VehicleState::kVf);
+        const float rightVelocityMps = state(VehicleState::kVr);
+        const float yawRateRadps = state(VehicleState::kYawRate);
         const Eigen::Vector2f wheelLinearVelocityMps = wheelLinearVelocityFromBodyState(state);
         const float wheelRadiusM = Vehicle::GetDriveWheelRadiusM();
-        const bool useEncoderInput =
-            (encoderInput != nullptr) &&
-            std::isfinite(encoderInput->LeftWheelSpeedRadps()) &&
-            std::isfinite(encoderInput->RightWheelSpeedRadps());
-        const bool useEncoderLinearVelocity =
-            useEncoderInput &&
-            std::isfinite(encoderInput->LeftVelocityMps()) &&
-            std::isfinite(encoderInput->RightVelocityMps());
+        const bool useEncoderInput = (encoderInput != nullptr);
+        const bool useEncoderLinearVelocity = useEncoderInput;
         const float halfTrackWidthM = 0.5f * std::fabs(_vehicle.GetTrackWidth());
         const float longitudinalOffsetM =
             std::fabs(Vehicle::GetDriveWheelLongitudinalOffsetM());
@@ -1374,13 +1258,13 @@ namespace MazeMap
         const float leftSurfaceVelocityMps =
             useEncoderLinearVelocity ?
             encoderInput->LeftVelocityMps() :
-            ((useEncoderInput && std::isfinite(wheelRadiusM) && (wheelRadiusM > 0.0f)) ?
+            (useEncoderInput ?
                 (wheelRadiusM * encoderInput->LeftWheelSpeedRadps()) :
                 wheelLinearVelocityMps.x());
         const float rightSurfaceVelocityMps =
             useEncoderLinearVelocity ?
             encoderInput->RightVelocityMps() :
-            ((useEncoderInput && std::isfinite(wheelRadiusM) && (wheelRadiusM > 0.0f)) ?
+            (useEncoderInput ?
                 (wheelRadiusM * encoderInput->RightWheelSpeedRadps()) :
                 wheelLinearVelocityMps.y());
         const float frontRightBodyVelocityMps = rightVelocityMps + (longitudinalOffsetM * yawRateRadps);
@@ -1465,7 +1349,7 @@ namespace MazeMap
 
     void PlantModel::integrate(const App::Internal::CommandVector& control, float dt) noexcept
     {
-        if (!(std::isfinite(dt) && (dt > 0.0f)))
+        if (!(dt > 0.0f))
         {
             return;
         }
@@ -1502,18 +1386,14 @@ namespace MazeMap
             if (maximizeForwardAccel)
             {
                 const float resolvedLimit =
-                    (std::isfinite(maxLongitudinalAccelMps2) && (maxLongitudinalAccelMps2 > 0.0f)) ?
-                    maxLongitudinalAccelMps2 :
-                    0.0f;
+                    maxLongitudinalAccelMps2;
                 desiredAccelMps2 = std::signbit(desiredAccelMps2) ? -resolvedLimit : resolvedLimit;
             }
 
             if (maximizeYawAccel)
             {
                 const float resolvedLimit =
-                    (std::isfinite(maxYawAccelRadps2) && (maxYawAccelRadps2 > 0.0f)) ?
-                    maxYawAccelRadps2 :
-                    0.0f;
+                    maxYawAccelRadps2;
                 desiredYawAccelRadps2 = std::signbit(desiredYawAccelRadps2) ? -resolvedLimit : resolvedLimit;
             }
         }
@@ -1534,28 +1414,12 @@ namespace MazeMap
         const float trackWidthM = std::fabs(_vehicle.GetTrackWidth());
         const float halfTrackWidthM = 0.5f * trackWidthM;
         const float invTrackWidthM = (trackWidthM > 0.0f) ? (1.0f / trackWidthM) : 0.0f;
-        const float massKg =
-            (std::isfinite(_vehicle.GetMass()) && (_vehicle.GetMass() > 0.0f)) ?
-            _vehicle.GetMass() :
-            1.0f;
-        const float yawInertiaKgM2 =
-            (std::isfinite(_vehicle.GetYawInertia()) && (_vehicle.GetYawInertia() > 0.0f)) ?
-            _vehicle.GetYawInertia() :
-            1.0f;
-        const float leftWheelInertiaKgM2 =
-            (std::isfinite(_leftDrive.getEquivalentWheelInertiaKgM2()) &&
-             (_leftDrive.getEquivalentWheelInertiaKgM2() > 0.0f)) ?
-            _leftDrive.getEquivalentWheelInertiaKgM2() :
-            0.0f;
-        const float rightWheelInertiaKgM2 =
-            (std::isfinite(_rightDrive.getEquivalentWheelInertiaKgM2()) &&
-             (_rightDrive.getEquivalentWheelInertiaKgM2() > 0.0f)) ?
-            _rightDrive.getEquivalentWheelInertiaKgM2() :
-            0.0f;
-        const float forwardVelocityMps =
-            std::isfinite(_runtimeState.GetForwardVelocity()) ? _runtimeState.GetForwardVelocity() : 0.0f;
-        const float yawRateRadps =
-            std::isfinite(_runtimeState.GetYawRate()) ? _runtimeState.GetYawRate() : 0.0f;
+        const float massKg = _vehicle.GetMass();
+        const float yawInertiaKgM2 = _vehicle.GetYawInertia();
+        const float leftWheelInertiaKgM2 = _leftDrive.getEquivalentWheelInertiaKgM2();
+        const float rightWheelInertiaKgM2 = _rightDrive.getEquivalentWheelInertiaKgM2();
+        const float forwardVelocityMps = _runtimeState.GetForwardVelocity();
+        const float yawRateRadps = _runtimeState.GetYawRate();
         const float leftWheelSpeedRadps =
             (wheelRadiusM > 0.0f) ?
             ((forwardVelocityMps + (halfTrackWidthM * yawRateRadps)) * invWheelRadiusM) :
@@ -1569,7 +1433,7 @@ namespace MazeMap
         const WheelKinematics currentKinematics = wheelKinematics(currentState, nullptr);
         const float totalNormalLoadN =
             (massKg * GRAVITY_MPS2) +
-            ((std::clamp)(_vehicle.GetFanDuty(), 0.0f, 1.0f) * _vehicle.GetFanDownforceAtFullDuty());
+            (_vehicle.GetFanDuty() * _vehicle.GetFanDownforceAtFullDuty());
         const float frontWheelNormalLoadN = 0.5f * kFrontLoadFraction * totalNormalLoadN;
         const float rearWheelNormalLoadN = 0.5f * (1.0f - kFrontLoadFraction) * totalNormalLoadN;
         const std::array<float, 4> contactNormalLoadN = {
@@ -1597,28 +1461,20 @@ namespace MazeMap
                 contactNormalLoadN,
                 totalNormalLoadN);
         const float sustainedContactMu =
-            (std::isfinite(Vehicle::GetSustainedLateralAccelerationReferenceMps2()) &&
-             (Vehicle::GetSustainedLateralAccelerationReferenceMps2() > 0.0f) &&
-             (totalNormalLoadN > kForceEpsilonN)) ?
-            ((Vehicle::GetSustainedLateralAccelerationReferenceMps2() * massKg) / totalNormalLoadN) :
-            0.0f;
+            (Vehicle::GetSustainedLateralAccelerationReferenceMps2() * massKg) / totalNormalLoadN;
         const float yawMomentYieldNm =
-            (std::max)(0.0f, sustainedContactMu * halfTrackWidthM * totalNormalLoadN);
-        const auto positiveGainOrZero = [](const float gain) noexcept -> float
-        {
-            return (std::isfinite(gain) && (gain > 0.0f)) ? gain : 0.0f;
-        };
+            PositivePart(sustainedContactMu * halfTrackWidthM * totalNormalLoadN);
         const float frontLeftRightForceN =
-            positiveGainOrZero(_leftDrive.getFrontRightContactForceGainNPerMps()) *
+            _leftDrive.getFrontRightContactForceGainNPerMps() *
             currentKinematics._contacts[kFrontLeft]._rightRelativeVelocityMps;
         const float frontRightRightForceN =
-            positiveGainOrZero(_rightDrive.getFrontRightContactForceGainNPerMps()) *
+            _rightDrive.getFrontRightContactForceGainNPerMps() *
             currentKinematics._contacts[kFrontRight]._rightRelativeVelocityMps;
         const float rearLeftRightForceN =
-            positiveGainOrZero(_leftDrive.getRearRightContactForceGainNPerMps()) *
+            _leftDrive.getRearRightContactForceGainNPerMps() *
             currentKinematics._contacts[kRearLeft]._rightRelativeVelocityMps;
         const float rearRightRightForceN =
-            positiveGainOrZero(_rightDrive.getRearRightContactForceGainNPerMps()) *
+            _rightDrive.getRearRightContactForceGainNPerMps() *
             currentKinematics._contacts[kRearRight]._rightRelativeVelocityMps;
         const std::array<float, 4> synthesizedRightForceN = {
             frontLeftRightForceN,
@@ -1670,7 +1526,7 @@ namespace MazeMap
                         (synthesizedForwardForceN[contactIndex] * synthesizedForwardForceN[contactIndex]) +
                         (synthesizedRightForceN[contactIndex] * synthesizedRightForceN[contactIndex]));
                 const float maxForceN =
-                    (std::max)(0.0f, sustainedContactMu * contactNormalLoadN[contactIndex]);
+                    PositivePart(sustainedContactMu * contactNormalLoadN[contactIndex]);
                 maxUtilization =
                     (std::max)(
                         maxUtilization,
@@ -1704,18 +1560,14 @@ namespace MazeMap
         {
             const float desiredMomentAlongYawNm = yawDirection * desiredYawMomentNm;
             const float correctionAtZeroNm = correctionAtProjectedMoment(0.0f);
-            const float relWeight = PositiveFiniteOrDefault(
-                _aggregateContactYawMomentCorrectionForceRelWeight,
-                kDefaultAggregateContactYawMomentCorrectionForceRelWeight);
+            const float relWeight = _aggregateContactYawMomentCorrectionForceRelWeight;
             const float speedV2 =
                 (forwardVelocityMps * forwardVelocityMps) +
                 ((relWeight * contactRelativeSpeedMps) * (relWeight * contactRelativeSpeedMps));
-            const float speedKnee = PositiveFiniteOrDefault(
-                _aggregateContactYawMomentCorrectionBlendSpeedKneeMps,
-                kDefaultAggregateContactYawMomentCorrectionBlendSpeedKneeMps);
+            const float speedKnee = _aggregateContactYawMomentCorrectionBlendSpeedKneeMps;
             const float speedKnee2 = speedKnee * speedKnee;
             const float speedLow =
-                (speedKnee2 > 0.0f) ? (speedKnee2 / (speedKnee2 + (std::max)(0.0f, speedV2))) : 0.0f;
+                (speedKnee2 > 0.0f) ? (speedKnee2 / (speedKnee2 + PositivePart(speedV2))) : 0.0f;
             if (!(yawMomentYieldNm > kForceEpsilonN) || !(speedLow > kForceEpsilonN))
             {
                 requestedProjectedYawMomentNm = yawDirection * (desiredMomentAlongYawNm + correctionAtZeroNm);
@@ -1726,25 +1578,19 @@ namespace MazeMap
             }
             else
             {
-                const float speedFade = PositiveFiniteOrDefault(
-                    _aggregateContactYawMomentCorrectionForceSpeedFadeMps,
-                    kDefaultAggregateContactYawMomentCorrectionForceSpeedFadeMps);
+                const float speedFade = _aggregateContactYawMomentCorrectionForceSpeedFadeMps;
                 const float speedFade2 = speedFade * speedFade;
                 const float forceBranchContactYawMomentCorrectionAlongYawNm =
-                    ((speedFade2 > 0.0f) ? (speedFade2 / (speedFade2 + (std::max)(0.0f, speedV2))) : 0.0f) *
-                    PositiveFiniteOrDefault(
-                        _aggregateContactYawMomentCorrectionForceSlidingMomentNm,
-                        kDefaultAggregateContactYawMomentCorrectionForceSlidingMomentNm);
-                float lo = (std::max)(0.0f, desiredMomentAlongYawNm);
+                    ((speedFade2 > 0.0f) ? (speedFade2 / (speedFade2 + PositivePart(speedV2))) : 0.0f) *
+                    _aggregateContactYawMomentCorrectionForceSlidingMomentNm;
+                float lo = PositivePart(desiredMomentAlongYawNm);
                 float hi =
                     lo +
                     (std::max)(
                         (std::max)(forceBranchContactYawMomentCorrectionAlongYawNm, correctionAtZeroNm),
                         0.0f) +
                     (4.0f *
-                        PositiveFiniteOrDefault(
-                            _aggregateContactYawMomentCorrectionBlendForceKnee,
-                            kDefaultAggregateContactYawMomentCorrectionBlendForceKnee) *
+                        _aggregateContactYawMomentCorrectionBlendForceKnee *
                         yawMomentYieldNm);
                 if (!(hi > lo))
                 {
@@ -1777,8 +1623,7 @@ namespace MazeMap
             }
         }
         const float requestedLongitudinalYawMomentNm =
-            (std::isfinite(requestedProjectedYawMomentNm) ? requestedProjectedYawMomentNm : 0.0f) -
-            (std::isfinite(synthesizedRightYawMomentNm) ? synthesizedRightYawMomentNm : 0.0f);
+            requestedProjectedYawMomentNm - synthesizedRightYawMomentNm;
         const float forwardForceRequestN = massKg * desiredAccelMps2;
         const float commonForceRequestN = 0.5f * forwardForceRequestN;
         const float differentialForceRequestN = requestedLongitudinalYawMomentNm * invTrackWidthM;
@@ -1848,29 +1693,10 @@ namespace MazeMap
     {
         Eigen::Matrix<float, 2, 2> covariance = Eigen::Matrix<float, 2, 2>::Zero();
         const float wheelRadiusM = Vehicle::GetDriveWheelRadiusM();
-        if (!(wheelRadiusM > 0.0f) || !std::isfinite(wheelRadiusM))
-        {
-            covariance(0, 0) = 1.0f;
-            covariance(1, 1) = 1.0f;
-            return covariance;
-        }
-
-        const float resolvedLinearSigmaMps =
-            (std::isfinite(linearSpeedSigmaMps) && (linearSpeedSigmaMps > 0.0f)) ?
-            linearSpeedSigmaMps :
-            1.0f;
-        const float resolvedYawSigmaRadps =
-            (std::isfinite(yawRateSigmaRadps) && (yawRateSigmaRadps > 0.0f)) ?
-            yawRateSigmaRadps :
-            1.0f;
         const float physicalTrackWidthM = _vehicle.GetTrackWidth();
-        const float halfTrackWidthM =
-            0.5f *
-            ((std::isfinite(physicalTrackWidthM) && (physicalTrackWidthM > 0.0f)) ?
-                physicalTrackWidthM :
-                0.0f);
-        const float varianceUMps2 = resolvedLinearSigmaMps * resolvedLinearSigmaMps;
-        const float varianceYawRateRadps2 = resolvedYawSigmaRadps * resolvedYawSigmaRadps;
+        const float halfTrackWidthM = 0.5f * physicalTrackWidthM;
+        const float varianceUMps2 = linearSpeedSigmaMps * linearSpeedSigmaMps;
+        const float varianceYawRateRadps2 = yawRateSigmaRadps * yawRateSigmaRadps;
         const float varianceWheelLinearMps2 =
             varianceUMps2 + ((halfTrackWidthM * halfTrackWidthM) * varianceYawRateRadps2);
         const float covarianceWheelLinearMps2 =
@@ -1887,11 +1713,6 @@ namespace MazeMap
     float PlantModel::measuredLinearSpeedMps(const SensorSnapshot& snapshot) const noexcept
     {
         const float wheelRadiusM = Vehicle::GetDriveWheelRadiusM();
-        if (!(wheelRadiusM > 0.0f) || !std::isfinite(wheelRadiusM))
-        {
-            return 0.0f;
-        }
-
         const SensorSnapshot::EncoderObs& observation = snapshot.EncoderObservation();
         return 0.5f * wheelRadiusM * (observation.LeftWheelSpeedRadps() + observation.RightWheelSpeedRadps());
     }
@@ -1899,33 +1720,16 @@ namespace MazeMap
     float PlantModel::measuredYawRateRadps(const SensorSnapshot& snapshot) const noexcept
     {
         const float wheelRadiusM = Vehicle::GetDriveWheelRadiusM();
-        const float physicalTrackWidthM = _vehicle.GetTrackWidth();
-        const float trackWidthM =
-            (std::isfinite(physicalTrackWidthM) && (physicalTrackWidthM > 0.0f)) ?
-            physicalTrackWidthM :
-            0.0f;
-        if (!(wheelRadiusM > 0.0f) ||
-            !std::isfinite(wheelRadiusM) ||
-            !(trackWidthM > 0.0f) ||
-            !std::isfinite(trackWidthM))
-        {
-            return 0.0f;
-        }
-
+        const float trackWidthM = _vehicle.GetTrackWidth();
         const SensorSnapshot::EncoderObs& observation = snapshot.EncoderObservation();
         return wheelRadiusM * (observation.LeftWheelSpeedRadps() - observation.RightWheelSpeedRadps()) / trackWidthM;
     }
 
     Eigen::Vector2f PlantModel::wheelLinearVelocityFromBodyState(const Eigen::Matrix<float, VehicleState::kDimension, 1>& state) const noexcept
     {
-        const float trackWidthM =
-            (std::isfinite(_vehicle.GetTrackWidth()) && (_vehicle.GetTrackWidth() > 0.0f)) ?
-            _vehicle.GetTrackWidth() :
-            0.0f;
-        const float forwardSpeedMps =
-            std::isfinite(state(VehicleState::kVf)) ? state(VehicleState::kVf) : 0.0f;
-        const float yawRateRadps =
-            std::isfinite(state(VehicleState::kYawRate)) ? state(VehicleState::kYawRate) : 0.0f;
+        const float trackWidthM = _vehicle.GetTrackWidth();
+        const float forwardSpeedMps = state(VehicleState::kVf);
+        const float yawRateRadps = state(VehicleState::kYawRate);
         Eigen::Vector2f wheelLinearVelocityMps = Eigen::Vector2f::Zero();
         wheelLinearVelocityMps(0) = forwardSpeedMps + (0.5f * trackWidthM * yawRateRadps);
         wheelLinearVelocityMps(1) = forwardSpeedMps - (0.5f * trackWidthM * yawRateRadps);
@@ -1934,42 +1738,22 @@ namespace MazeMap
 
     float PlantModel::sustainedCombinedAccelerationUsage(float accelerationMps2) const noexcept
     {
-        const float limit =
-            (std::isfinite(Vehicle::GetSustainedLateralAccelerationReferenceMps2()) &&
-             (Vehicle::GetSustainedLateralAccelerationReferenceMps2() > 0.0f)) ?
-            Vehicle::GetSustainedLateralAccelerationReferenceMps2() :
-            1.0f;
-        return std::fabs(accelerationMps2) / limit;
+        return std::fabs(accelerationMps2) / Vehicle::GetSustainedLateralAccelerationReferenceMps2();
     }
 
     float PlantModel::nominalCombinedAccelerationUsage(float accelerationMps2) const noexcept
     {
-        const float limit =
-            (std::isfinite(_vehicle.GetNominalCombinedAcceleration()) &&
-             (_vehicle.GetNominalCombinedAcceleration() > 0.0f)) ?
-            _vehicle.GetNominalCombinedAcceleration() :
-            1.0f;
-        return std::fabs(accelerationMps2) / limit;
+        return std::fabs(accelerationMps2) / _vehicle.GetNominalCombinedAcceleration();
     }
 
     float PlantModel::peakCombinedAccelerationUsage(float accelerationMps2) const noexcept
     {
-        const float limit =
-            (std::isfinite(_vehicle.GetPeakCombinedAcceleration()) &&
-             (_vehicle.GetPeakCombinedAcceleration() > 0.0f)) ?
-            _vehicle.GetPeakCombinedAcceleration() :
-            1.0f;
-        return std::fabs(accelerationMps2) / limit;
+        return std::fabs(accelerationMps2) / _vehicle.GetPeakCombinedAcceleration();
     }
 
     float PlantModel::stopExitYawRateUsage(float yawRateRadps) const noexcept
     {
-        const float limit =
-            (std::isfinite(kStopExitYawRateRadps) &&
-             (kStopExitYawRateRadps > 0.0f)) ?
-            kStopExitYawRateRadps :
-            1.0f;
-        return std::fabs(yawRateRadps) / limit;
+        return std::fabs(yawRateRadps) / kStopExitYawRateRadps;
     }
 
     float PlantModel::totalForwardContactForceN(const App::Internal::CommandVector& control) const noexcept
@@ -2053,32 +1837,20 @@ namespace MazeMap
 
         const float wheelRadiusM = Vehicle::GetDriveWheelRadiusM();
         const float trackWidthM = std::fabs(_vehicle.GetTrackWidth());
-        if (!(std::isfinite(wheelRadiusM) &&
-            std::isfinite(trackWidthM) &&
-            (wheelRadiusM > kForceEpsilonN)))
+        if (!(wheelRadiusM > kForceEpsilonN))
         {
             return;
         }
 
         const float invWheelRadiusM = 1.0f / wheelRadiusM;
         const float halfTrackWidthM = 0.5f * trackWidthM;
-        const float massKg =
-            (std::isfinite(_vehicle.GetMass()) && (_vehicle.GetMass() > 0.0f)) ?
-            _vehicle.GetMass() :
-            1.0f;
-        const float yawInertiaKgM2 =
-            (std::isfinite(_vehicle.GetYawInertia()) && (_vehicle.GetYawInertia() > 0.0f)) ?
-            _vehicle.GetYawInertia() :
-            1.0f;
-        const float resolvedForwardVelocityMps =
-            std::isfinite(forwardVelocityMps) ? forwardVelocityMps : 0.0f;
-        const float resolvedYawRateRadps =
-            std::isfinite(yawRateRadps) ? yawRateRadps : 0.0f;
+        const float massKg = _vehicle.GetMass();
+        const float yawInertiaKgM2 = _vehicle.GetYawInertia();
         const float leftBankSpeedRadps =
-            (resolvedForwardVelocityMps + (halfTrackWidthM * resolvedYawRateRadps)) *
+            (forwardVelocityMps + (halfTrackWidthM * yawRateRadps)) *
             invWheelRadiusM;
         const float rightBankSpeedRadps =
-            (resolvedForwardVelocityMps - (halfTrackWidthM * resolvedYawRateRadps)) *
+            (forwardVelocityMps - (halfTrackWidthM * yawRateRadps)) *
             invWheelRadiusM;
         const float batteryVoltageV = _vehicle.GetBatteryVoltage();
         const float leftPositiveTorqueNm =
@@ -2094,17 +1866,13 @@ namespace MazeMap
         const float rightSymmetricTorqueNm =
             (std::min)(std::fabs(rightPositiveTorqueNm), std::fabs(rightNegativeTorqueNm));
         const float leftBankForceN =
-            (std::isfinite(leftSymmetricTorqueNm) && (wheelRadiusM > kForceEpsilonN)) ?
-            (leftSymmetricTorqueNm / wheelRadiusM) :
-            0.0f;
+            leftSymmetricTorqueNm / wheelRadiusM;
         const float rightBankForceN =
-            (std::isfinite(rightSymmetricTorqueNm) && (wheelRadiusM > kForceEpsilonN)) ?
-            (rightSymmetricTorqueNm / wheelRadiusM) :
-            0.0f;
+            rightSymmetricTorqueNm / wheelRadiusM;
         const float maxBankForceN =
             (std::min)(
-                (std::max)(0.0f, leftBankForceN),
-                (std::max)(0.0f, rightBankForceN));
+                PositivePart(leftBankForceN),
+                PositivePart(rightBankForceN));
         maxLongitudinalAccelMps2 =
             (2.0f * maxBankForceN) / massKg;
         maxYawAccelRadps2 =

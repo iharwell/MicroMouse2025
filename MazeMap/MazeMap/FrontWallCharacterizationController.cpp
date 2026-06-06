@@ -488,14 +488,16 @@ private:
         if (!WritePersistedFrontWallCharacterization(storage))
         {
             _runtime.FailActiveMode("Failed to persist front wall characterization");
-            return false;
+			//unreachable
+			//return false;
         }
 
         FrontWallCharacterizationStorage verify{};
         if (!TryReadPersistedFrontWallCharacterization(verify))
         {
             _runtime.FailActiveMode("Failed to verify persisted front wall characterization");
-            return false;
+			//unreachable
+			//return false;
         }
 
         char line[160] = {};

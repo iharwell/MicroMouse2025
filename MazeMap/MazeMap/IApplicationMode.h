@@ -36,7 +36,7 @@ namespace MazeMap::App::Internal
     // - During RunTick(...), the mode may keep callback ownership, transfer it explicitly,
     //   request pause, request an end-session boundary, or request terminal whole-program halt.
     // - Ordinary top-level mode completion is terminal whole-program end, not end-session.
-    class IApplicationMode
+    class EXPORT IApplicationMode
     {
     public:
         // `~IApplicationMode()`:

@@ -373,7 +373,7 @@ namespace MazeMap
 
     inline float OpenFloorMetersToHalfSteps(float meters)
     {
-        const float halfStepM = OpenFloorHalfStepMeters();
+		constexpr float halfStepM = OpenFloorHalfStepMeters();
         if (!(halfStepM > 0.0f))
         {
             return 0.0f;
