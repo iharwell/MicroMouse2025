@@ -230,6 +230,7 @@
     <ClInclude Include="IApplicationMode.h" />
     <ClInclude Include="MazeMapApplicationPrivate.h" />
     <ClInclude Include="MazeMapControllerRegistry.h" />
+    <ClInclude Include="MeasurementRegimeSequencer.h" />
     <ClInclude Include="WallSensorLedCalibrationController.h" />
     <ClInclude Include="MazeMapRuntimeCore.h" />
     <ClInclude Include="MazeMapRuntimeInfrastructure.h" />
@@ -325,6 +326,7 @@
     <ClCompile Include="MaskQueue.cpp" />
     <ClCompile Include="Maze.cpp" />
     <ClCompile Include="MapEvidenceUpdater.cpp" />
+    <ClCompile Include="MeasurementRegimeSequencer.cpp" />
     <ClCompile Include="Application.cpp" />
     <ClCompile Include="BootModeRegistry.cpp" />
     <ClCompile Include="BootFramework.cpp" />

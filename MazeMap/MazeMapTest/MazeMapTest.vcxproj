@@ -250,6 +250,7 @@
     <ClCompile Include="OpenFloorMeasurementControllerTest.cpp">
       <ObjectFileName>$(IntDir)OpenFloorMeasurementControllerTest.obj</ObjectFileName>
     </ClCompile>
+    <ClCompile Include="MeasurementRegimeSequencerTest.cpp" />
     <ClCompile Include="PathFinderTest.cpp" />
     <ClCompile Include="pch.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>

@@ -9,6 +9,7 @@
 #include "ManeuverInstance.h"
 #include "MazeMapRuntimeCore.h"
 #include "MazeMapRuntimeMmLog.h"
+#include "MeasurementRegimeSequencer.h"
 #include "OpenFloorMeasurementSpec.h"
 #include "VehicleState.h"
 
@@ -190,31 +191,23 @@ namespace MazeMap::App::Internal
 
         using MeasurementLogId = std::uint8_t;
         static constexpr MeasurementLogId kTimingLogId = 0U;
+        static constexpr std::size_t kMainRegimeCount = 8U;
+        using MainRegimeArray = std::array<MeasurementRegimeSequencer::Regime*, kMainRegimeCount>;
 
         class MainStage;
 
-        class MainMeasurementRegime
+        class MainMeasurementRegime : public MeasurementRegimeSequencer::Regime
         {
         public:
-            virtual ~MainMeasurementRegime() = default;
+            ~MainMeasurementRegime() override = default;
 
-            virtual const char* Title() const noexcept = 0;
-            virtual MeasurementLogId LogId() const noexcept = 0;
-            virtual std::uint16_t PrimitiveCount() const noexcept = 0;
-            virtual std::uint8_t SpeedCount() const noexcept = 0;
-            virtual std::uint16_t RepeatCount() const noexcept = 0;
-            virtual MazeMap::ManeuverCode PrimitiveCode(
-                std::uint16_t primitiveIndex,
-                std::uint8_t speedIndex) const noexcept = 0;
-            virtual float SpeedBinValue(
-                std::uint16_t primitiveIndex,
-                std::uint8_t speedIndex) const noexcept = 0;
             virtual bool EnsureReady(OpenFloorMeasurementController& controller);
-            virtual CommandVector Tick(
-                OpenFloorMeasurementController& controller,
-                std::uint16_t primitiveIndex,
-                std::uint8_t speedIndex,
-                bool& done) = 0;
+
+        protected:
+            OpenFloorMeasurementController& Controller() const noexcept;
+
+        private:
+            OpenFloorMeasurementController* _controller{};
         };
 
         class StaticMeasurementRegime final : public MainMeasurementRegime
@@ -222,21 +215,21 @@ namespace MazeMap::App::Internal
         public:
             static StaticMeasurementRegime& SharedInstance() noexcept;
 
-            const char* Title() const noexcept override;
-            MeasurementLogId LogId() const noexcept override;
+            const char* Name() const noexcept override;
+            MeasurementLogId Id() const noexcept override;
             std::uint16_t PrimitiveCount() const noexcept override;
-            std::uint8_t SpeedCount() const noexcept override;
+            std::uint8_t SpeedBinCount() const noexcept override;
             std::uint16_t RepeatCount() const noexcept override;
             MazeMap::ManeuverCode PrimitiveCode(
                 std::uint16_t primitiveIndex,
-                std::uint8_t speedIndex) const noexcept override;
+                std::uint8_t speedBinIndex) const noexcept override;
             float SpeedBinValue(
                 std::uint16_t primitiveIndex,
-                std::uint8_t speedIndex) const noexcept override;
-            CommandVector Tick(
-                OpenFloorMeasurementController& controller,
+                std::uint8_t speedBinIndex) const noexcept override;
+            CommandVector GetNextControls(
                 std::uint16_t primitiveIndex,
-                std::uint8_t speedIndex,
+                std::uint8_t speedBinIndex,
+                std::uint16_t repeatIndex,
                 bool& done) override;
 
         private:
@@ -250,21 +243,21 @@ namespace MazeMap::App::Internal
         public:
             static LaunchMeasurementRegime& SharedInstance() noexcept;
 
-            const char* Title() const noexcept override;
-            MeasurementLogId LogId() const noexcept override;
+            const char* Name() const noexcept override;
+            MeasurementLogId Id() const noexcept override;
             std::uint16_t PrimitiveCount() const noexcept override;
-            std::uint8_t SpeedCount() const noexcept override;
+            std::uint8_t SpeedBinCount() const noexcept override;
             std::uint16_t RepeatCount() const noexcept override;
             MazeMap::ManeuverCode PrimitiveCode(
                 std::uint16_t primitiveIndex,
-                std::uint8_t speedIndex) const noexcept override;
+                std::uint8_t speedBinIndex) const noexcept override;
             float SpeedBinValue(
                 std::uint16_t primitiveIndex,
-                std::uint8_t speedIndex) const noexcept override;
-            CommandVector Tick(
-                OpenFloorMeasurementController& controller,
+                std::uint8_t speedBinIndex) const noexcept override;
+            CommandVector GetNextControls(
                 std::uint16_t primitiveIndex,
-                std::uint8_t speedIndex,
+                std::uint8_t speedBinIndex,
+                std::uint16_t repeatIndex,
                 bool& done) override;
 
         private:
@@ -286,32 +279,34 @@ namespace MazeMap::App::Internal
                 return regime;
             }
 
-            const char* Title() const noexcept override { return "Yaw Launch"; }
-            MeasurementLogId LogId() const noexcept override { return kLogId; }
+            const char* Name() const noexcept override { return "Yaw Launch"; }
+            MeasurementLogId Id() const noexcept override { return kLogId; }
             std::uint16_t PrimitiveCount() const noexcept override { return 2U; }
-            std::uint8_t SpeedCount() const noexcept override { return 5U; }
+            std::uint8_t SpeedBinCount() const noexcept override { return 5U; }
             std::uint16_t RepeatCount() const noexcept override { return 10U; }
             MazeMap::ManeuverCode PrimitiveCode(
                 std::uint16_t primitiveIndex,
-                std::uint8_t speedIndex) const noexcept override
+                std::uint8_t speedBinIndex) const noexcept override
             {
                 (void)primitiveIndex;
-                (void)speedIndex;
+                (void)speedBinIndex;
                 return ManeuverCode::MC_NONE;
             }
             float SpeedBinValue(
                 std::uint16_t primitiveIndex,
-                std::uint8_t speedIndex) const noexcept override
+                std::uint8_t speedBinIndex) const noexcept override
             {
-                return (0.5f + speedIndex * 0.05f) * ((primitiveIndex == 0U) ? 1.0f : -1.0f);
+                return (0.5f + speedBinIndex * 0.05f) * ((primitiveIndex == 0U) ? 1.0f : -1.0f);
             }
-            CommandVector Tick(
-                OpenFloorMeasurementController& controller,
+            CommandVector GetNextControls(
                 std::uint16_t primitiveIndex,
-                std::uint8_t speedIndex,
+                std::uint8_t speedBinIndex,
+                std::uint16_t repeatIndex,
                 bool& done) override
             {
+                (void)repeatIndex;
 				done = false;
+                OpenFloorMeasurementController& controller = Controller();
                 // This is guaranteed to catch on the first tick because all
                 // regimes end on a hold completion, and it's also true at boot.
                 if(controller._driveService.IsEffectivelyComplete())
@@ -324,8 +319,8 @@ namespace MazeMap::App::Internal
                 {
                     _counter++;
 					// Since the actual drive values are already calculated for logging purposes,
-                    // we can just pull them directly with the sign naturally providing the direction.
-                    const float commandVal = SpeedBinValue(primitiveIndex, speedIndex);
+					// we can just pull them directly with the sign naturally providing the direction.
+                    const float commandVal = SpeedBinValue(primitiveIndex, speedBinIndex);
                     return CommandVector(commandVal, -commandVal);
                 }
                 else
@@ -346,21 +341,21 @@ namespace MazeMap::App::Internal
         public:
             static StraightMeasurementRegime& SharedInstance() noexcept;
 
-            const char* Title() const noexcept override;
-            MeasurementLogId LogId() const noexcept override;
+            const char* Name() const noexcept override;
+            MeasurementLogId Id() const noexcept override;
             std::uint16_t PrimitiveCount() const noexcept override;
-            std::uint8_t SpeedCount() const noexcept override;
+            std::uint8_t SpeedBinCount() const noexcept override;
             std::uint16_t RepeatCount() const noexcept override;
             MazeMap::ManeuverCode PrimitiveCode(
                 std::uint16_t primitiveIndex,
-                std::uint8_t speedIndex) const noexcept override;
+                std::uint8_t speedBinIndex) const noexcept override;
             float SpeedBinValue(
                 std::uint16_t primitiveIndex,
-                std::uint8_t speedIndex) const noexcept override;
-            CommandVector Tick(
-                OpenFloorMeasurementController& controller,
+                std::uint8_t speedBinIndex) const noexcept override;
+            CommandVector GetNextControls(
                 std::uint16_t primitiveIndex,
-                std::uint8_t speedIndex,
+                std::uint8_t speedBinIndex,
+                std::uint16_t repeatIndex,
                 bool& done) override;
 
         private:
@@ -374,21 +369,21 @@ namespace MazeMap::App::Internal
         public:
             static YawMeasurementRegime& SharedInstance() noexcept;
 
-            const char* Title() const noexcept override;
-            MeasurementLogId LogId() const noexcept override;
+            const char* Name() const noexcept override;
+            MeasurementLogId Id() const noexcept override;
             std::uint16_t PrimitiveCount() const noexcept override;
-            std::uint8_t SpeedCount() const noexcept override;
+            std::uint8_t SpeedBinCount() const noexcept override;
             std::uint16_t RepeatCount() const noexcept override;
             MazeMap::ManeuverCode PrimitiveCode(
                 std::uint16_t primitiveIndex,
-                std::uint8_t speedIndex) const noexcept override;
+                std::uint8_t speedBinIndex) const noexcept override;
             float SpeedBinValue(
                 std::uint16_t primitiveIndex,
-                std::uint8_t speedIndex) const noexcept override;
-            CommandVector Tick(
-                OpenFloorMeasurementController& controller,
+                std::uint8_t speedBinIndex) const noexcept override;
+            CommandVector GetNextControls(
                 std::uint16_t primitiveIndex,
-                std::uint8_t speedIndex,
+                std::uint8_t speedBinIndex,
+                std::uint16_t repeatIndex,
                 bool& done) override;
 
         private:
@@ -404,22 +399,22 @@ namespace MazeMap::App::Internal
             static SmoothMeasurementRegime& SharedInstance() noexcept;
             SmoothMeasurementRegime() noexcept;
 
-            const char* Title() const noexcept override;
-            MeasurementLogId LogId() const noexcept override;
+            const char* Name() const noexcept override;
+            MeasurementLogId Id() const noexcept override;
             std::uint16_t PrimitiveCount() const noexcept override;
-            std::uint8_t SpeedCount() const noexcept override;
+            std::uint8_t SpeedBinCount() const noexcept override;
             std::uint16_t RepeatCount() const noexcept override;
             MazeMap::ManeuverCode PrimitiveCode(
                 std::uint16_t primitiveIndex,
-                std::uint8_t speedIndex) const noexcept override;
+                std::uint8_t speedBinIndex) const noexcept override;
             float SpeedBinValue(
                 std::uint16_t primitiveIndex,
-                std::uint8_t speedIndex) const noexcept override;
+                std::uint8_t speedBinIndex) const noexcept override;
             bool EnsureReady(OpenFloorMeasurementController& controller) override;
-            CommandVector Tick(
-                OpenFloorMeasurementController& controller,
+            CommandVector GetNextControls(
                 std::uint16_t primitiveIndex,
-                std::uint8_t speedIndex,
+                std::uint8_t speedBinIndex,
+                std::uint16_t repeatIndex,
                 bool& done) override;
 
         private:
@@ -455,22 +450,22 @@ namespace MazeMap::App::Internal
 
             LoopMeasurementRegime(MeasurementLogId logId, bool clockwise) noexcept;
 
-            const char* Title() const noexcept override;
-            MeasurementLogId LogId() const noexcept override;
+            const char* Name() const noexcept override;
+            MeasurementLogId Id() const noexcept override;
             std::uint16_t PrimitiveCount() const noexcept override;
-            std::uint8_t SpeedCount() const noexcept override;
+            std::uint8_t SpeedBinCount() const noexcept override;
             std::uint16_t RepeatCount() const noexcept override;
             MazeMap::ManeuverCode PrimitiveCode(
                 std::uint16_t primitiveIndex,
-                std::uint8_t speedIndex) const noexcept override;
+                std::uint8_t speedBinIndex) const noexcept override;
             float SpeedBinValue(
                 std::uint16_t primitiveIndex,
-                std::uint8_t speedIndex) const noexcept override;
+                std::uint8_t speedBinIndex) const noexcept override;
             bool EnsureReady(OpenFloorMeasurementController& controller) override;
-            CommandVector Tick(
-                OpenFloorMeasurementController& controller,
+            CommandVector GetNextControls(
                 std::uint16_t primitiveIndex,
-                std::uint8_t speedIndex,
+                std::uint8_t speedBinIndex,
+                std::uint16_t repeatIndex,
                 bool& done) override;
 
         private:
@@ -510,30 +505,23 @@ namespace MazeMap::App::Internal
         class MainStage final
         {
         public:
-            MainStage(MainMeasurementRegime* const* regimes, std::size_t regimeCount) noexcept;
+            explicit MainStage(const MainRegimeArray& regimes) noexcept;
 
             bool OpenMainLog(OpenFloorMeasurementController& controller);
-            bool IsCurrentSlotLastInRegime() const noexcept;
             CommandVector Tick(
                 OpenFloorMeasurementController& controller,
                 const MazeMap::VehicleState& state,
                 LoopController& loopController);
 
         private:
-            MainMeasurementRegime& ActiveRegime() const noexcept;
-            bool AdvanceIndices() noexcept;
             bool WriteBufferedRow(
                 OpenFloorMeasurementController& controller,
                 const char* failureReason);
             void BufferRow(const Runtime::OpenFloorMainRow& row);
             bool CheckFault(OpenFloorMeasurementController& controller);
 
-            MainMeasurementRegime* const* _regimes{};
-            std::size_t _regimeCount{};
-            std::size_t _activeRegimeIndex{};
-            std::uint16_t _activePrimitiveIndex{};
-            std::uint8_t _activeSpeedIndex{};
-            std::uint16_t _activeRepeatIndex{};
+            MainRegimeArray _regimes{};
+            MeasurementRegimeSequencer _sequencer{};
             bool _completionPending{};
             std::optional<Runtime::OpenFloorMainRow> _bufferedRow{};
         };
@@ -550,7 +538,6 @@ namespace MazeMap::App::Internal
             const MazeMap::VehicleState& state,
             Runtime::OpenFloorMainRow& row) const;
         void FinalizeSuccessfulRun() noexcept;
-        bool ActiveMainStageSlotEndsRegime() const noexcept;
         CommandVector TimingStageTick(
             std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,

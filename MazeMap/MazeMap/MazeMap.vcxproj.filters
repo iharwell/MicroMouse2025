@@ -240,6 +240,9 @@
     <ClInclude Include="MazeMapControllerRegistry.h">
       <Filter>Header Files\App\Internal</Filter>
     </ClInclude>
+    <ClInclude Include="MeasurementRegimeSequencer.h">
+      <Filter>Header Files\App\Internal</Filter>
+    </ClInclude>
     <ClInclude Include="WallSensorLedCalibrationController.h">
       <Filter>Header Files\App\Internal</Filter>
     </ClInclude>
@@ -523,6 +526,9 @@
     </ClCompile>
     <ClCompile Include="MapEvidenceUpdater.cpp">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="MeasurementRegimeSequencer.cpp">
+      <Filter>Source Files\App\Internal</Filter>
     </ClCompile>
     <ClCompile Include="Application.cpp">
       <Filter>Source Files\App</Filter>
