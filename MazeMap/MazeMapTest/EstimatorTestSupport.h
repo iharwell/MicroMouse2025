@@ -44,38 +44,29 @@ namespace MazeMap
 
         if (std::isfinite(dtSeconds) && (dtSeconds > 0.0f))
         {
-            if (!estimator.predict(
-                    dtSeconds,
-                    appliedControl,
-                    snapshot.EncoderObservation(),
-                    snapshot.EncoderObservationValid()))
+            if (!estimator.predict(dtSeconds, appliedControl))
             {
                 return;
             }
         }
 
-        const bool updateYawFromEncoder = !std::isfinite(snapshot.RawYawRateRadps());
-        if (snapshot.EncoderObservationValid())
+        const SensorSnapshot& publishedSnapshot = runtimeState.GetSensorSnapshot();
+        if (std::isfinite(publishedSnapshot.RawYawRateRadps()))
         {
-            (void)estimator.updateEncoderPair(snapshot.EncoderObservation(), dtSeconds, updateYawFromEncoder);
-        }
-
-        if (std::isfinite(snapshot.RawYawRateRadps()))
-        {
-            if (!estimator.updateYawRate(snapshot.YawRateRadps()))
+            if (!estimator.updateYawRate(publishedSnapshot.YawRateRadps()))
             {
                 return;
             }
         }
 
         const bool accelObservationValid =
-            snapshot.AccelerationBiasValid() &&
-            std::isfinite(snapshot.BodyRightAccelerationMps2()) &&
-            std::isfinite(snapshot.BodyForwardAccelerationMps2());
+            publishedSnapshot.AccelerationBiasValid() &&
+            std::isfinite(publishedSnapshot.BodyRightAccelerationMps2()) &&
+            std::isfinite(publishedSnapshot.BodyForwardAccelerationMps2());
         const ImuAccelObs accelObservation(
             accelObservationValid,
-            snapshot.BodyForwardAccelerationMps2(),
-            snapshot.BodyRightAccelerationMps2());
+            publishedSnapshot.BodyForwardAccelerationMps2(),
+            publishedSnapshot.BodyRightAccelerationMps2());
         (void)estimator.updatePlanarAccel(accelObservation);
 
         if (map != nullptr)
@@ -90,22 +81,22 @@ namespace MazeMap
             WallObs unusedFrontLeftObs{};
             WallObs unusedFrontRightObs{};
             WallObs::BuildFrontWallObservations(
-                snapshot.FrontWallObservationValid(),
-                snapshot.HasFrontWall(),
-                snapshot.FrontWallUsesFallbackDetection(),
-                snapshot.FrontWallUsesCharacterizationDetection(),
-                snapshot.FrontLeftDistanceM(),
-                snapshot.FrontRightDistanceM(),
+                publishedSnapshot.FrontWallObservationValid(),
+                publishedSnapshot.HasFrontWall(),
+                publishedSnapshot.FrontWallUsesFallbackDetection(),
+                publishedSnapshot.FrontWallUsesCharacterizationDetection(),
+                publishedSnapshot.FrontLeftDistanceM(),
+                publishedSnapshot.FrontRightDistanceM(),
                 frontLeftMaxRangeM,
                 frontLeftObs,
                 unusedFrontRightObs);
             WallObs::BuildFrontWallObservations(
-                snapshot.FrontWallObservationValid(),
-                snapshot.HasFrontWall(),
-                snapshot.FrontWallUsesFallbackDetection(),
-                snapshot.FrontWallUsesCharacterizationDetection(),
-                snapshot.FrontLeftDistanceM(),
-                snapshot.FrontRightDistanceM(),
+                publishedSnapshot.FrontWallObservationValid(),
+                publishedSnapshot.HasFrontWall(),
+                publishedSnapshot.FrontWallUsesFallbackDetection(),
+                publishedSnapshot.FrontWallUsesCharacterizationDetection(),
+                publishedSnapshot.FrontLeftDistanceM(),
+                publishedSnapshot.FrontRightDistanceM(),
                 frontRightMaxRangeM,
                 unusedFrontLeftObs,
                 frontRightObs);
@@ -115,10 +106,10 @@ namespace MazeMap
             }
 
             const WallObs leftSideObs = WallObs::BuildSideWallObservation(
-                snapshot.LeftDistanceValidForControl(),
-                snapshot.LeftTransitionDetected(),
-                snapshot.HasLeftWallObservation(),
-                snapshot.SideLeftDistanceM(),
+                publishedSnapshot.LeftDistanceValidForControl(),
+                publishedSnapshot.LeftTransitionDetected(),
+                publishedSnapshot.HasLeftWallObservation(),
+                publishedSnapshot.SideLeftDistanceM(),
                 sideLeftMaxRangeM);
             if (leftSideObs.IsValid())
             {
@@ -126,10 +117,10 @@ namespace MazeMap
             }
 
             const WallObs rightSideObs = WallObs::BuildSideWallObservation(
-                snapshot.RightDistanceValidForControl(),
-                snapshot.RightTransitionDetected(),
-                snapshot.HasRightWallObservation(),
-                snapshot.SideRightDistanceM(),
+                publishedSnapshot.RightDistanceValidForControl(),
+                publishedSnapshot.RightTransitionDetected(),
+                publishedSnapshot.HasRightWallObservation(),
+                publishedSnapshot.SideRightDistanceM(),
                 sideRightMaxRangeM);
             if (rightSideObs.IsValid())
             {

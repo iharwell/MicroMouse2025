@@ -132,7 +132,7 @@ bool SensorSnapshot::BuildEvidenceObservationSnapshot(
     bool leftTransitionDetected = false;
     bool rightTransitionDetected = false;
     bool encoderObservationValid = false;
-    MazeMap::EncoderObs encoderObservation{};
+    SensorSnapshot::EncoderObs encoderObservation{};
     MazeMap::WallObs frontLeftWallSensorObservation{};
     MazeMap::WallObs frontRightWallSensorObservation{};
     MazeMap::WallObs sideLeftWallSensorObservation{};

@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <windows.h>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <iomanip>
@@ -15,6 +16,7 @@
 #include "..\MazeMap\DirectionalPathFinder.h"
 #include "..\MazeMap\Estimator.h"
 #include "..\MazeMap\PlantModel.h"
+#include "..\MazeMap\SensorSnapshot.h"
 #include "Mazes.h"
 #include "SimVehicle.h"
 #include "../MazeMap/ManeuverPathFinder.h"
@@ -31,7 +33,7 @@ namespace
 {
     constexpr const char* kOpenFloorUkfBenchmarkArg = "--benchmark-open-floor-ukf-stationary";
     constexpr const char* kOpenFloorUkfBenchmarkMeasurementSet =
-        "predict + encoder_pair + yaw_rate + planar_accel";
+        "predict(encoder_input) + yaw_rate + planar_accel";
     constexpr uint32_t kDefaultOpenFloorUkfBenchmarkIterations = 200000U;
     constexpr uint32_t kOpenFloorUkfBenchmarkWarmupIterations = 2048U;
     constexpr float kOpenFloorUkfBenchmarkDtSeconds = 0.001f;
@@ -44,27 +46,35 @@ namespace
 
     bool ExecuteOpenFloorStationaryMeasurementCycle(
         MazeMap::Estimator& ukf,
+        MazeMap::VehicleState& runtimeState,
         float dtSeconds,
         const MazeMap::App::Internal::CommandVector& control,
-        const MazeMap::EncoderObs& encoderObservation,
-        const MazeMap::ImuAccelObs& accelObservation,
-        float yawRateRadps)
+        const SensorSnapshot& snapshot)
     {
+        runtimeState.SetSensorSnapshot(snapshot);
+        if (std::isfinite(dtSeconds) && (dtSeconds > 0.0f))
+        {
+            runtimeState.SetTime(runtimeState.GetTime() + dtSeconds);
+        }
+
         if (!ukf.predict(dtSeconds, control))
         {
             return false;
         }
 
-        if (!ukf.updateEncoderPair(encoderObservation, dtSeconds, true))
+        const SensorSnapshot& publishedSnapshot = runtimeState.GetSensorSnapshot();
+        if (std::isfinite(publishedSnapshot.YawRateRadps()) &&
+            !ukf.updateYawRate(publishedSnapshot.YawRateRadps()))
         {
             return false;
         }
 
-        if (!ukf.updateYawRate(yawRateRadps))
-        {
-            return false;
-        }
-
+        const MazeMap::ImuAccelObs accelObservation(
+            publishedSnapshot.AccelerationBiasValid() &&
+                std::isfinite(publishedSnapshot.BodyRightAccelerationMps2()) &&
+                std::isfinite(publishedSnapshot.BodyForwardAccelerationMps2()),
+            publishedSnapshot.BodyForwardAccelerationMps2(),
+            publishedSnapshot.BodyRightAccelerationMps2());
         if (!ukf.updatePlanarAccel(accelObservation))
         {
             return false;
@@ -107,23 +117,39 @@ namespace
         constexpr float fanDutyCycle = 0.80f;
         vehicle.SetFanDuty(fanDutyCycle);
 
-        MazeMap::EncoderObs encoderObservation{};
+        SensorSnapshot::EncoderObs encoderObservation = SensorSnapshot{}.EncoderObservation();
         encoderObservation.SetTotalLeftCounts(0);
         encoderObservation.SetTotalRightCounts(0);
+        encoderObservation.SetLeftDistanceDeltaM(0.0f);
+        encoderObservation.SetRightDistanceDeltaM(0.0f);
+        encoderObservation.SetLeftVelocityMps(0.0f);
+        encoderObservation.SetRightVelocityMps(0.0f);
         encoderObservation.SetLeftWheelSpeedRadps(0.0f);
         encoderObservation.SetRightWheelSpeedRadps(0.0f);
 
-        const MazeMap::ImuAccelObs accelObservation(true, 0.0f, 0.0f);
+        SensorSnapshot snapshot{};
+        snapshot.PublishEncoderObservation(
+            encoderObservation,
+            true,
+            0,
+            0,
+            0.0f,
+            0.0f);
+        snapshot.SetRawYawRateRadps(kOpenFloorUkfBenchmarkStationaryYawRateRadps);
+        snapshot.SetYawRateRadps(kOpenFloorUkfBenchmarkStationaryYawRateRadps);
+        snapshot.SetAccelerationBiasValid(true);
+        snapshot.SetBodyRightAccelerationMps2(0.0f);
+        snapshot.SetBodyForwardAccelerationMps2(0.0f);
+        snapshot.SetPlanarAccelerationMps2(0.0f);
 
         for (uint32_t index = 0U; index < kOpenFloorUkfBenchmarkWarmupIterations; ++index)
         {
             if (!ExecuteOpenFloorStationaryMeasurementCycle(
                     ukf,
+                    runtimeState,
                     kOpenFloorUkfBenchmarkDtSeconds,
                     control,
-                    encoderObservation,
-                    accelObservation,
-                    kOpenFloorUkfBenchmarkStationaryYawRateRadps))
+                    snapshot))
             {
                 std::cerr << "Open-floor UKF warmup failed at iteration " << index << "\n";
                 return 1;
@@ -140,11 +166,10 @@ namespace
         {
             if (!ExecuteOpenFloorStationaryMeasurementCycle(
                     ukf,
+                    runtimeState,
                     kOpenFloorUkfBenchmarkDtSeconds,
                     control,
-                    encoderObservation,
-                    accelObservation,
-                    kOpenFloorUkfBenchmarkStationaryYawRateRadps))
+                    snapshot))
             {
                 std::cerr << "Open-floor UKF benchmark failed at iteration " << index << "\n";
                 return 1;

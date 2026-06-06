@@ -110,23 +110,16 @@ namespace MazeMap
         float GetYawAccelResidual() const noexcept { return _state(kDeltaYawAccel); }
         float GetYawAccelResidual() noexcept { return const_cast<const VehicleState*>(this)->GetYawAccelResidual(); }
 
-        void SetWheelSpeedLeft(float wheelSpeedRadps) noexcept
-        {
-            MazeMap::EncoderObs encoderObservation = _sensorSnapshot.EncoderObservation();
-            encoderObservation.SetLeftWheelSpeedRadps(wheelSpeedRadps);
-            _sensorSnapshot.SetEncoderObservation(encoderObservation);
-        }
         float GetWheelSpeedLeft() const noexcept { return _sensorSnapshot.EncoderObservation().LeftWheelSpeedRadps(); }
         float GetWheelSpeedLeft() noexcept { return const_cast<const VehicleState*>(this)->GetWheelSpeedLeft(); }
 
-        void SetWheelSpeedRight(float wheelSpeedRadps) noexcept
-        {
-            MazeMap::EncoderObs encoderObservation = _sensorSnapshot.EncoderObservation();
-            encoderObservation.SetRightWheelSpeedRadps(wheelSpeedRadps);
-            _sensorSnapshot.SetEncoderObservation(encoderObservation);
-        }
         float GetWheelSpeedRight() const noexcept { return _sensorSnapshot.EncoderObservation().RightWheelSpeedRadps(); }
         float GetWheelSpeedRight() noexcept { return const_cast<const VehicleState*>(this)->GetWheelSpeedRight(); }
+
+        void PublishEncoderWheelSpeedsRadps(
+            float leftWheelSpeedRadps,
+            float rightWheelSpeedRadps,
+            bool valid = true) noexcept;
 
         void SetTime(float time) noexcept { _time = time; }
         float GetTime() const noexcept { return _time; }

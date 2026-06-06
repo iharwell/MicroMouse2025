@@ -1,6 +1,6 @@
 #pragma once
 
-#include "EstimatorEncoderMotionUpdateTestSupport.h"
+#include "EstimatorMotionUpdateAccess.h"
 
 #include <limits>
 
@@ -12,23 +12,22 @@ namespace MazeMap
         {
             bool resetAccepted = false;
             bool predictAccepted = false;
-            bool updateAttempted = false;
-            bool updateReturnedAccepted = false;
-            bool updateRecordedAccepted = false;
-            EncoderObs encoder{};
-            StateVector beforeEncoderState = NanState();
+            SensorSnapshot::EncoderObs encoder = SensorSnapshot{}.EncoderObservation();
+            StateVector beforePredictState = NanState();
             StateVector afterState = NanState();
-            CovarianceMatrix beforeEncoderCovariance = NanCovariance();
+            CovarianceMatrix beforePredictCovariance = NanCovariance();
             CovarianceMatrix afterCovariance = NanCovariance();
-            EncoderPairExpectation expectation{};
-            float actualNis = std::numeric_limits<float>::quiet_NaN();
-            float runtimeLeftWheelSpeedBeforeUpdateRadps =
+            float measuredForwardVelocityMps = std::numeric_limits<float>::quiet_NaN();
+            float measuredYawRateRadps = std::numeric_limits<float>::quiet_NaN();
+            float travelForwardVelocityMps = std::numeric_limits<float>::quiet_NaN();
+            float travelYawRateRadps = std::numeric_limits<float>::quiet_NaN();
+            float runtimeLeftWheelSpeedBeforePredictRadps =
                 std::numeric_limits<float>::quiet_NaN();
-            float runtimeRightWheelSpeedBeforeUpdateRadps =
+            float runtimeRightWheelSpeedBeforePredictRadps =
                 std::numeric_limits<float>::quiet_NaN();
-            float runtimeLeftWheelSpeedAfterUpdateRadps =
+            float runtimeLeftWheelSpeedAfterPredictRadps =
                 std::numeric_limits<float>::quiet_NaN();
-            float runtimeRightWheelSpeedAfterUpdateRadps =
+            float runtimeRightWheelSpeedAfterPredictRadps =
                 std::numeric_limits<float>::quiet_NaN();
         };
 
@@ -36,7 +35,6 @@ namespace MazeMap
         {
             bool resetAccepted = false;
             bool firstPredictAccepted = false;
-            bool firstEncoderAccepted = false;
             bool firstControlResetAccepted = false;
             bool secondControlResetAccepted = false;
             bool firstControlPredictAccepted = false;

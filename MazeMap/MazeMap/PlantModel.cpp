@@ -127,9 +127,13 @@ namespace MazeMap
             (blend *
                 (forceBranchContactYawMomentCorrectionAlongYawNm -
                     variantCContactYawMomentCorrectionAlongYawNm));
-        return std::isfinite(contactYawMomentCorrectionAlongYawNm) ?
-            contactYawMomentCorrectionAlongYawNm :
-            0.0f;
+        const float correctionLimitNm =
+            (std::min)(
+                PositivePart(projectedYawMomentAlongYawNm),
+                PositivePart(yawMomentYieldNm));
+        return (std::min)(
+            PositivePart(contactYawMomentCorrectionAlongYawNm),
+            correctionLimitNm);
     }
 
     float PlantModel::variantCAggregateContactYawMomentCorrectionAlongYawNm(
@@ -233,9 +237,7 @@ namespace MazeMap
                 highForward * (gainLeftLongBasis + gainRightLongBasis)) +
             (kAggregateContactYawMomentCorrectionVariantCRightHighForwardCoeff *
                 highForward * (gainFrontRightBasis + gainRearRightBasis));
-        return std::isfinite(contactYawMomentCorrectionAlongYawNm) ?
-            contactYawMomentCorrectionAlongYawNm :
-            0.0f;
+        return PositivePart(contactYawMomentCorrectionAlongYawNm);
     }
 
     float PlantModel::residualDecayAlpha(const float dtS, const float tauS) noexcept
@@ -455,14 +457,6 @@ namespace MazeMap
         _runtimeState.SetForwardAccelerationResidual(state(VehicleState::kDeltaAf));
         _runtimeState.SetRightwardAccelerationResidual(state(VehicleState::kDeltaAr));
         _runtimeState.SetYawAccelResidual(state(VehicleState::kDeltaYawAccel));
-
-        const Eigen::Vector2f wheelLinearVelocityMps = wheelLinearVelocityFromBodyState(state);
-        const float wheelRadiusM = Vehicle::GetDriveWheelRadiusM();
-        if (std::isfinite(wheelRadiusM) && (wheelRadiusM > 0.0f))
-        {
-            _runtimeState.SetWheelSpeedLeft(wheelLinearVelocityMps.x() / wheelRadiusM);
-            _runtimeState.SetWheelSpeedRight(wheelLinearVelocityMps.y() / wheelRadiusM);
-        }
     }
 
     void PlantModel::resolveAppliedBankTorques(
@@ -470,7 +464,7 @@ namespace MazeMap
         const App::Internal::CommandVector& control,
         float& leftAppliedBankTorqueNm,
         float& rightAppliedBankTorqueNm,
-        const EncoderObs* const encoderInput) const noexcept
+        const SensorSnapshot::EncoderObs* const encoderInput) const noexcept
     {
         const float wheelRadiusM = Vehicle::GetDriveWheelRadiusM();
         const Eigen::Vector2f wheelLinearVelocityMps = wheelLinearVelocityFromBodyState(currentState);
@@ -624,7 +618,7 @@ namespace MazeMap
     PlantModel::PlantDerivatives PlantModel::forwardStep(
         const Eigen::Matrix<float, VehicleState::kDimension, 1>& state,
         const App::Internal::CommandVector& control,
-        const EncoderObs* const encoderInput) const noexcept
+        const SensorSnapshot::EncoderObs* const encoderInput) const noexcept
     {
         float leftDriveTorqueNm = 0.0f;
         float rightDriveTorqueNm = 0.0f;
@@ -657,7 +651,7 @@ namespace MazeMap
         const Eigen::Matrix<float, VehicleState::kDimension, 1>& state,
         float leftAppliedBankTorqueNm,
         float rightAppliedBankTorqueNm,
-        const EncoderObs* const encoderInput) const noexcept
+        const SensorSnapshot::EncoderObs* const encoderInput) const noexcept
     {
         PlantDerivatives derivatives{};
         const float wheelRadiusM = Vehicle::GetDriveWheelRadiusM();
@@ -1044,17 +1038,31 @@ namespace MazeMap
         const float rawYawAccelRadps2 =
             yawMomentNm /
             (yawInertiaKgM2 + (wheelSpinupMassKg * contactYawHalfTrackWidthM * contactYawHalfTrackWidthM));
+        const float finiteRawForwardAccelMps2 =
+            std::isfinite(rawForwardAccelMps2) ? rawForwardAccelMps2 : 0.0f;
+        const float finiteRawRightAccelMps2 =
+            std::isfinite(rawRightAccelMps2) ? rawRightAccelMps2 : 0.0f;
+        const float finiteRawYawAccelRadps2 =
+            std::isfinite(rawYawAccelRadps2) ? rawYawAccelRadps2 : 0.0f;
         const float maxForwardAccelMps2 =
             (std::isfinite(_vehicle.GetMaxForwardAcceleration()) &&
              (_vehicle.GetMaxForwardAcceleration() > 0.0f)) ?
             _vehicle.GetMaxForwardAcceleration() :
             0.0f;
+        const float maxYawAccelRadps2 =
+            (std::isfinite(_vehicle.GetMaxYawAccel()) &&
+             (_vehicle.GetMaxYawAccel() > 0.0f)) ?
+            _vehicle.GetMaxYawAccel() :
+            0.0f;
         const float forwardAccelMps2 =
             (maxForwardAccelMps2 > 0.0f) ?
-            (std::clamp)(rawForwardAccelMps2, -maxForwardAccelMps2, maxForwardAccelMps2) :
-            rawForwardAccelMps2;
-        const float rightAccelMps2 = rawRightAccelMps2;
-        const float yawAccelRadps2 = rawYawAccelRadps2;
+            (std::clamp)(finiteRawForwardAccelMps2, -maxForwardAccelMps2, maxForwardAccelMps2) :
+            finiteRawForwardAccelMps2;
+        const float rightAccelMps2 = finiteRawRightAccelMps2;
+        const float yawAccelRadps2 =
+            (maxYawAccelRadps2 > 0.0f) ?
+            (std::clamp)(finiteRawYawAccelRadps2, -maxYawAccelRadps2, maxYawAccelRadps2) :
+            finiteRawYawAccelRadps2;
         const float resolvedForwardAccelMps2 = forwardAccelMps2 + forwardAccelResidualMps2;
         const float resolvedRightAccelMps2 = rightAccelMps2 + rightAccelResidualMps2;
         const float resolvedYawAccelRadps2 = yawAccelRadps2 + yawAccelResidualRadps2;
@@ -1096,7 +1104,7 @@ namespace MazeMap
         float leftAppliedBankTorqueNm,
         float rightAppliedBankTorqueNm,
         float dtS,
-        const EncoderObs* const encoderInput) const noexcept
+        const SensorSnapshot::EncoderObs* const encoderInput) const noexcept
     {
         if (!(std::isfinite(dtS) && (dtS > 0.0f)))
         {
@@ -1117,7 +1125,7 @@ namespace MazeMap
         const Eigen::Matrix<float, VehicleState::kDimension, 1>& state,
         const App::Internal::CommandVector& control,
         const float dtS,
-        const EncoderObs* const encoderInput) const noexcept
+        const SensorSnapshot::EncoderObs* const encoderInput) const noexcept
     {
         float leftAppliedBankTorqueNm = 0.0f;
         float rightAppliedBankTorqueNm = 0.0f;
@@ -1140,7 +1148,7 @@ namespace MazeMap
         const float leftAppliedBankTorqueNm,
         const float rightAppliedBankTorqueNm,
         const float dtS,
-        const EncoderObs* const encoderInput) const noexcept
+        const SensorSnapshot::EncoderObs* const encoderInput) const noexcept
     {
         if (!(std::isfinite(dtS) && (dtS > 0.0f)))
         {
@@ -1182,7 +1190,7 @@ namespace MazeMap
     void PlantModel::plantActivityForState(
         const Eigen::Matrix<float, VehicleState::kDimension, 1>& state,
         const App::Internal::CommandVector& control,
-        const EncoderObs* const encoderInput,
+        const SensorSnapshot::EncoderObs* const encoderInput,
         float& forwardAccelMps2,
         float& rightAccelMps2,
         float& yawAccelRadps2,
@@ -1220,7 +1228,7 @@ namespace MazeMap
     Eigen::Vector2f PlantModel::backLeftImuPlanarAccelerationForState(
         const Eigen::Matrix<float, VehicleState::kDimension, 1>& state,
         const App::Internal::CommandVector& control,
-        const EncoderObs* const encoderInput) const noexcept
+        const SensorSnapshot::EncoderObs* const encoderInput) const noexcept
     {
         return imuPlanarAcceleration(state, control, encoderInput);
     }
@@ -1236,34 +1244,102 @@ namespace MazeMap
             return nextState;
         }
 
-        nextState(VehicleState::kVf) += dtS * evaluatedStep._stateDot(VehicleState::kVf);
-        nextState(VehicleState::kVr) += dtS * evaluatedStep._stateDot(VehicleState::kVr);
-        nextState(VehicleState::kYawRate) += dtS * evaluatedStep._stateDot(VehicleState::kYawRate);
+        const auto finiteValueOrZero = [](const float value) noexcept -> float
+        {
+            return std::isfinite(value) ? value : 0.0f;
+        };
+
+        const float currentForwardVelocityMps =
+            finiteValueOrZero(currentState(VehicleState::kVf));
+        const float currentRightVelocityMps =
+            finiteValueOrZero(currentState(VehicleState::kVr));
+        const float currentYawRateRadps =
+            finiteValueOrZero(currentState(VehicleState::kYawRate));
+        const float forwardAccelMps2 =
+            finiteValueOrZero(evaluatedStep._forwardAccelMps2);
+        const float rightAccelMps2 =
+            finiteValueOrZero(evaluatedStep._rightAccelMps2);
+        const float yawAccelRadps2 =
+            finiteValueOrZero(evaluatedStep._yawAccelRadps2);
+        const float nextYawRateRadps =
+            currentYawRateRadps + (dtS * yawAccelRadps2);
+        const float midpointYawRateRadps =
+            currentYawRateRadps + (0.5f * dtS * yawAccelRadps2);
+        const float rotationRad =
+            finiteValueOrZero(midpointYawRateRadps * dtS);
+        const float normalizedRotationRad =
+            std::isfinite(rotationRad) ? std::remainder(rotationRad, TWO_PI_F) : 0.0f;
+        float rotationSin = 0.0f;
+        float rotationCos = 1.0f;
+        sin_cosf(normalizedRotationRad, rotationSin, rotationCos);
+
+        if (std::fabs(midpointYawRateRadps) > 1.0e-5f)
+        {
+            const float accelSinScale = rotationSin / midpointYawRateRadps;
+            const float accelCosScale = (1.0f - rotationCos) / midpointYawRateRadps;
+            nextState(VehicleState::kVf) =
+                (rotationCos * currentForwardVelocityMps) +
+                (rotationSin * currentRightVelocityMps) +
+                (accelSinScale * forwardAccelMps2) +
+                (accelCosScale * rightAccelMps2);
+            nextState(VehicleState::kVr) =
+                (-rotationSin * currentForwardVelocityMps) +
+                (rotationCos * currentRightVelocityMps) -
+                (accelCosScale * forwardAccelMps2) +
+                (accelSinScale * rightAccelMps2);
+        }
+        else
+        {
+            nextState(VehicleState::kVf) =
+                currentForwardVelocityMps +
+                (dtS * (forwardAccelMps2 + (midpointYawRateRadps * currentRightVelocityMps)));
+            nextState(VehicleState::kVr) =
+                currentRightVelocityMps +
+                (dtS * (rightAccelMps2 - (midpointYawRateRadps * currentForwardVelocityMps)));
+        }
+
+        nextState(VehicleState::kYawRate) =
+            finiteValueOrZero(nextYawRateRadps);
         nextState(VehicleState::kDeltaAf) =
-            currentState(VehicleState::kDeltaAf) *
+            finiteValueOrZero(currentState(VehicleState::kDeltaAf)) *
             std::exp(-dtS / kForwardAccelerationResidualDecayTauS);
         nextState(VehicleState::kDeltaAr) =
-            currentState(VehicleState::kDeltaAr) *
+            finiteValueOrZero(currentState(VehicleState::kDeltaAr)) *
             std::exp(-dtS / kRightAccelerationResidualDecayTauS);
         nextState(VehicleState::kDeltaYawAccel) =
-            currentState(VehicleState::kDeltaYawAccel) *
+            finiteValueOrZero(currentState(VehicleState::kDeltaYawAccel)) *
             std::exp(-dtS / kYawAccelResidualDecayTauS);
 
-        nextState(VehicleState::kHeading) =
-            NormalizeAngle(
-                currentState(VehicleState::kHeading) + (dtS * nextState(VehicleState::kYawRate)));
+        const float currentHeadingRad =
+            std::isfinite(currentState(VehicleState::kHeading)) ?
+            NormalizeAngle(currentState(VehicleState::kHeading)) :
+            0.0f;
+        nextState(VehicleState::kHeading) = NormalizeAngle(currentHeadingRad + rotationRad);
 
-        float sineHeading = 0.0f;
-        float cosineHeading = 0.0f;
-        sin_cosf(nextState(VehicleState::kHeading), sineHeading, cosineHeading);
-        const float worldRightVelocityMps =
-            (nextState(VehicleState::kVr) * cosineHeading) +
-            (nextState(VehicleState::kVf) * sineHeading);
-        const float worldForwardVelocityMps =
-            (-nextState(VehicleState::kVr) * sineHeading) +
-            (nextState(VehicleState::kVf) * cosineHeading);
-        nextState(VehicleState::kPx) += dtS * worldRightVelocityMps;
-        nextState(VehicleState::kPy) += dtS * worldForwardVelocityMps;
+        float currentSineHeading = 0.0f;
+        float currentCosineHeading = 1.0f;
+        sin_cosf(currentHeadingRad, currentSineHeading, currentCosineHeading);
+        float nextSineHeading = 0.0f;
+        float nextCosineHeading = 1.0f;
+        sin_cosf(nextState(VehicleState::kHeading), nextSineHeading, nextCosineHeading);
+        const float currentWorldRightVelocityMps =
+            (currentRightVelocityMps * currentCosineHeading) +
+            (currentForwardVelocityMps * currentSineHeading);
+        const float currentWorldForwardVelocityMps =
+            (-currentRightVelocityMps * currentSineHeading) +
+            (currentForwardVelocityMps * currentCosineHeading);
+        const float nextWorldRightVelocityMps =
+            (nextState(VehicleState::kVr) * nextCosineHeading) +
+            (nextState(VehicleState::kVf) * nextSineHeading);
+        const float nextWorldForwardVelocityMps =
+            (-nextState(VehicleState::kVr) * nextSineHeading) +
+            (nextState(VehicleState::kVf) * nextCosineHeading);
+        nextState(VehicleState::kPx) =
+            finiteValueOrZero(currentState(VehicleState::kPx)) +
+            (0.5f * dtS * (currentWorldRightVelocityMps + nextWorldRightVelocityMps));
+        nextState(VehicleState::kPy) =
+            finiteValueOrZero(currentState(VehicleState::kPy)) +
+            (0.5f * dtS * (currentWorldForwardVelocityMps + nextWorldForwardVelocityMps));
 
         nextState(VehicleState::kHeading) = NormalizeAngle(nextState(VehicleState::kHeading));
         return nextState;
@@ -1271,12 +1347,15 @@ namespace MazeMap
 
     PlantModel::WheelKinematics PlantModel::wheelKinematics(
         const Eigen::Matrix<float, VehicleState::kDimension, 1>& state,
-        const EncoderObs* const encoderInput) const noexcept
+        const SensorSnapshot::EncoderObs* const encoderInput) const noexcept
     {
         WheelKinematics kinematics{};
-        const float forwardVelocityMps = state(VehicleState::kVf);
-        const float rightVelocityMps = state(VehicleState::kVr);
-        const float yawRateRadps = state(VehicleState::kYawRate);
+        const float forwardVelocityMps =
+            std::isfinite(state(VehicleState::kVf)) ? state(VehicleState::kVf) : 0.0f;
+        const float rightVelocityMps =
+            std::isfinite(state(VehicleState::kVr)) ? state(VehicleState::kVr) : 0.0f;
+        const float yawRateRadps =
+            std::isfinite(state(VehicleState::kYawRate)) ? state(VehicleState::kYawRate) : 0.0f;
         const Eigen::Vector2f wheelLinearVelocityMps = wheelLinearVelocityFromBodyState(state);
         const float wheelRadiusM = Vehicle::GetDriveWheelRadiusM();
         const bool useEncoderInput =
@@ -1331,7 +1410,7 @@ namespace MazeMap
     Eigen::Vector2f PlantModel::imuPlanarAcceleration(
         const Eigen::Matrix<float, VehicleState::kDimension, 1>& state,
         const App::Internal::CommandVector& control,
-        const EncoderObs* const encoderInput) const noexcept
+        const SensorSnapshot::EncoderObs* const encoderInput) const noexcept
     {
         return forwardStep(state, control, encoderInput)._imuAccelBodyMps2;
     }
@@ -1393,17 +1472,8 @@ namespace MazeMap
 
         const Eigen::Matrix<float, VehicleState::kDimension, 1> currentState = BuildBoundStateVector();
         const PlantDerivatives derivatives = forwardStep(currentState, control, nullptr);
-        Eigen::Matrix<float, VehicleState::kDimension, 1> nextState = currentState + (dt * derivatives._stateDot);
-        nextState(VehicleState::kDeltaAf) =
-            currentState(VehicleState::kDeltaAf) *
-            std::exp(-dt / kForwardAccelerationResidualDecayTauS);
-        nextState(VehicleState::kDeltaAr) =
-            currentState(VehicleState::kDeltaAr) *
-            std::exp(-dt / kRightAccelerationResidualDecayTauS);
-        nextState(VehicleState::kDeltaYawAccel) =
-            currentState(VehicleState::kDeltaYawAccel) *
-            std::exp(-dt / kYawAccelResidualDecayTauS);
-        nextState(VehicleState::kHeading) = NormalizeAngle(nextState(VehicleState::kHeading));
+        const Eigen::Matrix<float, VehicleState::kDimension, 1> nextState =
+            advanceStateFromDerivatives(currentState, derivatives, dt);
 
         ApplyStateVectorToBoundState(nextState);
         _runtimeState.SetTime(_runtimeState.GetTime() + dt);
@@ -1577,7 +1647,7 @@ namespace MazeMap
             const float rightForceN = -yawDifferentialForceN;
             const float leftBankNormalLoadN = contactNormalLoadN[kFrontLeft] + contactNormalLoadN[kRearLeft];
             const float rightBankNormalLoadN = contactNormalLoadN[kFrontRight] + contactNormalLoadN[kRearRight];
-            const std::array<float, 4> synthesizedForwardForceN = {
+            const std::array<float, 4> synthesizedForwardForceN = { {
                 (leftBankNormalLoadN > kForceEpsilonN) ?
                     (leftForceN * (contactNormalLoadN[kFrontLeft] / leftBankNormalLoadN)) :
                     (0.5f * leftForceN),
@@ -1590,7 +1660,7 @@ namespace MazeMap
                 (rightBankNormalLoadN > kForceEpsilonN) ?
                     (rightForceN * (contactNormalLoadN[kRearRight] / rightBankNormalLoadN)) :
                     (0.5f * rightForceN)
-            };
+            } };
 
             float maxUtilization = 0.0f;
             for (uint8_t contactIndex = 0U; contactIndex < 4U; ++contactIndex)
@@ -1629,7 +1699,7 @@ namespace MazeMap
                 variantCAtProjectedMoment(projectedMomentAlongYawNm));
         };
 
-        float requestedYawMomentNm = desiredYawMomentNm;
+        float requestedProjectedYawMomentNm = desiredYawMomentNm;
         if (yawDirection != 0.0f)
         {
             const float desiredMomentAlongYawNm = yawDirection * desiredYawMomentNm;
@@ -1648,11 +1718,11 @@ namespace MazeMap
                 (speedKnee2 > 0.0f) ? (speedKnee2 / (speedKnee2 + (std::max)(0.0f, speedV2))) : 0.0f;
             if (!(yawMomentYieldNm > kForceEpsilonN) || !(speedLow > kForceEpsilonN))
             {
-                requestedYawMomentNm = yawDirection * (desiredMomentAlongYawNm + correctionAtZeroNm);
+                requestedProjectedYawMomentNm = yawDirection * (desiredMomentAlongYawNm + correctionAtZeroNm);
             }
             else if (desiredMomentAlongYawNm <= -correctionAtZeroNm)
             {
-                requestedYawMomentNm = yawDirection * (desiredMomentAlongYawNm + correctionAtZeroNm);
+                requestedProjectedYawMomentNm = yawDirection * (desiredMomentAlongYawNm + correctionAtZeroNm);
             }
             else
             {
@@ -1703,12 +1773,15 @@ namespace MazeMap
                     }
                 }
 
-                requestedYawMomentNm = yawDirection * hi;
+                requestedProjectedYawMomentNm = yawDirection * hi;
             }
         }
+        const float requestedLongitudinalYawMomentNm =
+            (std::isfinite(requestedProjectedYawMomentNm) ? requestedProjectedYawMomentNm : 0.0f) -
+            (std::isfinite(synthesizedRightYawMomentNm) ? synthesizedRightYawMomentNm : 0.0f);
         const float forwardForceRequestN = massKg * desiredAccelMps2;
         const float commonForceRequestN = 0.5f * forwardForceRequestN;
-        const float differentialForceRequestN = requestedYawMomentNm * invTrackWidthM;
+        const float differentialForceRequestN = requestedLongitudinalYawMomentNm * invTrackWidthM;
         const float leftForceCommandN = commonForceRequestN + differentialForceRequestN;
         const float rightForceCommandN = commonForceRequestN - differentialForceRequestN;
         const float leftBankAccelMps2 = desiredAccelMps2 + (halfTrackWidthM * desiredYawAccelRadps2);
@@ -1811,42 +1884,7 @@ namespace MazeMap
         return covariance;
     }
 
-    Eigen::Matrix<float, 2, 2> PlantModel::encoderPairSqrtNoise(
-        const EncoderObs&,
-        float,
-        float generalLinearSpeedSigmaMps,
-        float generalYawRateSigmaRadps) const noexcept
-    {
-        const Eigen::Matrix<float, 2, 2> covariance =
-            encoderPairCovarianceRadps(generalLinearSpeedSigmaMps, generalYawRateSigmaRadps);
-        const Eigen::LLT<Eigen::Matrix<float, 2, 2>> llt(covariance);
-        if (llt.info() == Eigen::Success)
-        {
-            return llt.matrixL();
-        }
-
-        Eigen::Matrix<float, 2, 2> fallback = Eigen::Matrix<float, 2, 2>::Zero();
-        fallback(0, 0) = 1.0f;
-        fallback(1, 1) = 1.0f;
-        return fallback;
-    }
-
-    float PlantModel::stationaryEncoderWheelSpeedSigmaRadps(float stationaryLinearSpeedSigmaMps) const noexcept
-    {
-        const float wheelRadiusM = Vehicle::GetDriveWheelRadiusM();
-        if (!(wheelRadiusM > 0.0f) || !std::isfinite(wheelRadiusM))
-        {
-            return 1.0f;
-        }
-
-        const float resolvedStationarySigmaMps =
-            (std::isfinite(stationaryLinearSpeedSigmaMps) && (stationaryLinearSpeedSigmaMps > 0.0f)) ?
-            stationaryLinearSpeedSigmaMps :
-            1.0f;
-        return resolvedStationarySigmaMps / wheelRadiusM;
-    }
-
-    float PlantModel::measuredLinearSpeedMps(const EncoderObs& observation) const noexcept
+    float PlantModel::measuredLinearSpeedMps(const SensorSnapshot& snapshot) const noexcept
     {
         const float wheelRadiusM = Vehicle::GetDriveWheelRadiusM();
         if (!(wheelRadiusM > 0.0f) || !std::isfinite(wheelRadiusM))
@@ -1854,10 +1892,11 @@ namespace MazeMap
             return 0.0f;
         }
 
+        const SensorSnapshot::EncoderObs& observation = snapshot.EncoderObservation();
         return 0.5f * wheelRadiusM * (observation.LeftWheelSpeedRadps() + observation.RightWheelSpeedRadps());
     }
 
-    float PlantModel::measuredYawRateRadps(const EncoderObs& observation) const noexcept
+    float PlantModel::measuredYawRateRadps(const SensorSnapshot& snapshot) const noexcept
     {
         const float wheelRadiusM = Vehicle::GetDriveWheelRadiusM();
         const float physicalTrackWidthM = _vehicle.GetTrackWidth();
@@ -1873,50 +1912,8 @@ namespace MazeMap
             return 0.0f;
         }
 
+        const SensorSnapshot::EncoderObs& observation = snapshot.EncoderObservation();
         return wheelRadiusM * (observation.LeftWheelSpeedRadps() - observation.RightWheelSpeedRadps()) / trackWidthM;
-    }
-
-    float PlantModel::measuredYawRateVarianceRadps2(
-        const EncoderObs&,
-        float,
-        float generalLinearSpeedSigmaMps,
-        float generalYawRateSigmaRadps) const noexcept
-    {
-        const float wheelRadiusM = Vehicle::GetDriveWheelRadiusM();
-        const float physicalTrackWidthM = _vehicle.GetTrackWidth();
-        const float trackWidthM =
-            (std::isfinite(physicalTrackWidthM) && (physicalTrackWidthM > 0.0f)) ?
-            physicalTrackWidthM :
-            0.0f;
-        if (!(wheelRadiusM > 0.0f) ||
-            !std::isfinite(wheelRadiusM) ||
-            !(trackWidthM > 0.0f) ||
-            !std::isfinite(trackWidthM))
-        {
-            return 1.0f;
-        }
-
-        const Eigen::Matrix<float, 2, 2> wheelCovarianceRadps2 =
-            encoderPairCovarianceRadps(generalLinearSpeedSigmaMps, generalYawRateSigmaRadps);
-        const float yawScale = wheelRadiusM / trackWidthM;
-        const float variance =
-            (yawScale * yawScale) *
-            (wheelCovarianceRadps2(0, 0) +
-             wheelCovarianceRadps2(1, 1) -
-             (2.0f * wheelCovarianceRadps2(0, 1)));
-        return (std::isfinite(variance) && (variance > 0.0f)) ? variance : 1.0f;
-    }
-
-    float PlantModel::measuredWheelVarianceRadps2(
-        const EncoderObs&,
-        float,
-        float generalLinearSpeedSigmaMps,
-        float generalYawRateSigmaRadps) const noexcept
-    {
-        const Eigen::Matrix<float, 2, 2> covariance =
-            encoderPairCovarianceRadps(generalLinearSpeedSigmaMps, generalYawRateSigmaRadps);
-        const float variance = (std::max)(covariance(0, 0), covariance(1, 1));
-        return (std::isfinite(variance) && (variance > 0.0f)) ? variance : 1.0f;
     }
 
     Eigen::Vector2f PlantModel::wheelLinearVelocityFromBodyState(const Eigen::Matrix<float, VehicleState::kDimension, 1>& state) const noexcept

@@ -239,6 +239,7 @@ namespace MazeMap::App::Internal
         unsigned long _imuRequiredSamples{};
         std::int64_t _imuStartLeftEncoderCounts{};
         std::int64_t _imuStartRightEncoderCounts{};
+        bool _imuEncoderBaselineCaptured{};
     };
 
     inline constexpr StartupCalibration::SensorCalibration operator|(

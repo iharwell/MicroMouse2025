@@ -1,7 +1,6 @@
 #pragma once
 
 #include "Defines.h"
-#include "EncoderObs.h"
 #include "SensorTelemetryTypes.h"
 #include "WallObservationPipeline.h"
 
@@ -9,9 +8,100 @@
 #include <limits>
 #include <stdint.h>
 
+namespace MazeMap
+{
+    class RuntimeSensorSuite;
+}
+
 class SensorSnapshot final
 {
 public:
+    // Exact wheel-encoder measurement for the current committed sensor snapshot.
+    class EncoderObs final
+    {
+    public:
+        constexpr EncoderObs(const EncoderObs&) noexcept = default;
+        constexpr EncoderObs(EncoderObs&&) noexcept = default;
+        constexpr EncoderObs& operator=(const EncoderObs&) noexcept = default;
+        constexpr EncoderObs& operator=(EncoderObs&&) noexcept = default;
+
+        constexpr std::int32_t TotalLeftCounts() const noexcept { return _totalLeftCounts; }
+        constexpr std::int32_t TotalRightCounts() const noexcept { return _totalRightCounts; }
+        constexpr float LeftDistanceDeltaM() const noexcept { return _leftDistanceDeltaM; }
+        constexpr float RightDistanceDeltaM() const noexcept { return _rightDistanceDeltaM; }
+        constexpr float LeftVelocityMps() const noexcept { return _leftVelocityMps; }
+        constexpr float RightVelocityMps() const noexcept { return _rightVelocityMps; }
+        constexpr float LeftWheelSpeedRadps() const noexcept { return _leftWheelSpeedRadps; }
+        constexpr float RightWheelSpeedRadps() const noexcept { return _rightWheelSpeedRadps; }
+
+        constexpr void SetTotalLeftCounts(std::int32_t counts) noexcept { _totalLeftCounts = counts; }
+        constexpr void SetTotalRightCounts(std::int32_t counts) noexcept { _totalRightCounts = counts; }
+        constexpr void SetLeftDistanceDeltaM(float distanceM) noexcept { _leftDistanceDeltaM = distanceM; }
+        constexpr void SetRightDistanceDeltaM(float distanceM) noexcept { _rightDistanceDeltaM = distanceM; }
+        constexpr void SetLeftVelocityMps(float velocityMps) noexcept { _leftVelocityMps = velocityMps; }
+        constexpr void SetRightVelocityMps(float velocityMps) noexcept { _rightVelocityMps = velocityMps; }
+        constexpr void SetLeftWheelSpeedRadps(float wheelSpeedRadps) noexcept { _leftWheelSpeedRadps = wheelSpeedRadps; }
+        constexpr void SetRightWheelSpeedRadps(float wheelSpeedRadps) noexcept { _rightWheelSpeedRadps = wheelSpeedRadps; }
+
+        constexpr void SetCounts(std::int32_t leftCounts, std::int32_t rightCounts) noexcept
+        {
+            _totalLeftCounts = leftCounts;
+            _totalRightCounts = rightCounts;
+        }
+
+        constexpr void SetDistanceDeltasM(float leftDistanceM, float rightDistanceM) noexcept
+        {
+            _leftDistanceDeltaM = leftDistanceM;
+            _rightDistanceDeltaM = rightDistanceM;
+        }
+
+        constexpr void SetWheelLinearVelocityMps(float leftVelocityMps, float rightVelocityMps) noexcept
+        {
+            _leftVelocityMps = leftVelocityMps;
+            _rightVelocityMps = rightVelocityMps;
+        }
+
+        constexpr void SetWheelSpeedRadps(float leftWheelSpeedRadps, float rightWheelSpeedRadps) noexcept
+        {
+            _leftWheelSpeedRadps = leftWheelSpeedRadps;
+            _rightWheelSpeedRadps = rightWheelSpeedRadps;
+        }
+
+    private:
+        friend class SensorSnapshot;
+
+        constexpr EncoderObs() noexcept = default;
+
+        constexpr EncoderObs(
+            std::int32_t totalLeftCounts,
+            std::int32_t totalRightCounts,
+            float leftDistanceDeltaM,
+            float rightDistanceDeltaM,
+            float leftVelocityMps,
+            float rightVelocityMps,
+            float leftWheelSpeedRadps,
+            float rightWheelSpeedRadps) noexcept
+            : _totalLeftCounts(totalLeftCounts)
+            , _totalRightCounts(totalRightCounts)
+            , _leftDistanceDeltaM(leftDistanceDeltaM)
+            , _rightDistanceDeltaM(rightDistanceDeltaM)
+            , _leftVelocityMps(leftVelocityMps)
+            , _rightVelocityMps(rightVelocityMps)
+            , _leftWheelSpeedRadps(leftWheelSpeedRadps)
+            , _rightWheelSpeedRadps(rightWheelSpeedRadps)
+        {
+        }
+
+        std::int32_t _totalLeftCounts = 0;
+        std::int32_t _totalRightCounts = 0;
+        float _leftDistanceDeltaM = 0.0f;
+        float _rightDistanceDeltaM = 0.0f;
+        float _leftVelocityMps = 0.0f;
+        float _rightVelocityMps = 0.0f;
+        float _leftWheelSpeedRadps = 0.0f;
+        float _rightWheelSpeedRadps = 0.0f;
+    };
+
     constexpr SensorSnapshot() noexcept = default;
 
     EXPORT bool BuildEvidenceObservationSnapshot(
@@ -61,7 +151,22 @@ public:
         return 0.5f * (_leftEncoderDistanceM + _rightEncoderDistanceM);
     }
 
-    constexpr const MazeMap::EncoderObs& EncoderObservation() const noexcept { return _encoderObservation; }
+    constexpr const SensorSnapshot::EncoderObs& EncoderObservation() const noexcept { return _encoderObservation; }
+    constexpr void PublishEncoderObservation(
+        const SensorSnapshot::EncoderObs& observation,
+        bool valid,
+        std::int64_t leftTotalCounts,
+        std::int64_t rightTotalCounts,
+        float leftDistanceM,
+        float rightDistanceM) noexcept
+    {
+        _encoderObservation = observation;
+        _encoderObservationValid = valid;
+        _leftEncoderTotalCounts = leftTotalCounts;
+        _rightEncoderTotalCounts = rightTotalCounts;
+        _leftEncoderDistanceM = leftDistanceM;
+        _rightEncoderDistanceM = rightDistanceM;
+    }
     constexpr const WallSensorTelemetry& FrontLeftTelemetry() const noexcept { return _frontLeftTelemetry; }
     constexpr const WallSensorTelemetry& FrontRightTelemetry() const noexcept { return _frontRightTelemetry; }
     constexpr const WallSensorTelemetry& SideLeftTelemetry() const noexcept { return _sideLeftTelemetry; }
@@ -110,27 +215,6 @@ public:
     constexpr void SetRightWallObservationWindowValid(bool valid) noexcept { _rightWallObservationWindowValid = valid; }
     constexpr void SetLeftTransitionDetected(bool detected) noexcept { _leftTransitionDetected = detected; }
     constexpr void SetRightTransitionDetected(bool detected) noexcept { _rightTransitionDetected = detected; }
-    constexpr void SetEncoderObservationValid(bool valid) noexcept { _encoderObservationValid = valid; }
-    constexpr void SetLeftEncoderTotalCounts(std::int64_t counts) noexcept { _leftEncoderTotalCounts = counts; }
-    constexpr void SetRightEncoderTotalCounts(std::int64_t counts) noexcept { _rightEncoderTotalCounts = counts; }
-    constexpr void SetLeftEncoderDistanceM(float distanceM) noexcept { _leftEncoderDistanceM = distanceM; }
-    constexpr void SetRightEncoderDistanceM(float distanceM) noexcept { _rightEncoderDistanceM = distanceM; }
-    constexpr void SetEncoderTotals(std::int64_t leftCounts, std::int64_t rightCounts) noexcept
-    {
-        _leftEncoderTotalCounts = leftCounts;
-        _rightEncoderTotalCounts = rightCounts;
-    }
-    constexpr void SetEncoderDistancesM(float leftDistanceM, float rightDistanceM) noexcept
-    {
-        _leftEncoderDistanceM = leftDistanceM;
-        _rightEncoderDistanceM = rightDistanceM;
-    }
-    constexpr void SetEncoderObservation(const MazeMap::EncoderObs& observation) noexcept { _encoderObservation = observation; }
-    constexpr void SetEncoderObservation(const MazeMap::EncoderObs& observation, bool valid) noexcept
-    {
-        _encoderObservation = observation;
-        _encoderObservationValid = valid;
-    }
     constexpr void SetFrontLeftTelemetry(const WallSensorTelemetry& telemetry) noexcept { _frontLeftTelemetry = telemetry; }
     constexpr void SetFrontRightTelemetry(const WallSensorTelemetry& telemetry) noexcept { _frontRightTelemetry = telemetry; }
     constexpr void SetSideLeftTelemetry(const WallSensorTelemetry& telemetry) noexcept { _sideLeftTelemetry = telemetry; }
@@ -298,6 +382,31 @@ public:
     }
 
 private:
+    friend class MazeMap::RuntimeSensorSuite;
+
+    constexpr SensorSnapshot::EncoderObs& MutableEncoderObservationForCapture() noexcept { return _encoderObservation; }
+    constexpr void SetEncoderObservationValid(bool valid) noexcept { _encoderObservationValid = valid; }
+    constexpr void SetLeftEncoderTotalCounts(std::int64_t counts) noexcept { _leftEncoderTotalCounts = counts; }
+    constexpr void SetRightEncoderTotalCounts(std::int64_t counts) noexcept { _rightEncoderTotalCounts = counts; }
+    constexpr void SetLeftEncoderDistanceM(float distanceM) noexcept { _leftEncoderDistanceM = distanceM; }
+    constexpr void SetRightEncoderDistanceM(float distanceM) noexcept { _rightEncoderDistanceM = distanceM; }
+    constexpr void SetEncoderTotals(std::int64_t leftCounts, std::int64_t rightCounts) noexcept
+    {
+        _leftEncoderTotalCounts = leftCounts;
+        _rightEncoderTotalCounts = rightCounts;
+    }
+    constexpr void SetEncoderDistancesM(float leftDistanceM, float rightDistanceM) noexcept
+    {
+        _leftEncoderDistanceM = leftDistanceM;
+        _rightEncoderDistanceM = rightDistanceM;
+    }
+    constexpr void SetEncoderObservation(const SensorSnapshot::EncoderObs& observation) noexcept { _encoderObservation = observation; }
+    constexpr void SetEncoderObservation(const SensorSnapshot::EncoderObs& observation, bool valid) noexcept
+    {
+        _encoderObservation = observation;
+        _encoderObservationValid = valid;
+    }
+
     float _frontLeftDistanceM = 0.0f;
     float _frontRightDistanceM = 0.0f;
     float _frontLeftDifferentialLight = 0.0f;
@@ -336,7 +445,7 @@ private:
     std::int64_t _rightEncoderTotalCounts = 0;
     float _leftEncoderDistanceM = 0.0f;
     float _rightEncoderDistanceM = 0.0f;
-    MazeMap::EncoderObs _encoderObservation{};
+    SensorSnapshot::EncoderObs _encoderObservation{};
     WallSensorTelemetry _frontLeftTelemetry{};
     WallSensorTelemetry _frontRightTelemetry{};
     WallSensorTelemetry _sideLeftTelemetry{};

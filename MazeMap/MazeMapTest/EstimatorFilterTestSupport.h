@@ -28,7 +28,6 @@ namespace MazeMap
     constexpr float kEstimatorTestGeneralEncoderLinearSpeedSigmaMps = 0.021187f;
     constexpr float kEstimatorTestGeneralEncoderYawRateSigmaRadps = 0.111268f;
     constexpr float kEstimatorTestStationaryEncoderVelocitySigmaMps = 0.002936f;
-    constexpr float kEstimatorTestEncoderPairNisThreshold = 13.81551f;
     constexpr float kEstimatorTestPivotScrubMinCommandAngularRadps = 1.0f;
     constexpr float kEstimatorTestStationaryCertificationDwellS = 0.150f;
 
@@ -193,6 +192,102 @@ namespace MazeMap
         float rightRemainderCounts = 0.0f;
     };
 
+    inline int32_t RoundedEncoderCountsFromDistanceDelta(
+        const float distanceDeltaM,
+        const float distancePerCountM) noexcept
+    {
+        if (!(std::isfinite(distanceDeltaM) &&
+              std::isfinite(distancePerCountM) &&
+              (distancePerCountM > 0.0f)))
+        {
+            return 0;
+        }
+
+        const float counts = distanceDeltaM / distancePerCountM;
+        return static_cast<int32_t>(
+            (counts >= 0.0f) ?
+            std::floor(counts + 0.5f) :
+            std::ceil(counts - 0.5f));
+    }
+
+    inline void SetEncoderCountDeltasForWheelTravel(
+        SensorSnapshot::EncoderObs& observation,
+        const float leftDistanceDeltaM,
+        const float rightDistanceDeltaM) noexcept
+    {
+        const float distancePerCountM = Vehicle::DriveEncoderDistanceFromCounts(1);
+        observation.SetTotalLeftCounts(
+            RoundedEncoderCountsFromDistanceDelta(leftDistanceDeltaM, distancePerCountM));
+        observation.SetTotalRightCounts(
+            RoundedEncoderCountsFromDistanceDelta(rightDistanceDeltaM, distancePerCountM));
+    }
+
+    inline void SetEncoderCountDeltasForWheelSpeedsOverTick(
+        SensorSnapshot::EncoderObs& observation,
+        const float leftWheelSpeedRadps,
+        const float rightWheelSpeedRadps,
+        const float dtSeconds) noexcept
+    {
+        if (!(std::isfinite(dtSeconds) && (dtSeconds > 0.0f)))
+        {
+            observation.SetTotalLeftCounts(0);
+            observation.SetTotalRightCounts(0);
+            return;
+        }
+
+        SetEncoderCountDeltasForWheelTravel(
+            observation,
+            Vehicle::WheelLinearVelocityFromWheelSpeed(leftWheelSpeedRadps) * dtSeconds,
+            Vehicle::WheelLinearVelocityFromWheelSpeed(rightWheelSpeedRadps) * dtSeconds);
+    }
+
+    inline SensorSnapshot::EncoderObs BuildPublishedEncoderObservation(
+        const SensorSnapshot::EncoderObs& observation,
+        const float dtSeconds) noexcept
+    {
+        SensorSnapshot::EncoderObs published = observation;
+        published.SetDistanceDeltasM(
+            Vehicle::DriveEncoderDistanceFromCounts(published.TotalLeftCounts()),
+            Vehicle::DriveEncoderDistanceFromCounts(published.TotalRightCounts()));
+
+        if (!(std::isfinite(dtSeconds) && (dtSeconds > 0.0f)))
+        {
+            published.SetWheelLinearVelocityMps(0.0f, 0.0f);
+            published.SetWheelSpeedRadps(0.0f, 0.0f);
+            return published;
+        }
+
+        const float invDtSeconds = 1.0f / dtSeconds;
+        const float leftVelocityMps = published.LeftDistanceDeltaM() * invDtSeconds;
+        const float rightVelocityMps = published.RightDistanceDeltaM() * invDtSeconds;
+        published.SetWheelLinearVelocityMps(
+            leftVelocityMps,
+            rightVelocityMps);
+        published.SetWheelSpeedRadps(
+            Vehicle::WheelSpeedFromLinearVelocity(leftVelocityMps),
+            Vehicle::WheelSpeedFromLinearVelocity(rightVelocityMps));
+        return published;
+    }
+
+    inline SensorSnapshot::EncoderObs PublishEncoderObservationToRuntime(
+        VehicleState& runtimeState,
+        const SensorSnapshot::EncoderObs& observation,
+        const float dtSeconds,
+        const bool valid = true) noexcept
+    {
+        SensorSnapshot snapshot = runtimeState.GetSensorSnapshot();
+        const SensorSnapshot::EncoderObs published = BuildPublishedEncoderObservation(observation, dtSeconds);
+        snapshot.PublishEncoderObservation(
+            published,
+            valid,
+            snapshot.LeftEncoderTotalCounts() + static_cast<std::int64_t>(published.TotalLeftCounts()),
+            snapshot.RightEncoderTotalCounts() + static_cast<std::int64_t>(published.TotalRightCounts()),
+            snapshot.LeftEncoderDistanceM() + published.LeftDistanceDeltaM(),
+            snapshot.RightEncoderDistanceM() + published.RightDistanceDeltaM());
+        runtimeState.SetSensorSnapshot(snapshot);
+        return published;
+    }
+
     inline int32_t ConsumeWholeEncoderCounts(float deltaCounts, float& remainderCounts) noexcept
     {
         remainderCounts += deltaCounts;
@@ -204,17 +299,13 @@ namespace MazeMap
         return wholeCounts;
     }
 
-    inline EncoderObs BuildPredictionMatchingEncoderObservation(
+    inline SensorSnapshot::EncoderObs BuildPredictionMatchingEncoderObservation(
         const Eigen::Matrix<float, VehicleState::kDimension, 1>& previousState,
         const Eigen::Matrix<float, VehicleState::kDimension, 1>& predictedState,
         float dtSeconds,
         SyntheticEncoderRemainderState& remainderState) noexcept
     {
-        EncoderObs encoder{};
-        encoder.SetLeftWheelSpeedRadps(Vehicle::WheelSpeedFromLinearVelocity(
-                Vehicle::LeftWheelLinearVelocityFromBody(predictedState(3), predictedState(5))));
-        encoder.SetRightWheelSpeedRadps(Vehicle::WheelSpeedFromLinearVelocity(
-                Vehicle::RightWheelLinearVelocityFromBody(predictedState(3), predictedState(5))));
+        SensorSnapshot::EncoderObs encoder = SensorSnapshot{}.EncoderObservation();
 
         if (!(std::isfinite(dtSeconds) && (dtSeconds > 0.0f)))
         {
@@ -232,14 +323,16 @@ namespace MazeMap
             0.5f *
             (Vehicle::WheelSpeedFromLinearVelocity(
                 Vehicle::LeftWheelLinearVelocityFromBody(previousState(3), previousState(5))) +
-             encoder.LeftWheelSpeedRadps()) *
+             Vehicle::WheelSpeedFromLinearVelocity(
+                Vehicle::LeftWheelLinearVelocityFromBody(predictedState(3), predictedState(5)))) *
             wheelRadiusM *
             dtSeconds;
         const float rightDistanceDeltaM =
             0.5f *
             (Vehicle::WheelSpeedFromLinearVelocity(
                 Vehicle::RightWheelLinearVelocityFromBody(previousState(3), previousState(5))) +
-             encoder.RightWheelSpeedRadps()) *
+             Vehicle::WheelSpeedFromLinearVelocity(
+                Vehicle::RightWheelLinearVelocityFromBody(predictedState(3), predictedState(5)))) *
             wheelRadiusM *
             dtSeconds;
 
@@ -249,7 +342,7 @@ namespace MazeMap
         encoder.SetTotalRightCounts(ConsumeWholeEncoderCounts(
                 rightDistanceDeltaM / distancePerCountM,
                 remainderState.rightRemainderCounts));
-        return encoder;
+        return BuildPublishedEncoderObservation(encoder, dtSeconds);
     }
 
     inline void ApplyPredictionMatchingEncoderAndYawUpdates(
@@ -259,18 +352,9 @@ namespace MazeMap
         float dtSeconds,
         SyntheticEncoderRemainderState& remainderState)
     {
-        const EncoderObs encoder =
-            BuildPredictionMatchingEncoderObservation(
-                previousState,
-                predictedState,
-                dtSeconds,
-                remainderState);
-        const bool encoderAccepted = core.updateEncoderPair(encoder, dtSeconds, true);
-        Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(
-            FindDebugDumpBool(core, "estimator_dump_update_metrics", "last_update_attempted"));
-        Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(encoderAccepted);
-        Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(
-            FindDebugDumpBool(core, "estimator_dump_update_metrics", "last_update_accepted"));
+        (void)previousState;
+        (void)dtSeconds;
+        (void)remainderState;
 
         const bool yawAccepted =
             core.updateYawRate(predictedState(5));
@@ -374,20 +458,12 @@ namespace MazeMap
 
         Estimator core = MakeDefaultEstimator();
         Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(core.reset(initialState, initialCovariance));
-        EncoderObs encoder{};
         constexpr float dt = 0.001f;
 
         for (int step = 0; step < numCycles; ++step)
         {
             Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(
                 core.predict(dt, control));
-
-            const bool encoderAccepted = core.updateEncoderPair(encoder, dt, true);
-            Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(
-                FindDebugDumpBool(core, "estimator_dump_update_metrics", "last_update_attempted"));
-            Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(encoderAccepted);
-            Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(
-                FindDebugDumpBool(core, "estimator_dump_update_metrics", "last_update_accepted"));
 
             const bool yawAccepted = core.updateYawRate(0.0f);
             Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(

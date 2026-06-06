@@ -2,7 +2,6 @@
 
 #include "EstimatorTestSupport.h"
 
-#include "..\MazeMap\EncoderObs.h"
 #include "..\MazeMap\PlantModel.h"
 #include "..\MazeMap\SensorSnapshot.h"
 #include "..\MazeMap\SharedRobotRuntime.h"
@@ -93,7 +92,7 @@ namespace MazeMap
             SensorSnapshot snapshot{};
             snapshot.SetRawYawRateRadps(gyroRawRadps);
             snapshot.SetYawRateRadps(std::isfinite(gyroRawRadps) ? gyroRawRadps : 0.0f);
-            MazeMap::EncoderObs encoderObservation{};
+            SensorSnapshot::EncoderObs encoderObservation = SensorSnapshot{}.EncoderObservation();
             encoderObservation.SetTotalLeftCounts(leftDeltaCounts);
             encoderObservation.SetTotalRightCounts(rightDeltaCounts);
             encoderObservation.SetLeftDistanceDeltaM(static_cast<float>(leftDeltaCounts) * distancePerCountM);
@@ -102,11 +101,13 @@ namespace MazeMap
             encoderObservation.SetRightVelocityMps(encoderObservation.RightDistanceDeltaM() / dtSeconds);
             encoderObservation.SetLeftWheelSpeedRadps(Vehicle::WheelSpeedFromLinearVelocity(encoderObservation.LeftVelocityMps()));
             encoderObservation.SetRightWheelSpeedRadps(Vehicle::WheelSpeedFromLinearVelocity(encoderObservation.RightVelocityMps()));
-            snapshot.SetEncoderObservation(encoderObservation, encoderObservationValid);
-            snapshot.SetEncoderTotals(encoderState.leftTotalCounts, encoderState.rightTotalCounts);
-            snapshot.SetEncoderDistancesM(
-                Vehicle::DriveEncoderDistanceFromCounts(snapshot.LeftEncoderTotalCounts()),
-                Vehicle::DriveEncoderDistanceFromCounts(snapshot.RightEncoderTotalCounts()));
+            snapshot.PublishEncoderObservation(
+                encoderObservation,
+                encoderObservationValid,
+                encoderState.leftTotalCounts,
+                encoderState.rightTotalCounts,
+                Vehicle::DriveEncoderDistanceFromCounts(encoderState.leftTotalCounts),
+                Vehicle::DriveEncoderDistanceFromCounts(encoderState.rightTotalCounts));
             return snapshot;
         }
 

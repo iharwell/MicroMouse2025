@@ -7,7 +7,6 @@
 #include "..\MazeMap\Drive.h"
 #include "..\MazeMap\DriveBase.h"
 #include "..\MazeMap\DriveTelemetry.h"
-#include "..\MazeMap\EncoderObs.h"
 #include "..\MazeMap\Estimator.h"
 #include "..\MazeMap\Maneuver.h"
 #include "..\MazeMap\ManeuverInstance.h"
@@ -93,6 +92,7 @@ namespace MazeMap::App::DriveManeuverContractTestSupport
         float elapsedSeconds = 0.0f;
         CommandVector lastReturnedCommand;
         DriveTelemetry lastTelemetry{};
+        VehicleState runtimeState;
         VehicleState truthState;
         std::vector<CommandSample> samples;
     };
@@ -111,7 +111,12 @@ namespace MazeMap::App::DriveManeuverContractTestSupport
             L" completed=" + BoolText(trace.completed) +
             L" estimator_fault=" + BoolText(trace.estimatorFault) +
             L" samples=" + std::to_wstring(trace.samples.size()) +
-            L" elapsed_s=" + std::to_wstring(trace.elapsedSeconds);
+            L" elapsed_s=" + std::to_wstring(trace.elapsedSeconds) +
+            L" encoder_avg_m=" + std::to_wstring(trace.runtimeState.GetSensorSnapshot().AverageEncoderDistanceM()) +
+            L" runtime_vf_mps=" + std::to_wstring(trace.runtimeState.GetForwardVelocity()) +
+            L" runtime_yaw_rate_radps=" + std::to_wstring(trace.runtimeState.GetYawRate()) +
+            L" truth_vf_mps=" + std::to_wstring(trace.truthState.GetForwardVelocity()) +
+            L" truth_yaw_rate_radps=" + std::to_wstring(trace.truthState.GetYawRate());
     }
 
     inline bool AccumulateSampleFlag(
@@ -143,6 +148,62 @@ namespace MazeMap::App::DriveManeuverContractTestSupport
         return wholeCounts;
     }
 
+    inline std::int32_t EncoderDeltaCountsFromWheelSpeedRadps(
+        const float wheelSpeedRadps,
+        const float dtSeconds) noexcept
+    {
+        const float distancePerCountM = MazeMap::Vehicle::DriveEncoderDistanceFromCounts(1);
+        if (!std::isfinite(wheelSpeedRadps) ||
+            !std::isfinite(dtSeconds) ||
+            !(dtSeconds > 0.0f) ||
+            !(distancePerCountM > 0.0f))
+        {
+            return 0;
+        }
+
+        return static_cast<std::int32_t>(
+            std::lround(
+                (MazeMap::Vehicle::WheelLinearVelocityFromWheelSpeed(wheelSpeedRadps) * dtSeconds) /
+                distancePerCountM));
+    }
+
+    inline void PublishInitialEncoderObservationForWheelSpeedsRadps(
+        VehicleState& state,
+        const float leftWheelSpeedRadps,
+        const float rightWheelSpeedRadps) noexcept
+    {
+        const std::int32_t leftCounts =
+            EncoderDeltaCountsFromWheelSpeedRadps(leftWheelSpeedRadps, kSimulationDtSeconds);
+        const std::int32_t rightCounts =
+            EncoderDeltaCountsFromWheelSpeedRadps(rightWheelSpeedRadps, kSimulationDtSeconds);
+        const float leftDistanceDeltaM =
+            MazeMap::Vehicle::DriveEncoderDistanceFromCounts(leftCounts);
+        const float rightDistanceDeltaM =
+            MazeMap::Vehicle::DriveEncoderDistanceFromCounts(rightCounts);
+
+        SensorSnapshot::EncoderObs encoderObservation = SensorSnapshot{}.EncoderObservation();
+        encoderObservation.SetTotalLeftCounts(leftCounts);
+        encoderObservation.SetTotalRightCounts(rightCounts);
+        encoderObservation.SetLeftDistanceDeltaM(leftDistanceDeltaM);
+        encoderObservation.SetRightDistanceDeltaM(rightDistanceDeltaM);
+        encoderObservation.SetLeftVelocityMps(leftDistanceDeltaM / kSimulationDtSeconds);
+        encoderObservation.SetRightVelocityMps(rightDistanceDeltaM / kSimulationDtSeconds);
+        encoderObservation.SetLeftWheelSpeedRadps(
+            MazeMap::Vehicle::WheelSpeedFromLinearVelocity(encoderObservation.LeftVelocityMps()));
+        encoderObservation.SetRightWheelSpeedRadps(
+            MazeMap::Vehicle::WheelSpeedFromLinearVelocity(encoderObservation.RightVelocityMps()));
+
+        SensorSnapshot snapshot = state.GetSensorSnapshot();
+        snapshot.PublishEncoderObservation(
+            encoderObservation,
+            true,
+            leftCounts,
+            rightCounts,
+            leftDistanceDeltaM,
+            rightDistanceDeltaM);
+        state.SetSensorSnapshot(snapshot);
+    }
+
     inline void ApplyEncoderObservation(
         Estimator& estimator,
         VehicleState& runtimeState,
@@ -161,7 +222,7 @@ namespace MazeMap::App::DriveManeuverContractTestSupport
             ConsumeWholeEncoderCounts(rightDistanceDeltaM / distancePerCountM, rightEncoderRemainderCounts);
 
         SensorSnapshot snapshot = BuildDriveManeuverSensorSnapshot(yawRateRadps);
-        MazeMap::EncoderObs encoderObservation{};
+        SensorSnapshot::EncoderObs encoderObservation = SensorSnapshot{}.EncoderObservation();
         encoderObservation.SetTotalLeftCounts(leftCounts);
         encoderObservation.SetTotalRightCounts(rightCounts);
         encoderObservation.SetLeftDistanceDeltaM(static_cast<float>(leftCounts) * distancePerCountM);
@@ -175,13 +236,17 @@ namespace MazeMap::App::DriveManeuverContractTestSupport
             encoderObservation.SetLeftWheelSpeedRadps(encoderObservation.LeftVelocityMps() * invWheelRadiusM);
             encoderObservation.SetRightWheelSpeedRadps(encoderObservation.RightVelocityMps() * invWheelRadiusM);
         }
-        snapshot.SetEncoderObservation(encoderObservation, true);
-        snapshot.SetEncoderTotals(
-            runtimeState.GetSensorSnapshot().LeftEncoderTotalCounts() + static_cast<std::int64_t>(leftCounts),
-            runtimeState.GetSensorSnapshot().RightEncoderTotalCounts() + static_cast<std::int64_t>(rightCounts));
-        snapshot.SetEncoderDistancesM(
-            MazeMap::Vehicle::DriveEncoderDistanceFromCounts(snapshot.LeftEncoderTotalCounts()),
-            MazeMap::Vehicle::DriveEncoderDistanceFromCounts(snapshot.RightEncoderTotalCounts()));
+        const std::int64_t leftTotalCounts =
+            runtimeState.GetSensorSnapshot().LeftEncoderTotalCounts() + static_cast<std::int64_t>(leftCounts);
+        const std::int64_t rightTotalCounts =
+            runtimeState.GetSensorSnapshot().RightEncoderTotalCounts() + static_cast<std::int64_t>(rightCounts);
+        snapshot.PublishEncoderObservation(
+            encoderObservation,
+            true,
+            leftTotalCounts,
+            rightTotalCounts,
+            MazeMap::Vehicle::DriveEncoderDistanceFromCounts(leftTotalCounts),
+            MazeMap::Vehicle::DriveEncoderDistanceFromCounts(rightTotalCounts));
         UpdateDriveEstimator(
             estimator,
             runtimeState,
@@ -196,9 +261,20 @@ namespace MazeMap::App::DriveManeuverContractTestSupport
         const float wheelSpeedRadps = Vehicle::WheelSpeedFromLinearVelocity(linearSpeedMps);
         VehicleState state;
         state.SetForwardVelocity(linearSpeedMps);
-        state.SetWheelSpeedLeft(wheelSpeedRadps);
-        state.SetWheelSpeedRight(wheelSpeedRadps);
+        PublishInitialEncoderObservationForWheelSpeedsRadps(state, wheelSpeedRadps, wheelSpeedRadps);
         return state;
+    }
+
+    inline void ComputeWheelSpeedsFromBodyState(
+        const VehicleState& state,
+        float& leftWheelSpeedRadps,
+        float& rightWheelSpeedRadps) noexcept
+    {
+        Vehicle::WheelSpeedsFromBodyVelocity(
+            state.GetForwardVelocity(),
+            state.GetYawRate(),
+            leftWheelSpeedRadps,
+            rightWheelSpeedRadps);
     }
 
     inline bool PrimeDriveForSmoothEntry(
@@ -233,6 +309,7 @@ namespace MazeMap::App::DriveManeuverContractTestSupport
             leftEncoderRemainderCounts,
             rightEncoderRemainderCounts,
             kSimulationDtSeconds);
+        truthState.SetSensorSnapshot(runtime.RuntimeState().GetSensorSnapshot());
         return true;
     }
 
@@ -245,18 +322,28 @@ namespace MazeMap::App::DriveManeuverContractTestSupport
         const float dtSeconds,
         const CommandVector& control)
     {
-        const float previousLeftWheelSpeedRadps = truthState.GetWheelSpeedLeft();
-        const float previousRightWheelSpeedRadps = truthState.GetWheelSpeedRight();
+        float previousLeftWheelSpeedRadps = 0.0f;
+        float previousRightWheelSpeedRadps = 0.0f;
+        ComputeWheelSpeedsFromBodyState(
+            truthState,
+            previousLeftWheelSpeedRadps,
+            previousRightWheelSpeedRadps);
         truthPlant.integrate(control, dtSeconds);
+        float currentLeftWheelSpeedRadps = 0.0f;
+        float currentRightWheelSpeedRadps = 0.0f;
+        ComputeWheelSpeedsFromBodyState(
+            truthState,
+            currentLeftWheelSpeedRadps,
+            currentRightWheelSpeedRadps);
 
         const float leftDistanceDeltaM =
             0.5f *
-            (previousLeftWheelSpeedRadps + truthState.GetWheelSpeedLeft()) *
+            (previousLeftWheelSpeedRadps + currentLeftWheelSpeedRadps) *
             Vehicle::GetDriveWheelRadiusM() *
             dtSeconds;
         const float rightDistanceDeltaM =
             0.5f *
-            (previousRightWheelSpeedRadps + truthState.GetWheelSpeedRight()) *
+            (previousRightWheelSpeedRadps + currentRightWheelSpeedRadps) *
             Vehicle::GetDriveWheelRadiusM() *
             dtSeconds;
 
@@ -270,6 +357,7 @@ namespace MazeMap::App::DriveManeuverContractTestSupport
             rightEncoderRemainderCounts,
             dtSeconds,
             control);
+        truthState.SetSensorSnapshot(runtime.RuntimeState().GetSensorSnapshot());
     }
 
     inline DirectionalLocation BuildManeuverStart() noexcept
@@ -360,11 +448,13 @@ namespace MazeMap::App::DriveManeuverContractTestSupport
             {
                 return trace;
             }
+            trace.runtimeState = runtime.RuntimeState();
         }
         else
         {
             trace.entryPoseReset = true;
             trace.truthState = BuildTruthState(0.0f);
+            trace.runtimeState = runtime.RuntimeState();
         }
         PlantModel truthPlant(runtime.Vehicle(), trace.truthState);
 
@@ -391,6 +481,7 @@ namespace MazeMap::App::DriveManeuverContractTestSupport
             if (done)
             {
                 trace.completed = true;
+                trace.runtimeState = runtime.RuntimeState();
                 return trace;
             }
 
@@ -463,6 +554,7 @@ namespace MazeMap::App::DriveManeuverContractTestSupport
                 rightEncoderRemainderCounts,
                 kSimulationDtSeconds,
                 control);
+            trace.runtimeState = runtime.RuntimeState();
             trace.elapsedSeconds += kSimulationDtSeconds;
         }
 

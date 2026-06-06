@@ -39,34 +39,19 @@ namespace MazeMap
         IterativeMotionScenario RunOpposedControlScenario()
         {
             IterativeMotionScenario scenario;
-            Estimator core = MakeDefaultEstimator();
+            EstimatorTestRuntime runtime;
+            Estimator core(runtime.vehicle, runtime.plantModel, runtime.runtimeState);
             const CommandVector control = CommandVector(0.18f, 0.18f);
-            EncoderObs encoder{};
+            SensorSnapshot::EncoderObs encoder = SensorSnapshot{}.EncoderObservation();
             constexpr int kSteps = 200;
             constexpr float dt = kDefaultEstimatorDtSeconds;
 
             for (int step = 0; step < kSteps; ++step)
             {
+                (void)PublishEncoderObservationToRuntime(runtime.runtimeState, encoder, dt);
                 if (!core.predict(dt, control))
                 {
                     scenario.firstIncompleteOperation = L"predict";
-                    break;
-                }
-
-                const bool encoderAccepted = core.updateEncoderPair(encoder, dt, true);
-                if (!EstimatorMotionUpdateTest::LastUpdateAttempted(core))
-                {
-                    scenario.firstIncompleteOperation = L"encoder update not attempted";
-                    break;
-                }
-                if (!encoderAccepted)
-                {
-                    scenario.firstIncompleteOperation = L"encoder update rejected";
-                    break;
-                }
-                if (!EstimatorMotionUpdateTest::LastUpdateAccepted(core))
-                {
-                    scenario.firstIncompleteOperation = L"encoder update not recorded accepted";
                     break;
                 }
 
@@ -156,7 +141,8 @@ namespace MazeMap
         StationarySplitCommandPrediction PredictStationarySplitCommandStateAfterPivotPredictSequence()
         {
             StationarySplitCommandPrediction prediction;
-            Estimator core = MakeDefaultEstimator();
+            EstimatorTestRuntime runtime;
+            Estimator core(runtime.vehicle, runtime.plantModel, runtime.runtimeState);
             StateVector initialState = StateVector::Zero();
             initialState(0) = 0.0f;
             initialState(1) = 0.0f;
@@ -194,15 +180,7 @@ namespace MazeMap
             SyntheticEncoderRemainderState syntheticEncoderState{};
             for (int step = 0; step < kStationarySplitCommandPredictSteps; ++step)
             {
-                if (!core.predict(dtSeconds, control))
-                {
-                    prediction.firstIncompleteOperation = L"predict";
-                    break;
-                }
-
-                EncoderObs encoder{};
-                encoder.SetLeftWheelSpeedRadps(pivotWheelSpeedRadps);
-                encoder.SetRightWheelSpeedRadps(-pivotWheelSpeedRadps);
+                SensorSnapshot::EncoderObs encoder = SensorSnapshot{}.EncoderObservation();
                 encoder.SetTotalLeftCounts(ConsumeWholeEncoderCounts(
                     (Vehicle::WheelLinearVelocityFromWheelSpeed(pivotWheelSpeedRadps) * dtSeconds) /
                         distancePerCountM,
@@ -211,20 +189,11 @@ namespace MazeMap
                     (-Vehicle::WheelLinearVelocityFromWheelSpeed(pivotWheelSpeedRadps) * dtSeconds) /
                         distancePerCountM,
                     syntheticEncoderState.rightRemainderCounts));
-                const bool encoderAccepted = core.updateEncoderPair(encoder, dtSeconds, true);
-                if (!EstimatorMotionUpdateTest::LastUpdateAttempted(core))
+                (void)PublishEncoderObservationToRuntime(runtime.runtimeState, encoder, dtSeconds);
+
+                if (!core.predict(dtSeconds, control))
                 {
-                    prediction.firstIncompleteOperation = L"encoder update not attempted";
-                    break;
-                }
-                if (!encoderAccepted)
-                {
-                    prediction.firstIncompleteOperation = L"encoder update rejected";
-                    break;
-                }
-                if (!EstimatorMotionUpdateTest::LastUpdateAccepted(core))
-                {
-                    prediction.firstIncompleteOperation = L"encoder update not recorded accepted";
+                    prediction.firstIncompleteOperation = L"predict";
                     break;
                 }
 
@@ -307,12 +276,31 @@ namespace MazeMap
 
         static bool ApplyPredictionMatchingCycleNoAssert(
             Estimator& core,
+            VehicleState& runtimeState,
             const CommandVector& control,
             const float dtSeconds,
             SyntheticEncoderRemainderState& remainderState,
             const wchar_t*& firstIncompleteOperation)
         {
             const StateVector stateBeforePredict = EstimatorMotionUpdateTest::WorkingState(core);
+            SensorSnapshot::EncoderObs encoder = SensorSnapshot{}.EncoderObservation();
+            const float distancePerCountM = Vehicle::DriveEncoderDistanceFromCounts(1);
+            if (std::isfinite(distancePerCountM) && (distancePerCountM > 0.0f))
+            {
+                const float leftDistanceDeltaM =
+                    Vehicle::LeftWheelLinearVelocityFromBody(stateBeforePredict(3), stateBeforePredict(5)) *
+                    dtSeconds;
+                const float rightDistanceDeltaM =
+                    Vehicle::RightWheelLinearVelocityFromBody(stateBeforePredict(3), stateBeforePredict(5)) *
+                    dtSeconds;
+                encoder.SetTotalLeftCounts(ConsumeWholeEncoderCounts(
+                    leftDistanceDeltaM / distancePerCountM,
+                    remainderState.leftRemainderCounts));
+                encoder.SetTotalRightCounts(ConsumeWholeEncoderCounts(
+                    rightDistanceDeltaM / distancePerCountM,
+                    remainderState.rightRemainderCounts));
+            }
+            (void)PublishEncoderObservationToRuntime(runtimeState, encoder, dtSeconds);
             if (!core.predict(dtSeconds, control))
             {
                 firstIncompleteOperation = L"predict";
@@ -320,29 +308,9 @@ namespace MazeMap
             }
 
             const StateVector stateAfterPredict = EstimatorMotionUpdateTest::WorkingState(core);
-            const EncoderObs encoder =
-                BuildPredictionMatchingEncoderObservation(
-                    stateBeforePredict,
-                    stateAfterPredict,
-                    dtSeconds,
-                    remainderState);
-            const bool encoderAccepted =
-                core.updateEncoderPair(encoder, dtSeconds, true);
-            if (!EstimatorMotionUpdateTest::LastUpdateAttempted(core))
-            {
-                firstIncompleteOperation = L"encoder update not attempted";
-                return false;
-            }
-            if (!encoderAccepted)
-            {
-                firstIncompleteOperation = L"encoder update rejected";
-                return false;
-            }
-            if (!EstimatorMotionUpdateTest::LastUpdateAccepted(core))
-            {
-                firstIncompleteOperation = L"encoder update not recorded accepted";
-                return false;
-            }
+            (void)stateBeforePredict;
+            (void)runtimeState;
+            (void)remainderState;
 
             const bool yawAccepted = core.updateYawRate(stateAfterPredict(5));
             if (!EstimatorMotionUpdateTest::LastUpdateAttempted(core))
@@ -365,31 +333,16 @@ namespace MazeMap
 
         static bool ApplyStationaryCycleNoAssert(
             Estimator& core,
+            VehicleState& runtimeState,
             const CommandVector& control,
             const float dtSeconds,
             const wchar_t*& firstIncompleteOperation)
         {
+            SensorSnapshot::EncoderObs encoder = SensorSnapshot{}.EncoderObservation();
+            (void)PublishEncoderObservationToRuntime(runtimeState, encoder, dtSeconds);
             if (!core.predict(dtSeconds, control))
             {
                 firstIncompleteOperation = L"predict";
-                return false;
-            }
-
-            EncoderObs encoder{};
-            const bool encoderAccepted = core.updateEncoderPair(encoder, dtSeconds, true);
-            if (!EstimatorMotionUpdateTest::LastUpdateAttempted(core))
-            {
-                firstIncompleteOperation = L"encoder update not attempted";
-                return false;
-            }
-            if (!encoderAccepted)
-            {
-                firstIncompleteOperation = L"encoder update rejected";
-                return false;
-            }
-            if (!EstimatorMotionUpdateTest::LastUpdateAccepted(core))
-            {
-                firstIncompleteOperation = L"encoder update not recorded accepted";
                 return false;
             }
 
@@ -436,7 +389,7 @@ namespace MazeMap
             ControlDirectionScenario scenario;
             EstimatorTestRuntime runtime;
             PlantModel& model = runtime.plantModel;
-            Estimator core = MakeDefaultEstimator();
+            Estimator core(runtime.vehicle, runtime.plantModel, runtime.runtimeState);
             StateVector initialState = StateVector::Zero();
             CovarianceMatrix initialCovariance = CovarianceMatrix::Zero();
             initialCovariance(0, 0) = 0.001f * 0.001f;
@@ -463,6 +416,7 @@ namespace MazeMap
                 {
                     if (!ApplyStationaryCycleNoAssert(
                             core,
+                            runtime.runtimeState,
                             zeroControl,
                             dt,
                             scenario.firstIncompleteOperation))
@@ -487,6 +441,7 @@ namespace MazeMap
                         forwardVelocityTargetMps);
                 if (!ApplyPredictionMatchingCycleNoAssert(
                         core,
+                        runtime.runtimeState,
                         control,
                         dt,
                         syntheticEncoderState,

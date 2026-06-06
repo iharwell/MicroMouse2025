@@ -3,9 +3,9 @@
 
 #include "CommandVector.h"
 #include "EigenCompat.h"
-#include "EncoderObs.h"
 #include "Estimator.h"
 #include "PlantModel.h"
+#include "SensorSnapshot.h"
 #include "Vehicle.h"
 #include "VehicleState.h"
 
@@ -37,8 +37,7 @@ int main(int argc, char** argv)
         state.SetForwardVelocity(0.0f);
         state.SetRightwardVelocity(lateralVelocityMps);
         state.SetYawRate(0.0f);
-        state.SetWheelSpeedLeft(0.0f);
-        state.SetWheelSpeedRight(0.0f);
+        state.PublishEncoderWheelSpeedsRadps(0.0f, 0.0f);
         MazeMap::PlantModel plant(vehicle, state);
 
         const float previousVrMps = state.GetRightwardVelocity();
@@ -61,12 +60,19 @@ int main(int argc, char** argv)
     stationaryState.SetForwardVelocity(0.0f);
     stationaryState.SetRightwardVelocity(0.0f);
     stationaryState.SetYawRate(0.0f);
-    stationaryState.SetWheelSpeedLeft(0.0f);
-    stationaryState.SetWheelSpeedRight(0.0f);
+    stationaryState.PublishEncoderWheelSpeedsRadps(0.0f, 0.0f);
     MazeMap::PlantModel stationaryPlant(stationaryVehicle, stationaryState);
     MazeMap::Estimator stationaryEstimator(stationaryVehicle, stationaryPlant, stationaryState);
 
-    MazeMap::EncoderObs encoder{};
+    SensorSnapshot::EncoderObs encoder = SensorSnapshot{}.EncoderObservation();
+    SensorSnapshot stationarySnapshot{};
+    stationarySnapshot.PublishEncoderObservation(
+        encoder,
+        true,
+        0,
+        0,
+        0.0f,
+        0.0f);
 
     for (int step = 0; step <= stationarySteps; ++step)
     {
@@ -85,13 +91,9 @@ int main(int argc, char** argv)
             break;
         }
 
+        stationaryState.SetSensorSnapshot(stationarySnapshot);
+        stationaryState.SetTime(stationaryState.GetTime() + kTickSeconds);
         (void)stationaryEstimator.predict(kTickSeconds, zeroControl);
-        const bool encoderAccepted = stationaryEstimator.updateEncoderPair(encoder, kTickSeconds, true);
-        if (!encoderAccepted)
-        {
-            std::cout << "encoder rejected at step " << step << '\n';
-            break;
-        }
     }
 
     const MazeMap::App::Internal::CommandVector drive(0.5f, 0.5f);
@@ -155,8 +157,7 @@ int main(int argc, char** argv)
     yawOnlyState.SetForwardVelocity(0.0f);
     yawOnlyState.SetRightwardVelocity(0.0f);
     yawOnlyState.SetYawRate(0.0f);
-    yawOnlyState.SetWheelSpeedLeft(0.0f);
-    yawOnlyState.SetWheelSpeedRight(0.0f);
+    yawOnlyState.PublishEncoderWheelSpeedsRadps(0.0f, 0.0f);
     MazeMap::PlantModel yawOnlyPlant(yawOnlyVehicle, yawOnlyState);
     MazeMap::Estimator yawOnlyEstimator(yawOnlyVehicle, yawOnlyPlant, yawOnlyState);
     const float correctedYawRateRadps = 0.35f;
@@ -178,12 +179,10 @@ int main(int argc, char** argv)
     movingEncoderState.SetForwardVelocity(measuredLinearSpeedMps);
     movingEncoderState.SetRightwardVelocity(0.0f);
     movingEncoderState.SetYawRate(0.0f);
-    movingEncoderState.SetWheelSpeedLeft(measuredWheelSpeedRadps);
-    movingEncoderState.SetWheelSpeedRight(measuredWheelSpeedRadps);
+    movingEncoderState.PublishEncoderWheelSpeedsRadps(measuredWheelSpeedRadps, measuredWheelSpeedRadps);
     MazeMap::PlantModel movingEncoderPlant(movingEncoderVehicle, movingEncoderState);
     MazeMap::Estimator movingEncoderEstimator(movingEncoderVehicle, movingEncoderPlant, movingEncoderState);
-    (void)movingEncoderEstimator.predict(kTickSeconds, zeroControl);
-    MazeMap::EncoderObs movingEncoder{};
+    SensorSnapshot::EncoderObs movingEncoder = SensorSnapshot{}.EncoderObservation();
     movingEncoder.SetTotalLeftCounts(1);
     movingEncoder.SetTotalRightCounts(1);
     movingEncoder.SetLeftDistanceDeltaM(distancePerCountM);
@@ -192,10 +191,19 @@ int main(int argc, char** argv)
     movingEncoder.SetRightVelocityMps(measuredLinearSpeedMps);
     movingEncoder.SetLeftWheelSpeedRadps(movingEncoderState.GetWheelSpeedLeft());
     movingEncoder.SetRightWheelSpeedRadps(movingEncoderState.GetWheelSpeedRight());
-    const bool movingAccepted = movingEncoderEstimator.updateEncoderPair(movingEncoder, kTickSeconds, true);
+    SensorSnapshot movingEncoderSnapshot{};
+    movingEncoderSnapshot.PublishEncoderObservation(
+        movingEncoder,
+        true,
+        movingEncoder.TotalLeftCounts(),
+        movingEncoder.TotalRightCounts(),
+        movingEncoder.LeftDistanceDeltaM(),
+        movingEncoder.RightDistanceDeltaM());
+    movingEncoderState.SetSensorSnapshot(movingEncoderSnapshot);
+    movingEncoderState.SetTime(movingEncoderState.GetTime() + kTickSeconds);
+    (void)movingEncoderEstimator.predict(kTickSeconds, zeroControl);
     std::cout
-        << "moving_encoder_update"
-        << " accepted=" << movingAccepted
+        << "moving_encoder_predict"
         << " vf=" << movingEncoderState.GetForwardVelocity()
         << " yaw_rate=" << movingEncoderState.GetYawRate()
         << " left_wheel_speed=" << movingEncoderState.GetWheelSpeedLeft()

@@ -13,9 +13,11 @@
 #include "..\MazeMap\MotionLimits.h"
 #include "..\MazeMap\SensorSnapshot.h"
 #include "..\MazeMap\SharedRobotRuntime.h"
+#include "..\MazeMap\Vehicle.h"
 #include "..\MazeMap\VehicleState.h"
 
 #include <cmath>
+#include <cstdint>
 #include <sstream>
 #include <string>
 
@@ -74,13 +76,38 @@ namespace MazeMap::App
             SensorSnapshot snapshot{};
             snapshot.SetRawYawRateRadps(yawRateRadps);
             snapshot.SetYawRateRadps(yawRateRadps);
-            snapshot.SetEncoderDistancesM(encoderProgressM, encoderProgressM);
-            MazeMap::EncoderObs encoderObservation{};
-            encoderObservation.SetLeftDistanceDeltaM(0.0f);
-            encoderObservation.SetRightDistanceDeltaM(0.0f);
-            encoderObservation.SetLeftVelocityMps(forwardMps);
-            encoderObservation.SetRightVelocityMps(forwardMps);
-            snapshot.SetEncoderObservation(encoderObservation, true);
+            const float distancePerCountM = Vehicle::DriveEncoderDistanceFromCounts(1);
+            const std::int64_t encoderProgressCounts =
+                (distancePerCountM != 0.0f) ?
+                static_cast<std::int64_t>(std::lround(encoderProgressM / distancePerCountM)) :
+                0;
+            const SensorSnapshot& previousSnapshot = runtime.RuntimeState().GetSensorSnapshot();
+            const std::int32_t leftDeltaCounts = static_cast<std::int32_t>(
+                encoderProgressCounts - previousSnapshot.LeftEncoderTotalCounts());
+            const std::int32_t rightDeltaCounts = static_cast<std::int32_t>(
+                encoderProgressCounts - previousSnapshot.RightEncoderTotalCounts());
+            const float leftDistanceDeltaM = Vehicle::DriveEncoderDistanceFromCounts(leftDeltaCounts);
+            const float rightDistanceDeltaM = Vehicle::DriveEncoderDistanceFromCounts(rightDeltaCounts);
+            const float encoderProgressDistanceM =
+                Vehicle::DriveEncoderDistanceFromCounts(encoderProgressCounts);
+            SensorSnapshot::EncoderObs encoderObservation = SensorSnapshot{}.EncoderObservation();
+            encoderObservation.SetTotalLeftCounts(leftDeltaCounts);
+            encoderObservation.SetTotalRightCounts(rightDeltaCounts);
+            encoderObservation.SetLeftDistanceDeltaM(leftDistanceDeltaM);
+            encoderObservation.SetRightDistanceDeltaM(rightDistanceDeltaM);
+            encoderObservation.SetLeftVelocityMps(leftDistanceDeltaM / kProfileDtSeconds);
+            encoderObservation.SetRightVelocityMps(rightDistanceDeltaM / kProfileDtSeconds);
+            encoderObservation.SetLeftWheelSpeedRadps(
+                Vehicle::WheelSpeedFromLinearVelocity(encoderObservation.LeftVelocityMps()));
+            encoderObservation.SetRightWheelSpeedRadps(
+                Vehicle::WheelSpeedFromLinearVelocity(encoderObservation.RightVelocityMps()));
+            snapshot.PublishEncoderObservation(
+                encoderObservation,
+                true,
+                encoderProgressCounts,
+                encoderProgressCounts,
+                encoderProgressDistanceM,
+                encoderProgressDistanceM);
 
             VehicleState& state = runtime.RuntimeState();
             state.SetSensorSnapshot(snapshot);

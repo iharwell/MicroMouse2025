@@ -175,12 +175,12 @@ namespace MazeMap
         _runtimeState.SetCurrentCommand(_lastControl);
         _lastFanDutyCycle = runtimeFanDuty();
         _lastBatteryVoltageV = runtimeBatteryVoltage();
-        _lastEncoderObs = EncoderObs{};
-        _lastEncoderDtSeconds = 0.0f;
         _prePredictState = _workingFilter.state();
         _prePredictCovariance = _workingFilter.covariance();
         _havePredictionReference = false;
-        _acceptedEncoderUpdateSincePredict = false;
+        _predictionUsesEncoderInput = false;
+        _predictionEncoderInput = SensorSnapshot{}.EncoderObservation();
+        _predictionEncoderDtSeconds = 0.0f;
         (void)_workingFilter.floorVariance(VehicleState::kVf, kMinimumVelocityVariance);
         (void)_workingFilter.floorVariance(VehicleState::kVr, kMinimumVelocityVariance);
         (void)_workingFilter.floorVariance(VehicleState::kYawRate, kMinimumYawRateVariance);
@@ -321,12 +321,12 @@ namespace MazeMap
         if (!EmitDebugTextLine(
                 context,
                 sink,
-                "estimator_dump_last_encoder_obs",
+                "estimator_dump_prediction_encoder_input",
                 "total_left_counts=%ld;total_right_counts=%ld;left_wheel_speed_radps=%.9g;right_wheel_speed_radps=%.9g",
-                static_cast<long>(_lastEncoderObs.TotalLeftCounts()),
-                static_cast<long>(_lastEncoderObs.TotalRightCounts()),
-                static_cast<double>(_lastEncoderObs.LeftWheelSpeedRadps()),
-                static_cast<double>(_lastEncoderObs.RightWheelSpeedRadps())))
+                static_cast<long>(_predictionEncoderInput.TotalLeftCounts()),
+                static_cast<long>(_predictionEncoderInput.TotalRightCounts()),
+                static_cast<double>(_predictionEncoderInput.LeftWheelSpeedRadps()),
+                static_cast<double>(_predictionEncoderInput.RightWheelSpeedRadps())))
         {
             return false;
         }
@@ -388,7 +388,7 @@ namespace MazeMap
             context,
             sink,
             "estimator_dump_update_metrics",
-            "last_update_attempted=%s;last_update_accepted=%s;last_update_nis=%.9g;yaw_rate_innovation_radps=%.9g;yaw_rate_nis=%.9g;forward_accel_innovation_mps2=%.9g;forward_accel_nis=%.9g;right_accel_innovation_mps2=%.9g;right_accel_nis=%.9g;stationary_certified=%s;encoder_prediction_input=%s",
+            "last_update_attempted=%s;last_update_accepted=%s;last_update_nis=%.9g;yaw_rate_innovation_radps=%.9g;yaw_rate_nis=%.9g;forward_accel_innovation_mps2=%.9g;forward_accel_nis=%.9g;right_accel_innovation_mps2=%.9g;right_accel_nis=%.9g;stationary_certified=%s;prediction_encoder_input=%s",
             _lastUpdateAttempted ? "true" : "false",
             _lastUpdateAccepted ? "true" : "false",
             static_cast<double>(_lastUpdateNis),
@@ -399,23 +399,14 @@ namespace MazeMap
             static_cast<double>(_lastRightAccelInnovationMps2),
             static_cast<double>(_lastRightAccelNis),
             _stationaryCertified ? "true" : "false",
-            _acceptedEncoderUpdateSincePredict ? "true" : "false");
+            _predictionUsesEncoderInput ? "true" : "false");
     }
 
     bool Estimator::predict(
         float dt,
         const App::Internal::CommandVector& control) noexcept
     {
-        return predictImpl(dt, control, nullptr, false);
-    }
-
-    bool Estimator::predict(
-        float dt,
-        const App::Internal::CommandVector& control,
-        const EncoderObs& encoderInput,
-        bool encoderInputValid) noexcept
-    {
-        return predictImpl(dt, control, &encoderInput, encoderInputValid);
+        return predictImpl(dt, control);
     }
 
     float Estimator::runtimeFanDuty() const noexcept
@@ -452,15 +443,11 @@ namespace MazeMap
 
     bool Estimator::predictImpl(
         float dt,
-        const App::Internal::CommandVector& control,
-        const EncoderObs* encoderInput,
-        bool encoderInputValid) noexcept
+        const App::Internal::CommandVector& control) noexcept
     {
         return predictWithInterleavedSensorService(
             dt,
             control,
-            encoderInput,
-            encoderInputValid,
             nullptr,
             nullptr);
     }
@@ -468,8 +455,6 @@ namespace MazeMap
     bool Estimator::predictWithInterleavedSensorService(
         float dt,
         const App::Internal::CommandVector& control,
-        const EncoderObs* encoderInput,
-        bool encoderInputValid,
         void* loopHookContext,
         void (*loopHook)(void*) noexcept) noexcept
     {
@@ -484,17 +469,12 @@ namespace MazeMap
             return true;
         }
 
+        const SensorSnapshot& snapshot = _runtimeState.GetSensorSnapshot();
+        const SensorSnapshot::EncoderObs& encoderInput = snapshot.EncoderObservation();
         const bool useEncoderInput =
-            encoderInputValid &&
-            (encoderInput != nullptr) &&
-            std::isfinite(encoderInput->LeftWheelSpeedRadps()) &&
-            std::isfinite(encoderInput->RightWheelSpeedRadps());
-        if (useEncoderInput)
-        {
-            _lastEncoderObs = *encoderInput;
-            _lastEncoderDtSeconds = dt;
-        }
-
+            snapshot.EncoderObservationValid() &&
+            std::isfinite(encoderInput.LeftWheelSpeedRadps()) &&
+            std::isfinite(encoderInput.RightWheelSpeedRadps());
         _prePredictState = _workingFilter.state();
         _prePredictCovariance = _workingFilter.covariance();
         float presentForwardAccelMps2 = 0.0f;
@@ -507,7 +487,7 @@ namespace MazeMap
         _plantModel.plantActivityForState(
             _prePredictState,
             control,
-            useEncoderInput ? encoderInput : nullptr,
+            useEncoderInput ? &encoderInput : nullptr,
             presentForwardAccelMps2,
             presentRightAccelMps2,
             presentYawAccelRadps2,
@@ -521,7 +501,6 @@ namespace MazeMap
         (void)maxContactSaturation;
         (void)totalNormalLoadN;
         _havePredictionReference = true;
-        _acceptedEncoderUpdateSincePredict = useEncoderInput;
         _lastYawRateMeasurementRadps = 0.0f;
         _lastYawRateInnovationRadps = 0.0f;
         _lastYawRateNis = 0.0f;
@@ -531,7 +510,8 @@ namespace MazeMap
         _lastRightAccelNis = 0.0f;
 
         _predictionUsesEncoderInput = useEncoderInput;
-        _predictionEncoderInput = useEncoderInput ? *encoderInput : EncoderObs{};
+        _predictionEncoderInput = useEncoderInput ? encoderInput : SensorSnapshot{}.EncoderObservation();
+        _predictionEncoderDtSeconds = useEncoderInput ? dt : 0.0f;
         const float forwardAccelerationResidualDecayAlpha =
             PlantModel::forwardAccelerationResidualDecayAlpha(dt);
         const float rightAccelerationResidualDecayAlpha =
@@ -543,11 +523,11 @@ namespace MazeMap
             _sqrtProcessNoiseDensity * MazeMap::Math::Sqrtf(dt);
         const float timingForwardSpeedMps =
             useEncoderInput ?
-            std::fabs(_plantModel.measuredLinearSpeedMps(*encoderInput)) :
+            std::fabs(_plantModel.measuredLinearSpeedMps(snapshot)) :
             std::fabs(_prePredictState(VehicleState::kVf));
         const float timingYawRateRadps =
             useEncoderInput ?
-            std::fabs(_plantModel.measuredYawRateRadps(*encoderInput)) :
+            std::fabs(_plantModel.measuredYawRateRadps(snapshot)) :
             std::fabs(_prePredictState(VehicleState::kYawRate));
         predictProcessNoiseSquareRoot(VehicleState::kPx, VehicleState::kPx) =
             (std::max)(
@@ -566,7 +546,7 @@ namespace MazeMap
 
         if (useEncoderInput)
         {
-            // EncoderObs carries wheel speeds only; PlantModel owns the matching wheel-speed covariance model.
+            // The encoder snapshot carries wheel speeds only; PlantModel owns the matching wheel-speed covariance model.
             Eigen::Matrix<float, 2, 2> encoderInputCovarianceRadps2 =
                 _plantModel.encoderPairCovarianceRadps(
                     kGeneralEncoderLinearSpeedSigmaMps,
@@ -589,8 +569,8 @@ namespace MazeMap
                         (std::max)(
                             1.0e-3f,
                             0.05f * MazeMap::Math::Sqrtf(wheelVarianceRadps2));
-                    EncoderObs plusEncoderInput = *encoderInput;
-                    EncoderObs minusEncoderInput = *encoderInput;
+                    SensorSnapshot::EncoderObs plusEncoderInput = encoderInput;
+                    SensorSnapshot::EncoderObs minusEncoderInput = encoderInput;
                     if (wheelColumn == 0)
                     {
                         plusEncoderInput.SetLeftWheelSpeedRadps(
@@ -681,7 +661,7 @@ namespace MazeMap
             (std::clamp)(maxContactUtilization, 0.0f, 1.0f);
         const float driveSaturationIndex = DriveCommandActivityIndex(control);
         const float encoderFaultIndicator =
-            ((encoderInput != nullptr) && !useEncoderInput) ? 1.0f : 0.0f;
+            useEncoderInput ? 0.0f : 1.0f;
         const float sigmaDeltaAfSs =
             kResidualForwardBaseSigmaSsMps2 +
             (kResidualForwardUtilSigmaSsMps2 * utilization * utilization) +
@@ -768,211 +748,6 @@ namespace MazeMap
             (void)_workingFilter.floorVariance(VehicleState::kYawRate, kMinimumYawRateVariance);
         }
         return predicted;
-    }
-
-    bool Estimator::updateEncoderPair(
-        const EncoderObs& observation,
-        float dt,
-        bool updateYaw) noexcept
-    {
-        return updateEncoderPairImpl(observation, dt, updateYaw);
-    }
-
-    Eigen::Matrix<float, 2, 1> Estimator::EncoderBodyMeasurementForState(
-        void* context,
-        const Eigen::Matrix<float, VehicleState::kDimension, 1>& sigmaPoint) noexcept
-    {
-        const Estimator* const core = static_cast<const Estimator*>(context);
-        if (core == nullptr)
-        {
-            return Eigen::Matrix<float, 2, 1>::Zero();
-        }
-
-        const float wheelRadiusM = Vehicle::GetDriveWheelRadiusM();
-        if (!(std::isfinite(wheelRadiusM) && (wheelRadiusM > 0.0f)))
-        {
-            return Eigen::Matrix<float, 2, 1>::Zero();
-        }
-
-        const float forwardSpeedMps =
-            std::isfinite(sigmaPoint(VehicleState::kVf)) ?
-            sigmaPoint(VehicleState::kVf) :
-            0.0f;
-        const float yawRateRadps =
-            std::isfinite(sigmaPoint(VehicleState::kYawRate)) ?
-            sigmaPoint(VehicleState::kYawRate) :
-            0.0f;
-        const float leftWheelSpeedRadps =
-            std::isfinite(core->_lastEncoderObs.LeftWheelSpeedRadps()) ?
-            core->_lastEncoderObs.LeftWheelSpeedRadps() :
-            0.0f;
-        const float rightWheelSpeedRadps =
-            std::isfinite(core->_lastEncoderObs.RightWheelSpeedRadps()) ?
-            core->_lastEncoderObs.RightWheelSpeedRadps() :
-            0.0f;
-        Eigen::Matrix<float, 2, 1> prediction;
-        prediction <<
-            (wheelRadiusM * leftWheelSpeedRadps) -
-                Vehicle::LeftWheelLinearVelocityFromBody(forwardSpeedMps, yawRateRadps),
-            (wheelRadiusM * rightWheelSpeedRadps) -
-                Vehicle::RightWheelLinearVelocityFromBody(forwardSpeedMps, yawRateRadps);
-        return prediction;
-    }
-
-    bool Estimator::updateEncoderPairImpl(
-        const EncoderObs& observation,
-        float dt,
-        bool updateYaw) noexcept
-    {
-        _lastUpdateAttempted =
-            std::isfinite(observation.LeftWheelSpeedRadps()) &&
-            std::isfinite(observation.RightWheelSpeedRadps());
-        _lastUpdateAccepted = false;
-        _lastUpdateNis = 0.0f;
-        if (!_lastUpdateAttempted)
-        {
-            return false;
-        }
-
-        _lastEncoderObs = observation;
-        _lastEncoderDtSeconds =
-            (std::isfinite(dt) && (dt > 0.0f)) ?
-            dt :
-            0.0f;
-
-        if (!updateYaw)
-        {
-            _lastUpdateAccepted = true;
-            return true;
-        }
-
-        Eigen::Matrix<float, 2, 1> measurement_vec;
-        measurement_vec << 0.0f, 0.0f;
-
-        float maxContactRelativeVelocityMps = 0.0f;
-        float maxContactUtilization = 0.0f;
-        float maxContactSaturation = 0.0f;
-        float totalNormalLoadN = 0.0f;
-        float ignoredForwardAccelMps2 = 0.0f;
-        float ignoredRightAccelMps2 = 0.0f;
-        float ignoredYawAccelRadps2 = 0.0f;
-        _plantModel.plantActivityForState(
-            _workingFilter.state(),
-            _lastControl,
-            &observation,
-            ignoredForwardAccelMps2,
-            ignoredRightAccelMps2,
-            ignoredYawAccelRadps2,
-            maxContactRelativeVelocityMps,
-            maxContactUtilization,
-            maxContactSaturation,
-            totalNormalLoadN);
-        (void)maxContactSaturation;
-        (void)totalNormalLoadN;
-        const float absForwardSpeedMps =
-            std::fabs(_workingFilter.state()(VehicleState::kVf));
-        const float absRightSpeedMps =
-            std::fabs(_workingFilter.state()(VehicleState::kVr));
-        const float absYawRateRadps =
-            std::fabs(_workingFilter.state()(VehicleState::kYawRate));
-        const float halfTrackWidthM =
-            0.5f * (std::max)(0.0f, std::fabs(_vehicle.GetTrackWidth()));
-        const float yawSurfaceSpeedMps = halfTrackWidthM * absYawRateRadps;
-        const float contactRelativeSpeedReferenceMps =
-            (std::max)(kContactSpeedScheduleReferenceMps, absForwardSpeedMps + yawSurfaceSpeedMps);
-        const float contactRelativeSpeedUtilization =
-            (std::clamp)(maxContactRelativeVelocityMps / contactRelativeSpeedReferenceMps, 0.0f, 1.0f);
-        const float yawInducedContactSpeedFraction =
-            (std::clamp)(
-                yawSurfaceSpeedMps /
-                    (yawSurfaceSpeedMps + absForwardSpeedMps + kContactSpeedScheduleReferenceMps),
-                0.0f,
-                1.0f);
-        const float utilization =
-            (std::clamp)(maxContactUtilization, 0.0f, 1.0f);
-        const float planarSpeedMps =
-            MazeMap::Math::Sqrtf(
-                (absForwardSpeedMps * absForwardSpeedMps) +
-                (absRightSpeedMps * absRightSpeedMps));
-        const float lowSpeedBlend =
-            (std::clamp)(
-                kContactSpeedScheduleReferenceMps /
-                    (planarSpeedMps + kContactSpeedScheduleReferenceMps),
-                0.0f,
-                1.0f);
-        const float driveSaturationIndex = DriveCommandActivityIndex(_lastControl);
-        const float launchTorqueIndex = lowSpeedBlend * driveSaturationIndex;
-        const float covarianceInflation =
-            1.0f +
-            (kEncoderPseudoUtilizationInflation * utilization * utilization * utilization * utilization) +
-            (kEncoderPseudoContactRelativeSpeedInflation *
-                contactRelativeSpeedUtilization *
-                contactRelativeSpeedUtilization) +
-            (kEncoderPseudoYawInducedContactSpeedInflation *
-                yawInducedContactSpeedFraction *
-                yawInducedContactSpeedFraction) +
-            (kEncoderPseudoLaunchInflation * launchTorqueIndex * launchTorqueIndex);
-        const float modelVarianceMps2 =
-            (kGeneralEncoderLinearSpeedSigmaMps * kGeneralEncoderLinearSpeedSigmaMps) *
-            ((std::isfinite(covarianceInflation) && (covarianceInflation > 0.0f)) ?
-                covarianceInflation :
-                1.0f);
-        Eigen::Matrix<float, 2, 2> measurementCovariance =
-            Eigen::Matrix<float, 2, 2>::Identity() * modelVarianceMps2;
-        const float wheelRadiusM = Vehicle::GetDriveWheelRadiusM();
-        if (std::isfinite(wheelRadiusM) && (wheelRadiusM > 0.0f))
-        {
-            measurementCovariance +=
-                (wheelRadiusM * wheelRadiusM) *
-                _plantModel.encoderPairCovarianceRadps(
-                    kGeneralEncoderLinearSpeedSigmaMps,
-                    kGeneralEncoderYawRateSigmaRadps);
-        }
-        Eigen::Matrix<float, 2, 2> sqrtNoise = Eigen::Matrix<float, 2, 2>::Zero();
-        const Eigen::LLT<Eigen::Matrix<float, 2, 2>> llt(measurementCovariance);
-        if (llt.info() == Eigen::Success)
-        {
-            sqrtNoise = llt.matrixL();
-        }
-        else
-        {
-            sqrtNoise(0, 0) =
-                MazeMap::Math::Sqrtf((std::max)(measurementCovariance(0, 0), 1.0e-8f));
-            sqrtNoise(1, 1) =
-                MazeMap::Math::Sqrtf((std::max)(measurementCovariance(1, 1), 1.0e-8f));
-        }
-
-        const Eigen::Matrix<float, VehicleState::kDimension, 1> priorState = _workingFilter.state();
-        const Eigen::Matrix<float, VehicleState::kDimension, VehicleState::kDimension> priorSqrtCovariance = _workingFilter.sqrtCovariance();
-        _lastUpdateAccepted = _workingFilter.Update<2>(
-            measurement_vec,
-            sqrtNoise,
-            kEncoderBodyNisThreshold,
-            this,
-            &Estimator::EncoderBodyMeasurementForState);
-        _lastUpdateNis = _workingFilter.lastNis();
-
-        if (_lastUpdateAccepted)
-        {
-            constexpr std::array<int, 2> kAllowedBodyIndices = { {
-                VehicleState::kVf,
-                VehicleState::kYawRate
-            } };
-            Eigen::Matrix<float, VehicleState::kDimension, 1> projectedState = priorState;
-            Eigen::Matrix<float, VehicleState::kDimension, VehicleState::kDimension> projectedSqrtCovariance = priorSqrtCovariance;
-            ProjectMaskedStateAndSquareRootCovariance(
-                priorState,
-                priorSqrtCovariance,
-                _workingFilter.state(),
-                _workingFilter.sqrtCovariance(),
-                kAllowedBodyIndices.data(),
-                kAllowedBodyIndices.size(),
-                projectedState,
-                projectedSqrtCovariance);
-            _workingFilter.setStateSquareRootCovariance(projectedState, projectedSqrtCovariance);
-            _acceptedEncoderUpdateSincePredict = true;
-        }
-        return _lastUpdateAccepted;
     }
 
     bool Estimator::updateYawRate(float yawRateRadps) noexcept
@@ -1229,8 +1004,8 @@ namespace MazeMap
                 0.0f,
                 1.0f);
         const float impactEventDtSeconds =
-            (std::isfinite(_lastEncoderDtSeconds) && (_lastEncoderDtSeconds > 0.0f)) ?
-            (std::max)(_lastEncoderDtSeconds, kTimingUncertaintySeconds) :
+            (std::isfinite(_predictionEncoderDtSeconds) && (_predictionEncoderDtSeconds > 0.0f)) ?
+            (std::max)(_predictionEncoderDtSeconds, kTimingUncertaintySeconds) :
             kTimingUncertaintySeconds;
         const float impactEventSigmaMps2 =
             accelFiniteJerkMps3 * impactEventDtSeconds * impactEventActivity;
@@ -1333,12 +1108,12 @@ namespace MazeMap
     bool Estimator::isStationaryCandidate(float yawRateRadps) const noexcept
     {
         return
-            _acceptedEncoderUpdateSincePredict &&
+            _predictionUsesEncoderInput &&
             controlCommandsAreEffectivelyZero() &&
-            std::isfinite(_lastEncoderObs.LeftWheelSpeedRadps()) &&
-            std::fabs(_lastEncoderObs.LeftWheelSpeedRadps()) < kStationaryCandidateMaxEncoderWheelSpeedRadps &&
-            std::isfinite(_lastEncoderObs.RightWheelSpeedRadps()) &&
-            std::fabs(_lastEncoderObs.RightWheelSpeedRadps()) < kStationaryCandidateMaxEncoderWheelSpeedRadps &&
+            std::isfinite(_predictionEncoderInput.LeftWheelSpeedRadps()) &&
+            std::fabs(_predictionEncoderInput.LeftWheelSpeedRadps()) < kStationaryCandidateMaxEncoderWheelSpeedRadps &&
+            std::isfinite(_predictionEncoderInput.RightWheelSpeedRadps()) &&
+            std::fabs(_predictionEncoderInput.RightWheelSpeedRadps()) < kStationaryCandidateMaxEncoderWheelSpeedRadps &&
             std::isfinite(yawRateRadps) &&
             std::fabs(yawRateRadps) < kStationaryCandidateMaxYawRateRadps;
     }
@@ -1348,8 +1123,8 @@ namespace MazeMap
         if (isStationaryCandidate(yawRateRadps))
         {
             _stationaryCandidateDwellS +=
-                (std::isfinite(_lastEncoderDtSeconds) && (_lastEncoderDtSeconds > 0.0f)) ?
-                _lastEncoderDtSeconds :
+                (std::isfinite(_predictionEncoderDtSeconds) && (_predictionEncoderDtSeconds > 0.0f)) ?
+                _predictionEncoderDtSeconds :
                 0.0f;
         }
         else

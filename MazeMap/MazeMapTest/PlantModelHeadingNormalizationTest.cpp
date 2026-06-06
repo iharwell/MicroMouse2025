@@ -34,8 +34,10 @@ namespace MazeMap
             state.SetForwardVelocity(0.5f);
             state.SetRightwardVelocity(0.0f);
             state.SetYawRate(6.0f);
-            state.SetWheelSpeedLeft(Vehicle::WheelSpeedFromLinearVelocity(0.5f));
-            state.SetWheelSpeedRight(Vehicle::WheelSpeedFromLinearVelocity(0.5f));
+            PublishEncoderObservationForWheelSpeedsRadps(
+                state,
+                Vehicle::WheelSpeedFromLinearVelocity(0.5f),
+                Vehicle::WheelSpeedFromLinearVelocity(0.5f));
             PlantModel plant(vehicle, state);
 
             plant.integrate(App::Internal::CommandVector{}, 0.01f);
@@ -58,8 +60,10 @@ namespace MazeMap
             state.SetForwardVelocity(0.5f);
             state.SetRightwardVelocity(0.0f);
             state.SetYawRate(6.0f);
-            state.SetWheelSpeedLeft(Vehicle::WheelSpeedFromLinearVelocity(0.5f));
-            state.SetWheelSpeedRight(Vehicle::WheelSpeedFromLinearVelocity(0.5f));
+            PublishEncoderObservationForWheelSpeedsRadps(
+                state,
+                Vehicle::WheelSpeedFromLinearVelocity(0.5f),
+                Vehicle::WheelSpeedFromLinearVelocity(0.5f));
             PlantModel plant(vehicle, state);
 
             plant.integrate(App::Internal::CommandVector{}, 0.01f);

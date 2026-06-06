@@ -262,7 +262,6 @@
     <ClInclude Include="PinPairStrap.h" />
     <ClInclude Include="Pins.h" />
     <ClInclude Include="PlantModel.h" />
-    <ClInclude Include="EncoderObs.h" />
     <ClInclude Include="ImuAccelObs.h" />
     <ClInclude Include="ProportionalDerivative.h" />
     <ClInclude Include="PDCluster.h" />

@@ -1075,8 +1075,7 @@
             spec.initialYawRateRadps,
             leftWheelSpeedRadps,
             rightWheelSpeedRadps);
-        state.SetWheelSpeedLeft(leftWheelSpeedRadps);
-        state.SetWheelSpeedRight(rightWheelSpeedRadps);
+        state.PublishEncoderWheelSpeedsRadps(leftWheelSpeedRadps, rightWheelSpeedRadps);
         return state;
     }
 
@@ -1092,24 +1091,27 @@
         SensorSnapshot snapshot{};
         snapshot.SetRawYawRateRadps(truth.GetYawRate());
         snapshot.SetYawRateRadps(truth.GetYawRate());
-        snapshot.SetEncoderObservationValid(true);
-        snapshot.SetEncoderDistancesM(wheels.leftDistanceM, wheels.rightDistanceM);
-        MazeMap::EncoderObs encoderObservation{};
+        SensorSnapshot::EncoderObs encoderObservation = SensorSnapshot{}.EncoderObservation();
         encoderObservation.SetLeftDistanceDeltaM(leftDistanceDeltaM);
         encoderObservation.SetRightDistanceDeltaM(rightDistanceDeltaM);
         encoderObservation.SetLeftVelocityMps(MazeMap::Vehicle::WheelLinearVelocityFromWheelSpeed(truth.GetWheelSpeedLeft()));
         encoderObservation.SetRightVelocityMps(MazeMap::Vehicle::WheelLinearVelocityFromWheelSpeed(truth.GetWheelSpeedRight()));
         encoderObservation.SetLeftWheelSpeedRadps(truth.GetWheelSpeedLeft());
         encoderObservation.SetRightWheelSpeedRadps(truth.GetWheelSpeedRight());
-        snapshot.SetEncoderObservation(encoderObservation);
+        snapshot.PublishEncoderObservation(
+            encoderObservation,
+            true,
+            snapshot.LeftEncoderTotalCounts(),
+            snapshot.RightEncoderTotalCounts(),
+            wheels.leftDistanceM,
+            wheels.rightDistanceM);
 
         runtimeState.SetPosition(truth.GetPosition());
         runtimeState.SetHeading(truth.GetHeading());
         runtimeState.SetForwardVelocity(truth.GetForwardVelocity());
         runtimeState.SetRightwardVelocity(truth.GetRightwardVelocity());
         runtimeState.SetYawRate(truth.GetYawRate());
-        runtimeState.SetWheelSpeedLeft(truth.GetWheelSpeedLeft());
-        runtimeState.SetWheelSpeedRight(truth.GetWheelSpeedRight());
+        runtimeState.PublishEncoderWheelSpeedsRadps(truth.GetWheelSpeedLeft(), truth.GetWheelSpeedRight());
         runtimeState.SetForwardAcceleration(0.0f);
         runtimeState.SetRightAcceleration(0.0f);
         runtimeState.SetYawAccel(0.0f);
@@ -1175,8 +1177,9 @@
         MazeMap::VehicleState state{};
         state.SetHeading(yawRad);
         state.SetForwardVelocity(forwardMps);
-        state.SetWheelSpeedLeft(MazeMap::Vehicle::WheelSpeedFromLinearVelocity(forwardMps));
-        state.SetWheelSpeedRight(MazeMap::Vehicle::WheelSpeedFromLinearVelocity(forwardMps));
+        state.PublishEncoderWheelSpeedsRadps(
+            MazeMap::Vehicle::WheelSpeedFromLinearVelocity(forwardMps),
+            MazeMap::Vehicle::WheelSpeedFromLinearVelocity(forwardMps));
         return state;
     }
 
@@ -1222,7 +1225,7 @@
 
         MazeMap::VehicleState& runtimeState = runtime.RuntimeState();
         SensorSnapshot snapshot = BuildDriveManeuverSensorSnapshot(yawRateRadps);
-        MazeMap::EncoderObs encoderObservation = snapshot.EncoderObservation();
+        SensorSnapshot::EncoderObs encoderObservation = snapshot.EncoderObservation();
         encoderObservation.SetTotalLeftCounts(leftCounts);
         encoderObservation.SetTotalRightCounts(rightCounts);
         encoderObservation.SetLeftDistanceDeltaM(static_cast<float>(leftCounts) * distancePerCountM);
@@ -1235,13 +1238,15 @@
             encoderObservation.SetLeftWheelSpeedRadps(MazeMap::Vehicle::WheelSpeedFromLinearVelocity(encoderObservation.LeftVelocityMps()));
             encoderObservation.SetRightWheelSpeedRadps(MazeMap::Vehicle::WheelSpeedFromLinearVelocity(encoderObservation.RightVelocityMps()));
         }
-        snapshot.SetEncoderObservation(encoderObservation, true);
         const std::int64_t leftEncoderTotalCounts =
             runtimeState.GetSensorSnapshot().LeftEncoderTotalCounts() + static_cast<std::int64_t>(leftCounts);
         const std::int64_t rightEncoderTotalCounts =
             runtimeState.GetSensorSnapshot().RightEncoderTotalCounts() + static_cast<std::int64_t>(rightCounts);
-        snapshot.SetEncoderTotals(leftEncoderTotalCounts, rightEncoderTotalCounts);
-        snapshot.SetEncoderDistancesM(
+        snapshot.PublishEncoderObservation(
+            encoderObservation,
+            true,
+            leftEncoderTotalCounts,
+            rightEncoderTotalCounts,
             MazeMap::Vehicle::DriveEncoderDistanceFromCounts(leftEncoderTotalCounts),
             MazeMap::Vehicle::DriveEncoderDistanceFromCounts(rightEncoderTotalCounts));
 
@@ -1263,11 +1268,6 @@
             !estimator.predict(dtSeconds, appliedControl))
         {
             return false;
-        }
-
-        if (snapshot.EncoderObservationValid())
-        {
-            (void)estimator.updateEncoderPair(snapshot.EncoderObservation(), dtSeconds, false);
         }
 
         if (std::isfinite(snapshot.YawRateRadps()))
@@ -1306,8 +1306,9 @@
         (void)runtime.Estimator().ResetPose(0.0f, -projectedForwardDistanceM, 0.0f);
         MazeMap::VehicleState& runtimeState = runtime.RuntimeState();
         runtimeState.SetForwardVelocity(kSmoothManeuverEntrySpeedMps);
-        runtimeState.SetWheelSpeedLeft(MazeMap::Vehicle::WheelSpeedFromLinearVelocity(kSmoothManeuverEntrySpeedMps));
-        runtimeState.SetWheelSpeedRight(MazeMap::Vehicle::WheelSpeedFromLinearVelocity(kSmoothManeuverEntrySpeedMps));
+        runtimeState.PublishEncoderWheelSpeedsRadps(
+            MazeMap::Vehicle::WheelSpeedFromLinearVelocity(kSmoothManeuverEntrySpeedMps),
+            MazeMap::Vehicle::WheelSpeedFromLinearVelocity(kSmoothManeuverEntrySpeedMps));
         (void)ApplyEncoderObservation(
             runtime,
             kSmoothManeuverEntrySpeedMps * kTickSeconds,

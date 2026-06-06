@@ -533,6 +533,7 @@ namespace MazeMap::App::Internal
 
         const CommandVector control = runtimeState.GetCurrentCommand();
         timing._encoderReadDoneUs = static_cast<std::uint32_t>(micros());
+        runtimeState.SetSensorSnapshot(snapshot);
 
         MazeMap::Estimator& estimator = _runtime->Estimator();
         if (std::isfinite(dtSeconds) && (dtSeconds > 0.0f))
@@ -554,8 +555,6 @@ namespace MazeMap::App::Internal
             predictOk = estimator.predictWithInterleavedSensorService(
                 dtSeconds,
                 control,
-                &snapshot.EncoderObservation(),
-                snapshot.EncoderObservationValid(),
                 captureSensors ? this : nullptr,
                 captureSensors ? &LoopController::ServiceInterlacedSensorCapture : nullptr);
             if (!predictOk)

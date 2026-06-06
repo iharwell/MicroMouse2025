@@ -42,9 +42,6 @@
     <ClInclude Include="EstimatorMotionUpdateAccess.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="EstimatorEncoderMotionUpdateTestSupport.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="EstimatorControlMotionUpdateTestSupport.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -332,9 +329,6 @@
     <ClCompile Include="EstimatorDiagnosticDumpTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="EstimatorEncoderNoiseTuningTest.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="EstimatorExactStationaryLockTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -342,18 +336,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="EstimatorLaunchTransientTest.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="EstimatorNonzeroStationaryEncoderCountsTest.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="EstimatorPivotCommandTest.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="EstimatorPivotConflictEncoderTest.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="EstimatorPivotConflictYawTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="EstimatorPlanarAccelChannelSensitivityTest.cpp">
@@ -386,34 +368,19 @@
     <ClCompile Include="EstimatorActiveCommandStorageTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="EstimatorCorrectedYawRateUpdateTest.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="EstimatorControlDirectionTrackingTest.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="EstimatorDirectEncoderUpdateTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="EstimatorFeedforwardRuntimeTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="EstimatorLatestEncoderUpdateTest.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="EstimatorLaunchEncoderYawUpdateTest.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="EstimatorMovingEncoderUpdateTest.cpp">
+    <ClCompile Include="EstimatorLaunchEncoderPredictionTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="EstimatorMovingPredictResidualTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="EstimatorOpposedControlUpdateTest.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="EstimatorRejectedEncoderUpdateTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="EstimatorSplitCommandPredictTest.cpp">
@@ -429,15 +396,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="EstimatorWallUpdateTest.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="EstimatorYawResidualCrossCovarianceTest.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="EstimatorZeroVelocityEncoderUpdateTest.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="EstimatorEncoderMotionUpdateTestSupport.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="EstimatorControlMotionUpdateTestSupport.cpp">

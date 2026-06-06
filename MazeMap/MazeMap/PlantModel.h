@@ -5,8 +5,8 @@
 #include "Defines.h"
 #include "EigenCompat.h"
 #include "CommandVector.h"
-#include "EncoderObs.h"
 #include "Maze.h"
+#include "SensorSnapshot.h"
 #include "SensorMount.h"
 #include "Vehicle.h"
 #include "VehicleState.h"
@@ -68,24 +68,8 @@ namespace MazeMap
         static float forwardAccelerationResidualDecayAlpha(float dtS) noexcept;
         static float rightAccelerationResidualDecayAlpha(float dtS) noexcept;
         static float yawAccelerationResidualDecayAlpha(float dtS) noexcept;
-        Eigen::Matrix<float, 2, 2> encoderPairSqrtNoise(
-            const EncoderObs& observation,
-            float stationaryLinearSpeedSigmaMps,
-            float generalLinearSpeedSigmaMps,
-            float generalYawRateSigmaRadps) const noexcept;
-        float stationaryEncoderWheelSpeedSigmaRadps(float stationaryLinearSpeedSigmaMps) const noexcept;
-        float measuredLinearSpeedMps(const EncoderObs& observation) const noexcept;
-        float measuredYawRateRadps(const EncoderObs& observation) const noexcept;
-        float measuredYawRateVarianceRadps2(
-            const EncoderObs& observation,
-            float stationaryLinearSpeedSigmaMps,
-            float generalLinearSpeedSigmaMps,
-            float generalYawRateSigmaRadps) const noexcept;
-        float measuredWheelVarianceRadps2(
-            const EncoderObs& observation,
-            float stationaryLinearSpeedSigmaMps,
-            float generalLinearSpeedSigmaMps,
-            float generalYawRateSigmaRadps) const noexcept;
+        float measuredLinearSpeedMps(const SensorSnapshot& snapshot) const noexcept;
+        float measuredYawRateRadps(const SensorSnapshot& snapshot) const noexcept;
         float sustainedCombinedAccelerationUsage(float accelerationMps2) const noexcept;
         float nominalCombinedAccelerationUsage(float accelerationMps2) const noexcept;
         float peakCombinedAccelerationUsage(float accelerationMps2) const noexcept;
@@ -168,18 +152,18 @@ namespace MazeMap
         static constexpr float kDefaultAggregateContactYawMomentCorrectionBlendForceKnee = 0.10f;
         static constexpr float kDefaultAggregateContactYawMomentCorrectionForceRelWeight = 0.75f;
         static constexpr float kDefaultAggregateContactYawMomentCorrectionForceSpeedFadeMps = 0.64f;
-        static constexpr float kDefaultAggregateContactYawMomentCorrectionForceSlidingMomentNm = 0.067416756f;
+        static constexpr float kDefaultAggregateContactYawMomentCorrectionForceSlidingMomentNm = 0.0f;
         static constexpr float kDefaultAggregateContactYawMomentCorrectionVariantCRelativeSpeedKneeMps = 0.060f;
         static constexpr float kDefaultAggregateContactYawMomentCorrectionVariantCForwardSpeedKneeMps = 0.700f;
-        static constexpr float kAggregateContactYawMomentCorrectionVariantCLongLowRelCoeff = -3.40047972f;
-        static constexpr float kAggregateContactYawMomentCorrectionVariantCRightBaseCoeff = 13.2601696f;
-        static constexpr float kAggregateContactYawMomentCorrectionVariantCForceMomentHighForwardCoeff = -4.82022237f;
-        static constexpr float kAggregateContactYawMomentCorrectionVariantCRightUtilCoeff = -23.1307703f;
-        static constexpr float kAggregateContactYawMomentCorrectionVariantCLongBaseCoeff = -0.698421232f;
-        static constexpr float kAggregateContactYawMomentCorrectionVariantCLongUtilCoeff = 1.44882457f;
-        static constexpr float kAggregateContactYawMomentCorrectionVariantCRightLowRelCoeff = 15.6895342f;
-        static constexpr float kAggregateContactYawMomentCorrectionVariantCLongHighForwardCoeff = 5.50859152f;
-        static constexpr float kAggregateContactYawMomentCorrectionVariantCRightHighForwardCoeff = -29.7563404f;
+        static constexpr float kAggregateContactYawMomentCorrectionVariantCLongLowRelCoeff = 0.0f;
+        static constexpr float kAggregateContactYawMomentCorrectionVariantCRightBaseCoeff = 0.0f;
+        static constexpr float kAggregateContactYawMomentCorrectionVariantCForceMomentHighForwardCoeff = 0.0f;
+        static constexpr float kAggregateContactYawMomentCorrectionVariantCRightUtilCoeff = 0.0f;
+        static constexpr float kAggregateContactYawMomentCorrectionVariantCLongBaseCoeff = 0.0f;
+        static constexpr float kAggregateContactYawMomentCorrectionVariantCLongUtilCoeff = 0.0f;
+        static constexpr float kAggregateContactYawMomentCorrectionVariantCRightLowRelCoeff = 0.0f;
+        static constexpr float kAggregateContactYawMomentCorrectionVariantCLongHighForwardCoeff = 0.0f;
+        static constexpr float kAggregateContactYawMomentCorrectionVariantCRightHighForwardCoeff = 0.0f;
         static constexpr float kFrontLoadFraction = 0.5f;
         static constexpr float kMuFront = 1.65f;
         static constexpr float kMuRear = 1.65f;
@@ -303,12 +287,12 @@ namespace MazeMap
             const Eigen::Matrix<float, VehicleState::kDimension, 1>& state,
             const App::Internal::CommandVector& control,
             float dtS,
-            const EncoderObs* encoderInput) const noexcept;
+            const SensorSnapshot::EncoderObs* encoderInput) const noexcept;
         // `control` is the active command for the state interval whose activity is calculated.
         void plantActivityForState(
             const Eigen::Matrix<float, VehicleState::kDimension, 1>& state,
             const App::Internal::CommandVector& control,
-            const EncoderObs* encoderInput,
+            const SensorSnapshot::EncoderObs* encoderInput,
             float& forwardAccelMps2,
             float& rightAccelMps2,
             float& yawAccelRadps2,
@@ -319,7 +303,7 @@ namespace MazeMap
         Eigen::Vector2f backLeftImuPlanarAccelerationForState(
             const Eigen::Matrix<float, VehicleState::kDimension, 1>& state,
             const App::Internal::CommandVector& control,
-            const EncoderObs* encoderInput) const noexcept;
+            const SensorSnapshot::EncoderObs* encoderInput) const noexcept;
         Eigen::Matrix<float, 2, 2> encoderPairCovarianceRadps(
             float linearSpeedSigmaMps,
             float yawRateSigmaRadps) const noexcept;
@@ -328,7 +312,7 @@ namespace MazeMap
             const App::Internal::CommandVector& control,
             float& leftAppliedBankTorqueNm,
             float& rightAppliedBankTorqueNm,
-            const EncoderObs* encoderInput) const noexcept;
+            const SensorSnapshot::EncoderObs* encoderInput) const noexcept;
         static bool WriteDebugTextLine(
             void* context,
             bool (*sink)(void* context, const char* type, const char* format, std::va_list args) noexcept,
@@ -366,7 +350,7 @@ namespace MazeMap
         PlantDerivatives forwardStep(
             const Eigen::Matrix<float, VehicleState::kDimension, 1>& state,
             const App::Internal::CommandVector& control,
-            const EncoderObs* encoderInput) const noexcept;
+            const SensorSnapshot::EncoderObs* encoderInput) const noexcept;
         PlantDerivatives forwardStepFromAppliedBankTorques(
             const Eigen::Matrix<float, VehicleState::kDimension, 1>& state,
             float leftAppliedBankTorqueNm,
@@ -375,26 +359,26 @@ namespace MazeMap
             const Eigen::Matrix<float, VehicleState::kDimension, 1>& state,
             float leftAppliedBankTorqueNm,
             float rightAppliedBankTorqueNm,
-            const EncoderObs* encoderInput) const noexcept;
+            const SensorSnapshot::EncoderObs* encoderInput) const noexcept;
         WheelKinematics wheelKinematics(
             const Eigen::Matrix<float, VehicleState::kDimension, 1>& state,
-            const EncoderObs* encoderInput) const noexcept;
+            const SensorSnapshot::EncoderObs* encoderInput) const noexcept;
         Eigen::Vector2f imuPlanarAcceleration(
             const Eigen::Matrix<float, VehicleState::kDimension, 1>& state,
             const App::Internal::CommandVector& control,
-            const EncoderObs* encoderInput) const noexcept;
+            const SensorSnapshot::EncoderObs* encoderInput) const noexcept;
         Eigen::Matrix<float, VehicleState::kDimension, 1> integrateAppliedBankTorques(
             const Eigen::Matrix<float, VehicleState::kDimension, 1>& state,
             float leftAppliedBankTorqueNm,
             float rightAppliedBankTorqueNm,
             float dtS,
-            const EncoderObs* encoderInput) const noexcept;
+            const SensorSnapshot::EncoderObs* encoderInput) const noexcept;
         Eigen::Matrix<float, VehicleState::kDimension, 1> predictStateWithAppliedBankTorques(
             const Eigen::Matrix<float, VehicleState::kDimension, 1>& state,
             float leftAppliedBankTorqueNm,
             float rightAppliedBankTorqueNm,
             float dtS,
-            const EncoderObs* encoderInput) const noexcept;
+            const SensorSnapshot::EncoderObs* encoderInput) const noexcept;
         static Eigen::Matrix<float, VehicleState::kDimension, 1> advanceStateFromDerivatives(
             const Eigen::Matrix<float, VehicleState::kDimension, 1>& currentState,
             const PlantDerivatives& evaluatedStep,

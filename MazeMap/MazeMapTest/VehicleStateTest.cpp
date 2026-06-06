@@ -2,10 +2,12 @@
 #include "CppUnitTest.h"
 
 #include "..\MazeMap\PlantModel.h"
+#include "..\MazeMap\SensorSnapshot.h"
 #include "..\MazeMap\Vehicle.h"
 #include "..\MazeMap\VehicleState.h"
 
 #include <cstdarg>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
@@ -21,6 +23,68 @@ namespace MazeMap
     {
         constexpr float kStationaryEncoderVelocitySigmaMps = 0.002936f;
         constexpr float kImuYawRateSigmaRadps = 0.0010954451f;
+
+        float DtSecondsForCountWheelSpeed(
+            const std::int32_t counts,
+            const float wheelSpeedRadps) noexcept
+        {
+            const float wheelLinearMps = Vehicle::WheelLinearVelocityFromWheelSpeed(wheelSpeedRadps);
+            if ((counts == 0) ||
+                !std::isfinite(wheelLinearMps) ||
+                !(std::fabs(wheelLinearMps) > 0.0f))
+            {
+                return 0.001f;
+            }
+
+            return std::fabs(
+                Vehicle::DriveEncoderDistanceFromCounts(counts) /
+                wheelLinearMps);
+        }
+
+        void PublishEncoderObservationFromCountDeltas(
+            VehicleState& state,
+            const std::int32_t leftDeltaCounts,
+            const std::int32_t rightDeltaCounts,
+            const float dtSeconds) noexcept
+        {
+            const float leftDistanceDeltaM =
+                Vehicle::DriveEncoderDistanceFromCounts(leftDeltaCounts);
+            const float rightDistanceDeltaM =
+                Vehicle::DriveEncoderDistanceFromCounts(rightDeltaCounts);
+            const float invDtSeconds =
+                (std::isfinite(dtSeconds) && (dtSeconds > 0.0f)) ?
+                (1.0f / dtSeconds) :
+                0.0f;
+
+            SensorSnapshot::EncoderObs encoderObservation = SensorSnapshot{}.EncoderObservation();
+            encoderObservation.SetTotalLeftCounts(leftDeltaCounts);
+            encoderObservation.SetTotalRightCounts(rightDeltaCounts);
+            encoderObservation.SetLeftDistanceDeltaM(leftDistanceDeltaM);
+            encoderObservation.SetRightDistanceDeltaM(rightDistanceDeltaM);
+            encoderObservation.SetLeftVelocityMps(leftDistanceDeltaM * invDtSeconds);
+            encoderObservation.SetRightVelocityMps(rightDistanceDeltaM * invDtSeconds);
+            encoderObservation.SetLeftWheelSpeedRadps(
+                Vehicle::WheelSpeedFromLinearVelocity(encoderObservation.LeftVelocityMps()));
+            encoderObservation.SetRightWheelSpeedRadps(
+                Vehicle::WheelSpeedFromLinearVelocity(encoderObservation.RightVelocityMps()));
+
+            const SensorSnapshot& previousSnapshot = state.GetSensorSnapshot();
+            const std::int64_t leftTotalCounts =
+                previousSnapshot.LeftEncoderTotalCounts() +
+                static_cast<std::int64_t>(leftDeltaCounts);
+            const std::int64_t rightTotalCounts =
+                previousSnapshot.RightEncoderTotalCounts() +
+                static_cast<std::int64_t>(rightDeltaCounts);
+            SensorSnapshot snapshot = previousSnapshot;
+            snapshot.PublishEncoderObservation(
+                encoderObservation,
+                true,
+                leftTotalCounts,
+                rightTotalCounts,
+                Vehicle::DriveEncoderDistanceFromCounts(leftTotalCounts),
+                Vehicle::DriveEncoderDistanceFromCounts(rightTotalCounts));
+            state.SetSensorSnapshot(snapshot);
+        }
 
 #define VEHICLE_STATE_LOG_TEST_ROW_FIELDS(X) \
     X(VehicleStateLogEntry, ukf_state)
@@ -100,8 +164,11 @@ namespace MazeMap
             stationaryState.SetForwardVelocity(0.0f);
             stationaryState.SetRightwardVelocity(0.0f);
             stationaryState.SetYawRate(0.5f * (3.0f * kImuYawRateSigmaRadps));
-            stationaryState.SetWheelSpeedLeft(0.5f * wheelSpeedThresholdRadps);
-            stationaryState.SetWheelSpeedRight(-0.5f * wheelSpeedThresholdRadps);
+            PublishEncoderObservationFromCountDeltas(
+                stationaryState,
+                1,
+                -1,
+                DtSecondsForCountWheelSpeed(1, 0.5f * wheelSpeedThresholdRadps));
             Assert::IsTrue(stationaryState.IsStationary());
 
             VehicleState movingState = stationaryState;
@@ -113,7 +180,11 @@ namespace MazeMap
             Assert::IsFalse(movingState.IsStationary());
 
             movingState = stationaryState;
-            movingState.SetWheelSpeedLeft(1.1f * wheelSpeedThresholdRadps);
+            PublishEncoderObservationFromCountDeltas(
+                movingState,
+                11,
+                -5,
+                DtSecondsForCountWheelSpeed(11, 1.1f * wheelSpeedThresholdRadps));
             Assert::IsFalse(movingState.IsStationary());
         }
 

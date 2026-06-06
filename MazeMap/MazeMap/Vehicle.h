@@ -3,8 +3,8 @@
 #include "Defines.h"
 #include "Direction.h"
 #include "CircularBuffer.h"
-#include "EncoderObs.h"
 #include "Imu.h"
+#include "SensorSnapshot.h"
 #include "SensorMount.h"
 #include "WallSensor.h"
 #include "MotorEncoderDrive.h"
@@ -118,7 +118,7 @@ namespace MazeMap
 
         void ApplyMotorCommand(const App::Internal::CommandVector& command) noexcept;
         void ResetDriveEncoders() noexcept;
-        EncoderObs CaptureEncoderObservation(float dtSeconds) noexcept;
+        void CaptureEncoderObservation(SensorSnapshot::EncoderObs& observation, float dtSeconds) noexcept;
     public:
         Vehicle();
 

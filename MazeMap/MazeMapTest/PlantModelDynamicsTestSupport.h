@@ -22,6 +22,13 @@ namespace MazeMap
 
         void AppendMotionState(std::wstringstream& message, const VehicleState& state);
 
+        void PublishEncoderObservationForWheelSpeedsRadps(
+            VehicleState& state,
+            const float leftWheelSpeedRadps,
+            const float rightWheelSpeedRadps,
+            const float dtSeconds = 0.0f,
+            const bool valid = true) noexcept;
+
         float MaxPreProjectionUtilizationForBank(
             const float leftWheelSpeedRadps,
             const float rightWheelSpeedRadps,

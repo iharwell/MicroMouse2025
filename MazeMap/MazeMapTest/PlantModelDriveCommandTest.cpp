@@ -1,7 +1,8 @@
 #include "pch.h"
 #include "CppUnitTest.h"
 
-#include "..\MazeMap\EncoderObs.h"
+#include "PlantModelDynamicsTestSupport.h"
+
 #include "..\MazeMap\PlantModel.h"
 #include "..\MazeMap\Vehicle.h"
 #include "..\MazeMap\VehicleState.h"
@@ -179,8 +180,10 @@ namespace MazeMap
             PlantModel plant(vehicle, state);
             state.SetForwardVelocity(0.35f);
             state.SetYawRate(0.0f);
-            state.SetWheelSpeedLeft(-30.0f);
-            state.SetWheelSpeedRight(70.0f);
+            PlantModelDynamicsTestSupport::PublishEncoderObservationForWheelSpeedsRadps(
+                state,
+                -30.0f,
+                70.0f);
 
             const App::Internal::CommandVector control =
                 plant.ComputeFeedforward(4.0f, 0.0f);
@@ -228,16 +231,20 @@ namespace MazeMap
                 restState.GetYawRate(),
                 leftWheelSpeedRadps,
                 rightWheelSpeedRadps);
-            restState.SetWheelSpeedLeft(leftWheelSpeedRadps);
-            restState.SetWheelSpeedRight(rightWheelSpeedRadps);
+            PlantModelDynamicsTestSupport::PublishEncoderObservationForWheelSpeedsRadps(
+                restState,
+                leftWheelSpeedRadps,
+                rightWheelSpeedRadps);
             PlantModel slowPlant(vehicle, restState);
             const App::Internal::CommandVector slowControl =
                 slowPlant.ComputeFeedforward(4.0f, 0.0f);
 
             VehicleState movingState;
             movingState.SetForwardVelocity(0.75f);
-            movingState.SetWheelSpeedLeft(0.0f);
-            movingState.SetWheelSpeedRight(0.0f);
+            PlantModelDynamicsTestSupport::PublishEncoderObservationForWheelSpeedsRadps(
+                movingState,
+                0.0f,
+                0.0f);
             PlantModel movingPlant(vehicle, movingState);
             const App::Internal::CommandVector movingControl =
                 movingPlant.ComputeFeedforward(4.0f, 0.0f);
@@ -313,8 +320,10 @@ namespace MazeMap
             PlantModel plant(vehicle, runtimeState);
 
             runtimeState.SetForwardVelocity(0.20f);
-            runtimeState.SetWheelSpeedLeft(Vehicle::WheelSpeedFromLinearVelocity(runtimeState.GetForwardVelocity()));
-            runtimeState.SetWheelSpeedRight(Vehicle::WheelSpeedFromLinearVelocity(runtimeState.GetForwardVelocity()));
+            PlantModelDynamicsTestSupport::PublishEncoderObservationForWheelSpeedsRadps(
+                runtimeState,
+                Vehicle::WheelSpeedFromLinearVelocity(runtimeState.GetForwardVelocity()),
+                Vehicle::WheelSpeedFromLinearVelocity(runtimeState.GetForwardVelocity()));
             const App::Internal::CommandVector command =
                 plant.ComputeFeedforward(requestedAccelMps2, 0.0f);
             const float initialVelocityMps = runtimeState.GetForwardVelocity();
@@ -445,26 +454,25 @@ namespace MazeMap
             }
         }
 
-        TEST_METHOD(PlantModelWheelProjectionRoundTripsVehicleBodyVelocity)
+        TEST_METHOD(VehicleWheelProjectionMatchesFormerPlantModelEncoderMeasurementRoundTrip)
         {
             Vehicle vehicle;
-            VehicleState runtimeState;
-            PlantModel plant(vehicle, runtimeState);
             constexpr float forwardMps = 1.0f;
             constexpr float yawRateRadps = 2.0f;
             float leftWheelSpeedRadps = 0.0f;
             float rightWheelSpeedRadps = 0.0f;
             vehicle.WheelSpeedsFromBodyVelocity(forwardMps, yawRateRadps, leftWheelSpeedRadps, rightWheelSpeedRadps);
-            EncoderObs observation{};
-            observation.SetLeftWheelSpeedRadps(leftWheelSpeedRadps);
-            observation.SetRightWheelSpeedRadps(rightWheelSpeedRadps);
-            const float measuredLinearSpeedMps = plant.measuredLinearSpeedMps(observation);
-            const float measuredYawRateRadps = plant.measuredYawRateRadps(observation);
+            const float leftWheelLinearMps = Vehicle::WheelLinearVelocityFromWheelSpeed(leftWheelSpeedRadps);
+            const float rightWheelLinearMps = Vehicle::WheelLinearVelocityFromWheelSpeed(rightWheelSpeedRadps);
+            const float measuredLinearSpeedMps =
+                Vehicle::BodyForwardVelocityFromWheelLinear(leftWheelLinearMps, rightWheelLinearMps);
+            const float measuredYawRateRadps =
+                Vehicle::BodyYawRateFromWheelLinear(leftWheelLinearMps, rightWheelLinearMps);
 
             {
                 std::wstringstream message;
                 message <<
-                    L"PlantModelWheelProjectionRoundTripsVehicleBodyVelocity\n"
+                    L"VehicleWheelProjectionMatchesFormerPlantModelEncoderMeasurementRoundTrip\n"
                     L"field=measured_linear_speed_mps\n"
                     L"actual=" << measuredLinearSpeedMps << L"\n"
                     L"expected=" << forwardMps << L"\n"
@@ -476,7 +484,7 @@ namespace MazeMap
             {
                 std::wstringstream message;
                 message <<
-                    L"PlantModelWheelProjectionRoundTripsVehicleBodyVelocity\n"
+                    L"VehicleWheelProjectionMatchesFormerPlantModelEncoderMeasurementRoundTrip\n"
                     L"field=measured_yaw_rate_radps\n"
                     L"actual=" << measuredYawRateRadps << L"\n"
                     L"expected=" << yawRateRadps << L"\n"
@@ -488,7 +496,7 @@ namespace MazeMap
             {
                 std::wstringstream message;
                 message <<
-                    L"PlantModelWheelProjectionRoundTripsVehicleBodyVelocity\n"
+                    L"VehicleWheelProjectionMatchesFormerPlantModelEncoderMeasurementRoundTrip\n"
                     L"field=left_wheel_speed_radps\n"
                     L"actual=" << leftWheelSpeedRadps << L"\n"
                     L"right_wheel_speed_radps=" << rightWheelSpeedRadps << L"\n"

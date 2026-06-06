@@ -33,30 +33,34 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(EncoderYawMeasurementPreservesClockwisePositiveSign)
+        TEST_METHOD(VehicleWheelYawProjectionMatchesFormerPlantModelEncoderMeasurement)
         {
-            TestRuntime runtime;
-            EncoderObs observation{};
+            constexpr float forwardMps = 0.40f;
+            constexpr float yawRateRadps = 2.0f;
             float leftWheelSpeedRadps = 0.0f;
             float rightWheelSpeedRadps = 0.0f;
             Vehicle::WheelSpeedsFromBodyVelocity(
-                0.40f,
-                2.0f,
+                forwardMps,
+                yawRateRadps,
                 leftWheelSpeedRadps,
                 rightWheelSpeedRadps);
-            observation.SetLeftWheelSpeedRadps(leftWheelSpeedRadps);
-            observation.SetRightWheelSpeedRadps(rightWheelSpeedRadps);
-            const float actualYawRateRadps = runtime.plant.measuredYawRateRadps(observation);
+            const float actualYawRateRadps =
+                Vehicle::BodyYawRateFromWheelLinear(
+                    Vehicle::WheelLinearVelocityFromWheelSpeed(leftWheelSpeedRadps),
+                    Vehicle::WheelLinearVelocityFromWheelSpeed(rightWheelSpeedRadps));
             std::wstringstream message;
             message << L"PM20_WHEEL_YAW_SIGN"
                 << L"\nfield=measured_yaw_rate_radps"
                 << L"\nactual=" << actualYawRateRadps
-                << L"\ncriterion=actual>0"
-                << L"\nleft_wheel_speed_radps=" << observation.LeftWheelSpeedRadps()
-                << L"\nright_wheel_speed_radps=" << observation.RightWheelSpeedRadps();
+                << L"\nexpected=" << yawRateRadps
+                << L"\ncriterion=abs(actual - expected) <= 1e-6"
+                << L"\nleft_wheel_speed_radps=" << leftWheelSpeedRadps
+                << L"\nright_wheel_speed_radps=" << rightWheelSpeedRadps;
 
-            Assert::IsTrue(
-                actualYawRateRadps > 0.0f,
+            Assert::AreEqual(
+                yawRateRadps,
+                actualYawRateRadps,
+                1.0e-6f,
                 message.str().c_str());
         }
 

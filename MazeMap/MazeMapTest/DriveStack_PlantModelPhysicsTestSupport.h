@@ -3,18 +3,20 @@
 #include "..\MazeMap\CommandVector.h"
 #include "..\MazeMap\Defines.h"
 #include "..\MazeMap\EigenCompat.h"
-#include "..\MazeMap\EncoderObs.h"
 #include "..\MazeMap\PlantModel.h"
+#include "..\MazeMap\SensorSnapshot.h"
 #include "..\MazeMap\Vehicle.h"
 #include "..\MazeMap\VehicleState.h"
 
 #include <cmath>
+#include <cstdint>
 
 namespace MazeMap
 {
     namespace DriveStackPlantModelPhysicsTestSupport
     {
         inline constexpr float kDirectDtSeconds = 0.001f;
+        inline constexpr float kSeedEncoderCountsPerRadps = 10000.0f;
 
         struct TestRuntime final
         {
@@ -28,6 +30,96 @@ namespace MazeMap
                 vehicle.SetFanDuty(fanDuty);
             }
         };
+
+        inline std::int32_t EncoderDeltaCountsFromWheelSpeedRadps(
+            const float wheelSpeedRadps,
+            const float dtSeconds) noexcept
+        {
+            const float distancePerCountM = Vehicle::DriveEncoderDistanceFromCounts(1);
+            if (!std::isfinite(wheelSpeedRadps) ||
+                !std::isfinite(dtSeconds) ||
+                !(dtSeconds > 0.0f) ||
+                !(distancePerCountM > 0.0f))
+            {
+                return 0;
+            }
+
+            return static_cast<std::int32_t>(
+                std::lround(
+                    (Vehicle::WheelLinearVelocityFromWheelSpeed(wheelSpeedRadps) * dtSeconds) /
+                    distancePerCountM));
+        }
+
+        inline float ResolveSeedEncoderObservationDtSeconds(const float dtSeconds) noexcept
+        {
+            if (std::isfinite(dtSeconds) && (dtSeconds > 0.0f))
+            {
+                return dtSeconds;
+            }
+
+            const float wheelRadiusM = Vehicle::GetDriveWheelRadiusM();
+            const float distancePerCountM = Vehicle::DriveEncoderDistanceFromCounts(1);
+            if (!(wheelRadiusM > 0.0f) ||
+                !std::isfinite(wheelRadiusM) ||
+                !(distancePerCountM > 0.0f) ||
+                !std::isfinite(distancePerCountM))
+            {
+                return kDirectDtSeconds;
+            }
+
+            return (kSeedEncoderCountsPerRadps * distancePerCountM) / wheelRadiusM;
+        }
+
+        inline void PublishEncoderObservationForWheelSpeedsRadps(
+            VehicleState& state,
+            const float leftWheelSpeedRadps,
+            const float rightWheelSpeedRadps,
+            const float dtSeconds = 0.0f,
+            const bool valid = true) noexcept
+        {
+            const float resolvedDtSeconds = ResolveSeedEncoderObservationDtSeconds(dtSeconds);
+            const std::int32_t leftDeltaCounts =
+                EncoderDeltaCountsFromWheelSpeedRadps(leftWheelSpeedRadps, resolvedDtSeconds);
+            const std::int32_t rightDeltaCounts =
+                EncoderDeltaCountsFromWheelSpeedRadps(rightWheelSpeedRadps, resolvedDtSeconds);
+            const float leftDistanceDeltaM =
+                Vehicle::DriveEncoderDistanceFromCounts(leftDeltaCounts);
+            const float rightDistanceDeltaM =
+                Vehicle::DriveEncoderDistanceFromCounts(rightDeltaCounts);
+            const float invDtSeconds =
+                (std::isfinite(resolvedDtSeconds) && (resolvedDtSeconds > 0.0f)) ?
+                (1.0f / resolvedDtSeconds) :
+                0.0f;
+
+            SensorSnapshot::EncoderObs encoderObservation = SensorSnapshot{}.EncoderObservation();
+            encoderObservation.SetTotalLeftCounts(leftDeltaCounts);
+            encoderObservation.SetTotalRightCounts(rightDeltaCounts);
+            encoderObservation.SetLeftDistanceDeltaM(leftDistanceDeltaM);
+            encoderObservation.SetRightDistanceDeltaM(rightDistanceDeltaM);
+            encoderObservation.SetLeftVelocityMps(leftDistanceDeltaM * invDtSeconds);
+            encoderObservation.SetRightVelocityMps(rightDistanceDeltaM * invDtSeconds);
+            encoderObservation.SetLeftWheelSpeedRadps(
+                Vehicle::WheelSpeedFromLinearVelocity(encoderObservation.LeftVelocityMps()));
+            encoderObservation.SetRightWheelSpeedRadps(
+                Vehicle::WheelSpeedFromLinearVelocity(encoderObservation.RightVelocityMps()));
+
+            const SensorSnapshot& previousSnapshot = state.GetSensorSnapshot();
+            const std::int64_t leftTotalCounts =
+                previousSnapshot.LeftEncoderTotalCounts() +
+                static_cast<std::int64_t>(leftDeltaCounts);
+            const std::int64_t rightTotalCounts =
+                previousSnapshot.RightEncoderTotalCounts() +
+                static_cast<std::int64_t>(rightDeltaCounts);
+            SensorSnapshot snapshot = previousSnapshot;
+            snapshot.PublishEncoderObservation(
+                encoderObservation,
+                valid,
+                leftTotalCounts,
+                rightTotalCounts,
+                Vehicle::DriveEncoderDistanceFromCounts(leftTotalCounts),
+                Vehicle::DriveEncoderDistanceFromCounts(rightTotalCounts));
+            state.SetSensorSnapshot(snapshot);
+        }
 
         inline VehicleState MakeState(
             float xM,
@@ -45,8 +137,10 @@ namespace MazeMap
             state.SetForwardVelocity(forwardVelocityMps);
             state.SetRightwardVelocity(lateralVelocityMps);
             state.SetYawRate(yawRateRadps);
-            state.SetWheelSpeedLeft(leftWheelSpeedRadps);
-            state.SetWheelSpeedRight(rightWheelSpeedRadps);
+            PublishEncoderObservationForWheelSpeedsRadps(
+                state,
+                leftWheelSpeedRadps,
+                rightWheelSpeedRadps);
             return state;
         }
 

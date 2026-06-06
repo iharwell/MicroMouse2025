@@ -107,8 +107,6 @@ namespace MazeMap
             const LoggedOpenFloorPoseJumpSample& first = kLatestLoggedOpenFloorPoseJumpWindow[0];
 
             EstimatorTestRuntime runtime;
-            runtime.runtimeState.SetWheelSpeedLeft(first.leftEncoderWheelSpeedRadps);
-            runtime.runtimeState.SetWheelSpeedRight(first.rightEncoderWheelSpeedRadps);
             Estimator core(runtime.vehicle, runtime.plantModel, runtime.runtimeState);
             Eigen::Matrix<float, VehicleState::kDimension, 1> initialState = Eigen::Matrix<float, VehicleState::kDimension, 1>::Zero();
             initialState(0) = first.poseXM;
@@ -135,15 +133,16 @@ namespace MazeMap
                     App::Internal::CommandVector(
                         sample.leftDriveCommand,
                         sample.rightDriveCommand);
-                Assert::IsTrue(core.predict(sample.dtSeconds, control));
 
-                EncoderObs encoderObservation{};
+                SensorSnapshot::EncoderObs encoderObservation = SensorSnapshot{}.EncoderObservation();
                 encoderObservation.SetTotalLeftCounts(sample.leftEncoderCount);
                 encoderObservation.SetTotalRightCounts(sample.rightEncoderCount);
-                encoderObservation.SetLeftWheelSpeedRadps(sample.leftEncoderWheelSpeedRadps);
-                encoderObservation.SetRightWheelSpeedRadps(sample.rightEncoderWheelSpeedRadps);
-                (void)core.updateEncoderPair(encoderObservation, sample.dtSeconds, true);
-                Assert::IsTrue(core.LastUpdateAttempted());
+                (void)PublishEncoderObservationToRuntime(
+                    runtime.runtimeState,
+                    encoderObservation,
+                    sample.dtSeconds);
+
+                Assert::IsTrue(core.predict(sample.dtSeconds, control));
 
                 (void)core.updateYawRate(sample.measuredAngularSpeedRadps);
                 Assert::IsTrue(core.LastUpdateAttempted());

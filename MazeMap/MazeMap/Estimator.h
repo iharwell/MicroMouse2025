@@ -2,7 +2,6 @@
 // Declares the authoritative micromouse estimator owner for state and maze-evidence updates.
 
 #include "MazeMapRuntimeCore.h"
-#include "EncoderObs.h"
 #include "ImuAccelObs.h"
 #include "CommandVector.h"
 #include "Maze.h"
@@ -67,17 +66,6 @@ namespace MazeMap
         bool predict(
             float dt,
             const App::Internal::CommandVector& control) noexcept;
-        // `control` is the active command for the state interval being calculated.
-        bool predict(
-            float dt,
-            const App::Internal::CommandVector& control,
-            const EncoderObs& encoderInput,
-            bool encoderInputValid) noexcept;
-
-        bool updateEncoderPair(
-            const EncoderObs& observation,
-            float dt,
-            bool updateHeading) noexcept;
 
         bool updateYawRate(float yawRateRadps) noexcept;
 
@@ -165,11 +153,6 @@ namespace MazeMap
         static constexpr float kStationaryCandidateMaxYawRateRadps = 0.12f;
         static constexpr float kGeneralEncoderLinearSpeedSigmaMps = 0.021187f;
         static constexpr float kGeneralEncoderYawRateSigmaRadps = 0.111268f;
-        static constexpr float kEncoderBodyNisThreshold = 13.81551f;
-        static constexpr float kEncoderPseudoUtilizationInflation = 9.0f;
-        static constexpr float kEncoderPseudoContactRelativeSpeedInflation = 16.0f;
-        static constexpr float kEncoderPseudoYawInducedContactSpeedInflation = 25.0f;
-        static constexpr float kEncoderPseudoLaunchInflation = 9.0f;
         static constexpr float kImuYawRateVarianceRadps2 = 1.2e-6f;
         static constexpr float kImuYawRateSigmaRadps = 0.0010954451f;
         // LSM6DSV16X datasheet sensitivity tolerance for the runtime DPS2000 gyro range.
@@ -265,20 +248,12 @@ namespace MazeMap
 
         bool predictImpl(
             float dt,
-            const App::Internal::CommandVector& control,
-            const EncoderObs* encoderInput,
-            bool encoderInputValid) noexcept;
+            const App::Internal::CommandVector& control) noexcept;
         bool predictWithInterleavedSensorService(
             float dt,
             const App::Internal::CommandVector& control,
-            const EncoderObs* encoderInput,
-            bool encoderInputValid,
             void* loopHookContext,
             void (*loopHook)(void*) noexcept) noexcept;
-        bool updateEncoderPairImpl(
-            const EncoderObs& observation,
-            float dt,
-            bool updateYaw) noexcept;
         bool updateYawRateImpl(float yawRateRadps) noexcept;
         bool updatePlanarAccelImpl(const ImuAccelObs& observation) noexcept;
 
@@ -295,9 +270,6 @@ namespace MazeMap
             const Eigen::Matrix<float, VehicleState::kDimension, 1>& sigmaPoint,
             const Eigen::Matrix<float, 3, 1>& control,
             float dtS) noexcept;
-        static Eigen::Matrix<float, 2, 1> EncoderBodyMeasurementForState(
-            void* context,
-            const Eigen::Matrix<float, VehicleState::kDimension, 1>& sigmaPoint) noexcept;
         static Eigen::Matrix<float, 1, 1> YawRateMeasurementForState(
             void* context,
             const Eigen::Matrix<float, VehicleState::kDimension, 1>& sigmaPoint) noexcept;
@@ -331,12 +303,9 @@ namespace MazeMap
         App::Internal::CommandVector _lastControl{};
         float _lastFanDutyCycle = 0.80f;
         float _lastBatteryVoltageV = 0.0f;
-        EncoderObs _lastEncoderObs{};
-        float _lastEncoderDtSeconds = 0.0f;
         Eigen::Matrix<float, VehicleState::kDimension, 1> _prePredictState = Eigen::Matrix<float, VehicleState::kDimension, 1>::Zero();
         Eigen::Matrix<float, VehicleState::kDimension, VehicleState::kDimension> _prePredictCovariance = Eigen::Matrix<float, VehicleState::kDimension, VehicleState::kDimension>::Zero();
         bool _havePredictionReference = false;
-        bool _acceptedEncoderUpdateSincePredict = false;
         Eigen::Matrix<float, VehicleState::kDimension, VehicleState::kDimension> _sqrtProcessNoiseDensity = Eigen::Matrix<float, VehicleState::kDimension, VehicleState::kDimension>::Zero();
         Eigen::Matrix<float, 3, 3> _sqrtImuNoise = Eigen::Matrix<float, 3, 3>::Identity();
         Eigen::Matrix<float, 2, 2> _sqrtFrontNoise = Eigen::Matrix<float, 2, 2>::Identity();
@@ -344,7 +313,8 @@ namespace MazeMap
         float _stationaryCandidateDwellS = 0.0f;
         bool _stationaryCertified = false;
         bool _predictionUsesEncoderInput = false;
-        EncoderObs _predictionEncoderInput{};
+        SensorSnapshot::EncoderObs _predictionEncoderInput = SensorSnapshot{}.EncoderObservation();
+        float _predictionEncoderDtSeconds = 0.0f;
         const Maze* _measurementMaze = nullptr;
         SensorMount _measurementSensor{};
         float _measurementNoHitRangeM = 0.0f;

@@ -29,47 +29,55 @@ namespace MazeMap
             initialCovariance(8, 8) = 0.002f * 0.002f;
             scenario.resetAccepted = EstimatorMotionUpdateTest::Reset(core, initialState, initialCovariance);
 
+            scenario.beforePredictState = EstimatorMotionUpdateTest::WorkingState(core);
+            scenario.beforePredictCovariance = EstimatorMotionUpdateTest::WorkingCovariance(core);
             const CommandVector control = CommandVector(0.19f, 0.17f);
             constexpr float dt = 0.002f;
-            scenario.predictAccepted = core.predict(dt, control);
-
-            scenario.encoder.SetTotalLeftCounts(1);
-            scenario.encoder.SetTotalRightCounts(0);
-            scenario.beforeEncoderState = EstimatorMotionUpdateTest::WorkingState(core);
-            scenario.beforeEncoderCovariance = EstimatorMotionUpdateTest::WorkingCovariance(core);
             float leftWheelSpeedRadps = 0.0f;
             float rightWheelSpeedRadps = 0.0f;
             Vehicle::WheelSpeedsFromBodyVelocity(
-                scenario.beforeEncoderState(3),
-                scenario.beforeEncoderState(5),
+                scenario.beforePredictState(3),
+                scenario.beforePredictState(5),
                 leftWheelSpeedRadps,
                 rightWheelSpeedRadps);
-            scenario.encoder.SetLeftWheelSpeedRadps(leftWheelSpeedRadps);
-            scenario.encoder.SetRightWheelSpeedRadps(rightWheelSpeedRadps);
-            scenario.expectation = ComputeEncoderPairExpectation(
-                runtime.plantModel,
+            SetEncoderCountDeltasForWheelSpeedsOverTick(
                 scenario.encoder,
-                scenario.beforeEncoderState,
-                scenario.beforeEncoderCovariance,
-                kEstimatorTestGeneralEncoderLinearSpeedSigmaMps,
-                kEstimatorTestGeneralEncoderYawRateSigmaRadps);
-            runtime.runtimeState.SetWheelSpeedLeft(scenario.encoder.LeftWheelSpeedRadps());
-            runtime.runtimeState.SetWheelSpeedRight(scenario.encoder.RightWheelSpeedRadps());
-            scenario.runtimeLeftWheelSpeedBeforeUpdateRadps =
+                leftWheelSpeedRadps,
+                rightWheelSpeedRadps,
+                dt);
+            scenario.encoder =
+                PublishEncoderObservationToRuntime(runtime.runtimeState, scenario.encoder, dt);
+            scenario.runtimeLeftWheelSpeedBeforePredictRadps =
                 runtime.runtimeState.GetWheelSpeedLeft();
-            scenario.runtimeRightWheelSpeedBeforeUpdateRadps =
+            scenario.runtimeRightWheelSpeedBeforePredictRadps =
                 runtime.runtimeState.GetWheelSpeedRight();
 
-            scenario.updateReturnedAccepted =
-                core.updateEncoderPair(scenario.encoder, dt, true);
-            scenario.updateAttempted = EstimatorMotionUpdateTest::LastUpdateAttempted(core);
-            scenario.updateRecordedAccepted = EstimatorMotionUpdateTest::LastUpdateAccepted(core);
-            scenario.actualNis = EstimatorMotionUpdateTest::LastUpdateNis(core);
+            const float measuredLeftVelocityMps =
+                Vehicle::WheelLinearVelocityFromWheelSpeed(scenario.encoder.LeftWheelSpeedRadps());
+            const float measuredRightVelocityMps =
+                Vehicle::WheelLinearVelocityFromWheelSpeed(scenario.encoder.RightWheelSpeedRadps());
+            scenario.measuredForwardVelocityMps =
+                Vehicle::BodyForwardVelocityFromWheelLinear(
+                    measuredLeftVelocityMps,
+                    measuredRightVelocityMps);
+            scenario.measuredYawRateRadps =
+                Vehicle::BodyYawRateFromWheelLinear(
+                    measuredLeftVelocityMps,
+                    measuredRightVelocityMps);
+            scenario.travelForwardVelocityMps =
+                Vehicle::BodyForwardVelocityFromWheelLinear(
+                    scenario.encoder.LeftDistanceDeltaM() / dt,
+                    scenario.encoder.RightDistanceDeltaM() / dt);
+            scenario.travelYawRateRadps =
+                Vehicle::BodyYawRateFromWheelLinear(
+                    scenario.encoder.LeftDistanceDeltaM() / dt,
+                    scenario.encoder.RightDistanceDeltaM() / dt);
+            scenario.predictAccepted = core.predict(dt, control);
             scenario.afterState = EstimatorMotionUpdateTest::WorkingState(core);
             scenario.afterCovariance = EstimatorMotionUpdateTest::WorkingCovariance(core);
-            scenario.runtimeLeftWheelSpeedAfterUpdateRadps =
+            scenario.runtimeLeftWheelSpeedAfterPredictRadps =
                 runtime.runtimeState.GetWheelSpeedLeft();
-            scenario.runtimeRightWheelSpeedAfterUpdateRadps =
+            scenario.runtimeRightWheelSpeedAfterPredictRadps =
                 runtime.runtimeState.GetWheelSpeedRight();
             return scenario;
         }
@@ -77,7 +85,8 @@ namespace MazeMap
         TorqueRefreshScenario RunTorqueRefreshScenario()
         {
             TorqueRefreshScenario scenario;
-            Estimator core = MakeDefaultEstimator();
+            EstimatorTestRuntime runtime;
+            Estimator core(runtime.vehicle, runtime.plantModel, runtime.runtimeState);
             StateVector initialState = StateVector::Zero();
             initialState(0) = 0.01f;
             initialState(1) = 0.02f;
@@ -97,15 +106,8 @@ namespace MazeMap
             initialCovariance(8, 8) = 0.002f * 0.002f;
             scenario.resetAccepted = EstimatorMotionUpdateTest::Reset(core, initialState, initialCovariance);
 
-            CommandVector firstControl{};
-            firstControl.SetLeftCommand(0.08f);
-            firstControl.SetRightCommand(0.06f);
+            SensorSnapshot::EncoderObs firstEncoder = SensorSnapshot{}.EncoderObservation();
             constexpr float dt = 0.002f;
-            scenario.firstPredictAccepted = core.predict(dt, firstControl);
-
-            EncoderObs firstEncoder{};
-            firstEncoder.SetTotalLeftCounts(0);
-            firstEncoder.SetTotalRightCounts(0);
             float firstLeftWheelSpeedRadps = 0.0f;
             float firstRightWheelSpeedRadps = 0.0f;
             Vehicle::WheelSpeedsFromBodyVelocity(
@@ -113,10 +115,17 @@ namespace MazeMap
                 EstimatorMotionUpdateTest::WorkingState(core)(5),
                 firstLeftWheelSpeedRadps,
                 firstRightWheelSpeedRadps);
-            firstEncoder.SetLeftWheelSpeedRadps(firstLeftWheelSpeedRadps);
-            firstEncoder.SetRightWheelSpeedRadps(firstRightWheelSpeedRadps);
-            scenario.firstEncoderAccepted =
-                core.updateEncoderPair(firstEncoder, dt, true);
+            SetEncoderCountDeltasForWheelSpeedsOverTick(
+                firstEncoder,
+                firstLeftWheelSpeedRadps,
+                firstRightWheelSpeedRadps,
+                dt);
+            (void)PublishEncoderObservationToRuntime(runtime.runtimeState, firstEncoder, dt);
+
+            CommandVector firstControl{};
+            firstControl.SetLeftCommand(0.08f);
+            firstControl.SetRightCommand(0.06f);
+            scenario.firstPredictAccepted = core.predict(dt, firstControl);
 
             const StateVector stateBeforeSecondPredict = EstimatorMotionUpdateTest::WorkingState(core);
             const CovarianceMatrix covarianceBeforeSecondPredict =

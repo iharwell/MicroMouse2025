@@ -1,7 +1,6 @@
 #include "pch.h"
 #include "Vehicle.h"
 #include "CommandVector.h"
-#include "EncoderObs.h"
 #include "HardwareConfig.h"
 #include "Pins.h"
 #include "VehicleState.h"
@@ -146,9 +145,11 @@ namespace MazeMap
         _rightMotor.resetEncoderCount();
     }
 
-    EncoderObs Vehicle::CaptureEncoderObservation(const float dtSeconds) noexcept
+    void Vehicle::CaptureEncoderObservation(
+        SensorSnapshot::EncoderObs& observation,
+        const float dtSeconds) noexcept
     {
-        EncoderObs observation{};
+        observation = SensorSnapshot{}.EncoderObservation();
         observation.SetTotalLeftCounts(_leftMotor.consumeEncoderCount());
         observation.SetTotalRightCounts(_rightMotor.consumeEncoderCount());
         observation.SetLeftDistanceDeltaM(_leftMotor.pulsesToDistance(observation.TotalLeftCounts()));
@@ -163,8 +164,6 @@ namespace MazeMap
             observation.SetLeftWheelSpeedRadps(observation.LeftVelocityMps() * invWheelRadiusM);
             observation.SetRightWheelSpeedRadps(observation.RightVelocityMps() * invWheelRadiusM);
         }
-
-        return observation;
     }
 
     SensorMount Vehicle::GetBackLeftImuMount() noexcept

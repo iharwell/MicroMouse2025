@@ -5,8 +5,10 @@
 #include "Imu.h"
 #include "MazeMapRuntimeCore.h"
 #include "RuntimeSensorSuite.h"
+#include "SensorSnapshot.h"
 #include "SharedRobotRuntime.h"
 #include "Vehicle.h"
+#include "VehicleState.h"
 #include "WallDetectionThresholds.h"
 #include "WallDistanceCalibration.h"
 #include "WallSensor.h"
@@ -343,6 +345,7 @@ namespace MazeMap::App::Internal
         _imuRequiredSamples = 0UL;
         _imuStartLeftEncoderCounts = 0;
         _imuStartRightEncoderCounts = 0;
+        _imuEncoderBaselineCaptured = false;
         if (_vehicle != nullptr)
         {
             _vehicle->BackLeftImu().ResetCalibrationSampling();
@@ -500,30 +503,31 @@ namespace MazeMap::App::Internal
 
     void StartupCalibration::CaptureCurrentEncoderTotalsForImuCalibration() noexcept
     {
-        if (_sensors == nullptr)
+        if (_runtime == nullptr)
         {
             _imuStartLeftEncoderCounts = 0;
             _imuStartRightEncoderCounts = 0;
+            _imuEncoderBaselineCaptured = false;
             return;
         }
 
-        std::int32_t leftCounts = 0;
-        std::int32_t rightCounts = 0;
-        _sensors->CaptureEncoderCountsForCalibration(leftCounts, rightCounts);
-        _imuStartLeftEncoderCounts = static_cast<std::int64_t>(leftCounts);
-        _imuStartRightEncoderCounts = static_cast<std::int64_t>(rightCounts);
+        const SensorSnapshot& snapshot = _runtime->RuntimeState().GetSensorSnapshot();
+        _imuStartLeftEncoderCounts = snapshot.LeftEncoderTotalCounts();
+        _imuStartRightEncoderCounts = snapshot.RightEncoderTotalCounts();
+        _imuEncoderBaselineCaptured = true;
     }
 
     bool StartupCalibration::EncoderTotalsChangedDuringImuCalibration() const noexcept
     {
-        if (_sensors == nullptr)
+        if ((_runtime == nullptr) || !_imuEncoderBaselineCaptured)
         {
             return false;
         }
 
-        return _sensors->HaveEncoderCountsChangedForCalibration(
-            static_cast<std::int32_t>(_imuStartLeftEncoderCounts),
-            static_cast<std::int32_t>(_imuStartRightEncoderCounts));
+        const SensorSnapshot& snapshot = _runtime->RuntimeState().GetSensorSnapshot();
+        return
+            (snapshot.LeftEncoderTotalCounts() != _imuStartLeftEncoderCounts) ||
+            (snapshot.RightEncoderTotalCounts() != _imuStartRightEncoderCounts);
     }
 
     void StartupCalibration::RestartImuCalibrationAfterMotion(const char* const reason) noexcept
@@ -554,10 +558,6 @@ namespace MazeMap::App::Internal
         }
 
         _vehicle->BackLeftImu().DisableSelfTest();
-        std::int32_t ignoredLeftCounts = 0;
-        std::int32_t ignoredRightCounts = 0;
-        _sensors->CaptureEncoderCountsForCalibration(ignoredLeftCounts, ignoredRightCounts);
-        CaptureCurrentEncoderTotalsForImuCalibration();
         BeginImuSettlePhase(Phase::ImuBaselineSettle);
         return true;
     }
@@ -565,6 +565,10 @@ namespace MazeMap::App::Internal
     CommandVector StartupCalibration::RunImuCalibrationPhase(bool& done)
     {
         done = false;
+        if (!_imuEncoderBaselineCaptured)
+        {
+            CaptureCurrentEncoderTotalsForImuCalibration();
+        }
         if (EncoderTotalsChangedDuringImuCalibration())
         {
             RestartImuCalibrationAfterMotion(

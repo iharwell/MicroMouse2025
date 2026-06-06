@@ -44,7 +44,6 @@
         std::filesystem::path feedforwardSampleCsvPath;
         std::vector<std::string> sampleMetrics;
         bool useKnownStationarySeed = false;
-        bool useEncoderPseudoMeasurement = false;
     };
 
     class SidecarInfo
@@ -761,8 +760,9 @@
                 }
             }
 
-            row.loggedState.SetWheelSpeedLeft(row.leftEncoderWheelSpeedRadps);
-            row.loggedState.SetWheelSpeedRight(row.rightEncoderWheelSpeedRadps);
+            row.loggedState.PublishEncoderWheelSpeedsRadps(
+                row.leftEncoderWheelSpeedRadps,
+                row.rightEncoderWheelSpeedRadps);
         }
 
         return true;
@@ -1048,10 +1048,6 @@
             {
                 options.useKnownStationarySeed = true;
             }
-            else if (argument == "--encoder-pseudo-measurement")
-            {
-                options.useEncoderPseudoMeasurement = true;
-            }
             else if (argument == "--help" || argument == "-h")
             {
                 std::cout
@@ -1059,7 +1055,6 @@
                     << "  --root <path>    Root directory to scan for open_floor_main.csv captures.\n"
                     << "  --output <path>  Output directory for the generated report.\n"
                     << "  --known-stationary-seed  Seed from the canonical open-floor start pose instead of the logged UKF state.\n"
-                    << "  --encoder-pseudo-measurement  Also run the post-predict encoder pseudo-measurement update.\n"
                     << "  --run-id <id>    Optional single-run filter.\n"
                     << "  --sample-csv <path>  Optional per-sample CSV export for the selected run.\n"
                     << "  --feedforward-sample-csv <path>  Optional per-sample feedforward-path audit CSV export for the selected run.\n"
@@ -1793,9 +1788,9 @@
         return true;
     }
 
-    static MazeMap::EncoderObs BuildEncoderObservation(const LoggedRow& row) noexcept
+    static SensorSnapshot::EncoderObs BuildEncoderObservation(const LoggedRow& row) noexcept
     {
-        MazeMap::EncoderObs observation{};
+        SensorSnapshot::EncoderObs observation = SensorSnapshot{}.EncoderObservation();
         observation.SetCounts(row.leftEncoderCount, row.rightEncoderCount);
         observation.SetDistanceDeltasM(row.leftEncoderDistanceDeltaM, row.rightEncoderDistanceDeltaM);
         observation.SetWheelLinearVelocityMps(row.leftEncoderVelocityMps, row.rightEncoderVelocityMps);
@@ -2013,8 +2008,9 @@
         runtimeState.SetForwardVelocity(SensorForwardVelocityMps(currentRow));
         runtimeState.SetRightwardVelocity(0.0f);
         runtimeState.SetYawRate(currentRow.correctedYawRateRadps);
-        runtimeState.SetWheelSpeedLeft(MazeMap::Vehicle::WheelSpeedFromLinearVelocity(currentRow.leftEncoderVelocityMps));
-        runtimeState.SetWheelSpeedRight(MazeMap::Vehicle::WheelSpeedFromLinearVelocity(currentRow.rightEncoderVelocityMps));
+        runtimeState.PublishEncoderWheelSpeedsRadps(
+            MazeMap::Vehicle::WheelSpeedFromLinearVelocity(currentRow.leftEncoderVelocityMps),
+            MazeMap::Vehicle::WheelSpeedFromLinearVelocity(currentRow.rightEncoderVelocityMps));
         plantModel.integrate(command, responseTimeS);
 
         exportRow = {};
@@ -2317,7 +2313,7 @@
             const MazeMap::App::Internal::CommandVector control(
                 previousRow.leftDriveCommand,
                 previousRow.rightDriveCommand);
-            const MazeMap::EncoderObs encoderObservation = BuildEncoderObservation(row);
+            const SensorSnapshot::EncoderObs encoderObservation = BuildEncoderObservation(row);
             const bool encoderObservationValid =
                 row.encoderKinematicsValid &&
                 std::isfinite(dtSeconds) &&
@@ -2331,9 +2327,13 @@
             vehicle.SetFanDuty(previousRow.fanDutyCycle);
             runtimeState.SetCurrentCommand(control);
             SensorSnapshot snapshot{};
-            snapshot.SetEncoderObservation(encoderObservation, encoderObservationValid);
-            snapshot.SetEncoderTotals(row.leftEncoderCount, row.rightEncoderCount);
-            snapshot.SetEncoderDistancesM(row.leftEncoderDistanceM, row.rightEncoderDistanceM);
+            snapshot.PublishEncoderObservation(
+                encoderObservation,
+                encoderObservationValid,
+                row.leftEncoderCount,
+                row.rightEncoderCount,
+                row.leftEncoderDistanceM,
+                row.rightEncoderDistanceM);
             snapshot.SetRawYawRateRadps(std::numeric_limits<float>::quiet_NaN());
             snapshot.SetYawRateRadps(row.correctedYawRateRadps);
             snapshot.SetAccelerationBiasValid(row.accelBiasValid);
@@ -2345,7 +2345,7 @@
             {
                 runtimeState.SetTime(runtimeState.GetTime() + dtSeconds);
             }
-            if (!estimator.predict(dtSeconds, control, encoderObservation, encoderObservationValid))
+            if (!estimator.predict(dtSeconds, control))
             {
                 ++report.predictFailures;
                 report.completed = false;
@@ -2379,10 +2379,6 @@
                     predictedAccelBodyMps2));
             }
 
-            if (options.useEncoderPseudoMeasurement && encoderObservationValid)
-            {
-                (void)estimator.updateEncoderPair(encoderObservation, dtSeconds, true);
-            }
             if (std::isfinite(snapshot.YawRateRadps()))
             {
                 if (!estimator.updateYawRate(snapshot.YawRateRadps()))
@@ -2887,6 +2883,7 @@
             << "- Canonical inertial input: corrected `gyro_radps`; raw IMU fields, `gyro_raw_radps`, and `gyro_bias_radps` are retained only for debug/report output.\n"
             << "- Canonical encoder input: raw total encoder counts plus `dt_us`; decoded encoder speed/velocity columns are not required for replay.\n"
             << "- Wall ADC policy: raw ambient/lit wall ADC columns are parsed when present, but wall updates are not injected until open-floor replay has a canonical maze/world-frame owner for those observations.\n"
+            << "- Encoder prediction path: replay publishes the tick snapshot into `VehicleState` before prediction; `Estimator::predict` consumes valid encoder input through `PlantModel`.\n"
             << "- Runtime-context gap: captured command targets, saturation flags, and acceleration context are parsed but not injected because no public `Estimator`/`VehicleState` owner path replaces the removed direct Estimator context hook.\n"
             << "- Plant diagnostic gap: body-acceleration prediction metrics remain non-finite until a canonical bound-state IMU-acceleration diagnostic is exposed.\n"
             << "- Prediction metrics compare the pre-update UKF prediction against observable sensor-space signals.\n"

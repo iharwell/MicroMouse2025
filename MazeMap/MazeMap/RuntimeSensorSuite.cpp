@@ -719,35 +719,17 @@ namespace MazeMap
             SensorWorkBitsRequestWallSensors(sensorWorkBits);
     }
 
-    MazeMap::EncoderObs RuntimeSensorSuite::CaptureEncoderObservation(const float dtSeconds) noexcept
+    void RuntimeSensorSuite::CaptureEncoderObservation(
+        SensorSnapshot::EncoderObs& observation,
+        const float dtSeconds) noexcept
     {
-        MazeMap::EncoderObs observation = _vehicle.CaptureEncoderObservation(dtSeconds);
+        _vehicle.CaptureEncoderObservation(observation, dtSeconds);
         _leftEncoderTotalCounts += static_cast<std::int64_t>(observation.TotalLeftCounts());
         _rightEncoderTotalCounts += static_cast<std::int64_t>(observation.TotalRightCounts());
-        return observation;
-    }
-
-    void RuntimeSensorSuite::CaptureEncoderCountsForCalibration(
-        std::int32_t& leftCounts,
-        std::int32_t& rightCounts) noexcept
-    {
-        const MazeMap::EncoderObs observation = CaptureEncoderObservation(0.0f);
-        leftCounts = observation.TotalLeftCounts();
-        rightCounts = observation.TotalRightCounts();
-    }
-
-    bool RuntimeSensorSuite::HaveEncoderCountsChangedForCalibration(
-        const std::int32_t startLeftCounts,
-        const std::int32_t startRightCounts) noexcept
-    {
-        std::int32_t leftCounts = 0;
-        std::int32_t rightCounts = 0;
-        CaptureEncoderCountsForCalibration(leftCounts, rightCounts);
-        return (leftCounts != startLeftCounts) || (rightCounts != startRightCounts);
     }
 
     bool RuntimeSensorSuite::IsEncoderObservationUsableForPrediction(
-        const MazeMap::EncoderObs& observation,
+        const SensorSnapshot::EncoderObs& observation,
         const float dtSeconds,
         const char*& degradedReason) const noexcept
     {
@@ -803,7 +785,7 @@ namespace MazeMap
     void RuntimeSensorSuite::ReportEncoderObservationState(
         const bool validForPrediction,
         const char* const degradedReason,
-        const MazeMap::EncoderObs& observation,
+        const SensorSnapshot::EncoderObs& observation,
         const float dtSeconds) noexcept
     {
         if (validForPrediction)
@@ -842,11 +824,12 @@ namespace MazeMap
         SensorSnapshot& snapshot,
         const float dtSeconds) noexcept
     {
-        const EncoderObs encoderObservation = CaptureEncoderObservation(dtSeconds);
+        SensorSnapshot::EncoderObs& encoderObservation = snapshot.MutableEncoderObservationForCapture();
+        CaptureEncoderObservation(encoderObservation, dtSeconds);
         const char* degradedReason = "ok";
         const bool encoderObservationValid =
             IsEncoderObservationUsableForPrediction(encoderObservation, dtSeconds, degradedReason);
-        snapshot.SetEncoderObservation(encoderObservation, encoderObservationValid);
+        snapshot.SetEncoderObservationValid(encoderObservationValid);
         ReportEncoderObservationState(
             encoderObservationValid,
             degradedReason,

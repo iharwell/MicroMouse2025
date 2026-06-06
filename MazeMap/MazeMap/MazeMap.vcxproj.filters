@@ -339,9 +339,6 @@
     <ClInclude Include="PlantModel.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="EncoderObs.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="ImuAccelObs.h">
       <Filter>Header Files</Filter>
     </ClInclude>

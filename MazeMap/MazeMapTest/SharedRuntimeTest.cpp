@@ -72,7 +72,7 @@ namespace
         const int32_t leftCounts = static_cast<int32_t>(std::round((leftWheelSpeedMps * dtSeconds) / distancePerCountM));
         const int32_t rightCounts = static_cast<int32_t>(std::round((rightWheelSpeedMps * dtSeconds) / distancePerCountM));
         SensorSnapshot snapshot = BuildSharedRuntimeSensorSnapshot();
-        MazeMap::EncoderObs encoderObservation{};
+        SensorSnapshot::EncoderObs encoderObservation = SensorSnapshot{}.EncoderObservation();
         encoderObservation.SetTotalLeftCounts(leftCounts);
         encoderObservation.SetTotalRightCounts(rightCounts);
         encoderObservation.SetLeftDistanceDeltaM(static_cast<float>(leftCounts) * distancePerCountM);
@@ -86,16 +86,19 @@ namespace
             encoderObservation.SetLeftWheelSpeedRadps(encoderObservation.LeftVelocityMps() * invWheelRadiusM);
             encoderObservation.SetRightWheelSpeedRadps(encoderObservation.RightVelocityMps() * invWheelRadiusM);
         }
-        snapshot.SetEncoderObservation(encoderObservation, true);
-        snapshot.SetLeftEncoderTotalCounts(
+        const std::int64_t leftTotalCounts =
             runtime.RuntimeState().GetSensorSnapshot().LeftEncoderTotalCounts() +
-            static_cast<std::int64_t>(leftCounts));
-        snapshot.SetRightEncoderTotalCounts(
+            static_cast<std::int64_t>(leftCounts);
+        const std::int64_t rightTotalCounts =
             runtime.RuntimeState().GetSensorSnapshot().RightEncoderTotalCounts() +
-            static_cast<std::int64_t>(rightCounts));
-        snapshot.SetEncoderDistancesM(
-            MazeMap::Vehicle::DriveEncoderDistanceFromCounts(snapshot.LeftEncoderTotalCounts()),
-            MazeMap::Vehicle::DriveEncoderDistanceFromCounts(snapshot.RightEncoderTotalCounts()));
+            static_cast<std::int64_t>(rightCounts);
+        snapshot.PublishEncoderObservation(
+            encoderObservation,
+            true,
+            leftTotalCounts,
+            rightTotalCounts,
+            MazeMap::Vehicle::DriveEncoderDistanceFromCounts(leftTotalCounts),
+            MazeMap::Vehicle::DriveEncoderDistanceFromCounts(rightTotalCounts));
         UpdateDriveEstimator(runtime.Estimator(), runtime.RuntimeState(), dtSeconds, snapshot, MazeMap::MakeControlVector());
     }
 

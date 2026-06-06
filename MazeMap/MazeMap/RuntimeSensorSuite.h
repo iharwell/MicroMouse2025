@@ -3,7 +3,6 @@
 
 #include "CoreConfig.h"
 #include "Direction.h"
-#include "EncoderObs.h"
 #include "RollingAverageWindow.h"
 #include "SensorSnapshot.h"
 
@@ -65,7 +64,6 @@ namespace MazeMap
     private:
         friend class App::Internal::LoopController;
         friend class App::Internal::SharedRobotRuntime;
-        friend class App::Internal::StartupCalibration;
 
         class WallTelemetryAverager final
         {
@@ -101,17 +99,15 @@ namespace MazeMap
         void AbortInterlacedWallCapture() noexcept;
         void FinalizeInterlacedSnapshot(SensorSnapshot& snapshot) const noexcept;
         void ClearInterlacedCaptureState() noexcept;
-        MazeMap::EncoderObs CaptureEncoderObservation(float dtSeconds) noexcept;
-        void CaptureEncoderCountsForCalibration(std::int32_t& leftCounts, std::int32_t& rightCounts) noexcept;
-        bool HaveEncoderCountsChangedForCalibration(std::int32_t startLeftCounts, std::int32_t startRightCounts) noexcept;
+        void CaptureEncoderObservation(SensorSnapshot::EncoderObs& observation, float dtSeconds) noexcept;
         bool IsEncoderObservationUsableForPrediction(
-            const MazeMap::EncoderObs& observation,
+            const SensorSnapshot::EncoderObs& observation,
             float dtSeconds,
             const char*& degradedReason) const noexcept;
         void ReportEncoderObservationState(
             bool validForPrediction,
             const char* degradedReason,
-            const MazeMap::EncoderObs& observation,
+            const SensorSnapshot::EncoderObs& observation,
             float dtSeconds) noexcept;
         void PublishEncoderTotals(SensorSnapshot& snapshot) const noexcept;
         void CaptureEncoderSnapshot(SensorSnapshot& snapshot, float dtSeconds) noexcept;

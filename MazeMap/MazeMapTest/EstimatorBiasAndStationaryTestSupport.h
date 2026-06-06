@@ -150,15 +150,6 @@ namespace MazeMap
             return state;
         }
 
-        inline StateVector BuildNonzeroCountStationaryState() noexcept
-        {
-            StateVector state = StateVector::Zero();
-            state(0) = 0.42f;
-            state(1) = -0.17f;
-            state(2) = NormalizeAngle(0.28f);
-            return state;
-        }
-
         inline StateVector BuildReferenceStationaryState() noexcept
         {
             StateVector state = StateVector::Zero();
@@ -277,9 +268,10 @@ namespace MazeMap
 
         inline void RunStationaryEncoderYawCycles(
             Estimator& core,
+            VehicleState& runtimeState,
             ScenarioStatus& status,
             const App::Internal::CommandVector& control,
-            EncoderObs& encoder,
+            SensorSnapshot::EncoderObs& encoder,
             const float dtSeconds,
             const float yawRateRadps,
             const int cycleCount,
@@ -288,16 +280,10 @@ namespace MazeMap
         {
             for (int step = 0; step < cycleCount; ++step)
             {
+                (void)PublishEncoderObservationToRuntime(runtimeState, encoder, dtSeconds);
                 const bool predictAccepted = core.predict(dtSeconds, control);
                 RecordOperation(status, predictAccepted, step, L"predict");
                 if (!predictAccepted)
-                {
-                    break;
-                }
-
-                const bool encoderAccepted = core.updateEncoderPair(encoder, dtSeconds, true);
-                RecordOperation(status, encoderAccepted, step, L"encoder");
-                if (!encoderAccepted)
                 {
                     break;
                 }
@@ -332,7 +318,7 @@ namespace MazeMap
             RecordOperation(result.status, resetAccepted, -1, L"reset");
 
             App::Internal::CommandVector control{};
-            EncoderObs encoder{};
+            SensorSnapshot::EncoderObs encoder = SensorSnapshot{}.EncoderObservation();
             constexpr float dt = 0.002f;
             const int steps =
                 static_cast<int>(std::ceil(kEstimatorTestStationaryCertificationDwellS / dt)) + 10;
@@ -340,6 +326,7 @@ namespace MazeMap
             {
                 RunStationaryEncoderYawCycles(
                     core,
+                    runtime.runtimeState,
                     result.status,
                     control,
                     encoder,
@@ -352,44 +339,19 @@ namespace MazeMap
             return result;
         }
 
-        inline FilterSnapshot RunExactStationaryLockWithNonzeroCounts()
-        {
-            FilterSnapshot result{};
-            result.initialState = BuildNonzeroCountStationaryState();
-
-            Estimator core = MakeDefaultEstimator();
-            const bool resetAccepted =
-                EstimatorBiasAndStationaryTest::Reset(core, result.initialState, BuildStationaryLockCovariance());
-            RecordOperation(result.status, resetAccepted, -1, L"reset");
-
-            App::Internal::CommandVector control{};
-            EncoderObs encoder{};
-            encoder.SetTotalLeftCounts(12);
-            encoder.SetTotalRightCounts(8);
-            constexpr float dt = 0.002f;
-            const int steps =
-                static_cast<int>(std::ceil(kEstimatorTestStationaryCertificationDwellS / dt)) + 10;
-            if (resetAccepted)
-            {
-                RunStationaryEncoderYawCycles(core, result.status, control, encoder, dt, 0.0f, steps);
-            }
-
-            CaptureSnapshot(result, core);
-            return result;
-        }
-
         inline FilterSnapshot RunExactStationaryReference()
         {
             FilterSnapshot result{};
             result.initialState = BuildReferenceStationaryState();
 
-            Estimator core = MakeDefaultEstimator();
+            EstimatorTestRuntime runtime;
+            Estimator core(runtime.vehicle, runtime.plantModel, runtime.runtimeState);
             const bool resetAccepted =
                 EstimatorBiasAndStationaryTest::Reset(core, result.initialState, BuildReferenceStationaryCovariance());
             RecordOperation(result.status, resetAccepted, -1, L"reset");
 
             App::Internal::CommandVector control{};
-            EncoderObs encoder{};
+            SensorSnapshot::EncoderObs encoder = SensorSnapshot{}.EncoderObservation();
             constexpr float dt = 0.002f;
             const int steps =
                 static_cast<int>(std::ceil(kEstimatorTestStationaryCertificationDwellS / dt)) + 10;
@@ -397,6 +359,7 @@ namespace MazeMap
             {
                 RunStationaryEncoderYawCycles(
                     core,
+                    runtime.runtimeState,
                     result.status,
                     control,
                     encoder,
@@ -418,27 +381,22 @@ namespace MazeMap
             FilterSnapshot result{};
             result.initialState = BuildZeroState();
 
-            Estimator core = MakeDefaultEstimator();
+            EstimatorTestRuntime runtime;
+            Estimator core(runtime.vehicle, runtime.plantModel, runtime.runtimeState);
             const bool resetAccepted =
                 EstimatorBiasAndStationaryTest::Reset(core, result.initialState, BuildZeroMotionCovariance());
             RecordOperation(result.status, resetAccepted, -1, L"reset");
 
-            EncoderObs encoder{};
+            SensorSnapshot::EncoderObs encoder = SensorSnapshot{}.EncoderObservation();
             constexpr float dt = 0.001f;
             if (resetAccepted)
             {
                 for (int step = 0; step < cycleCount; ++step)
                 {
+                    (void)PublishEncoderObservationToRuntime(runtime.runtimeState, encoder, dt);
                     const bool predictAccepted = core.predict(dt, control);
                     RecordOperation(result.status, predictAccepted, step, L"predict");
                     if (!predictAccepted)
-                    {
-                        break;
-                    }
-
-                    const bool encoderAccepted = core.updateEncoderPair(encoder, dt, true);
-                    RecordOperation(result.status, encoderAccepted, step, L"encoder");
-                    if (!encoderAccepted)
                     {
                         break;
                     }
@@ -469,7 +427,8 @@ namespace MazeMap
             FilterSnapshot result{};
             result.initialState = BuildZeroState();
 
-            Estimator core = MakeDefaultEstimator();
+            EstimatorTestRuntime runtime;
+            Estimator core(runtime.vehicle, runtime.plantModel, runtime.runtimeState);
             const bool resetAccepted =
                 EstimatorBiasAndStationaryTest::Reset(
                     core,
@@ -478,22 +437,16 @@ namespace MazeMap
             RecordOperation(result.status, resetAccepted, -1, L"reset");
 
             App::Internal::CommandVector control{};
-            EncoderObs encoder{};
+            SensorSnapshot::EncoderObs encoder = SensorSnapshot{}.EncoderObservation();
             constexpr float dt = 0.001f;
             if (resetAccepted)
             {
                 for (int step = 0; step < 1000; ++step)
                 {
+                    (void)PublishEncoderObservationToRuntime(runtime.runtimeState, encoder, dt);
                     const bool predictAccepted = core.predict(dt, control);
                     RecordOperation(result.status, predictAccepted, step, L"predict");
                     if (!predictAccepted)
-                    {
-                        break;
-                    }
-
-                    const bool encoderAccepted = core.updateEncoderPair(encoder, dt, true);
-                    RecordOperation(result.status, encoderAccepted, step, L"encoder");
-                    if (!encoderAccepted)
                     {
                         break;
                     }
@@ -514,7 +467,8 @@ namespace MazeMap
         inline LateralVarianceResult RunZeroEncoderLateralVariance()
         {
             LateralVarianceResult result{};
-            Estimator core = MakeDefaultEstimator();
+            EstimatorTestRuntime runtime;
+            Estimator core(runtime.vehicle, runtime.plantModel, runtime.runtimeState);
             const bool resetAccepted =
                 EstimatorBiasAndStationaryTest::Reset(core, BuildZeroState(), BuildZeroMotionCovariance(1.0f, 1.0f));
             RecordOperation(result.status, resetAccepted, -1, L"reset");
@@ -524,22 +478,16 @@ namespace MazeMap
             }
 
             App::Internal::CommandVector control{};
-            EncoderObs encoder{};
+            SensorSnapshot::EncoderObs encoder = SensorSnapshot{}.EncoderObservation();
             constexpr float dt = 0.001f;
             if (resetAccepted)
             {
                 for (int step = 0; step < 1000; ++step)
                 {
+                    (void)PublishEncoderObservationToRuntime(runtime.runtimeState, encoder, dt);
                     const bool predictAccepted = core.predict(dt, control);
                     RecordOperation(result.status, predictAccepted, step, L"predict");
                     if (!predictAccepted)
-                    {
-                        break;
-                    }
-
-                    const bool encoderAccepted = core.updateEncoderPair(encoder, dt, true);
-                    RecordOperation(result.status, encoderAccepted, step, L"encoder");
-                    if (!encoderAccepted)
                     {
                         break;
                     }
@@ -564,12 +512,13 @@ namespace MazeMap
             RecordOperation(result.status, resetAccepted, -1, L"reset");
 
             App::Internal::CommandVector control{};
-            EncoderObs encoder{};
+            SensorSnapshot::EncoderObs encoder = SensorSnapshot{}.EncoderObservation();
             constexpr float dt = 0.001f;
             if (resetAccepted)
             {
                 RunStationaryEncoderYawCycles(
                     core,
+                    runtime.runtimeState,
                     result.status,
                     control,
                     encoder,
@@ -594,25 +543,20 @@ namespace MazeMap
         inline ReleaseCovarianceResult RunStationaryRelease()
         {
             ReleaseCovarianceResult result{};
-            Estimator core = MakeDefaultEstimator();
+            EstimatorTestRuntime runtime;
+            Estimator core(runtime.vehicle, runtime.plantModel, runtime.runtimeState);
             App::Internal::CommandVector stationaryControl{};
-            EncoderObs stationaryEncoder{};
+            SensorSnapshot::EncoderObs stationaryEncoder = SensorSnapshot{}.EncoderObservation();
             constexpr float dt = 0.002f;
             const int stationarySteps =
                 static_cast<int>(std::ceil(kEstimatorTestStationaryCertificationDwellS / dt)) + 10;
 
             for (int step = 0; step < stationarySteps; ++step)
             {
+                (void)PublishEncoderObservationToRuntime(runtime.runtimeState, stationaryEncoder, dt);
                 const bool predictAccepted = core.predict(dt, stationaryControl);
                 RecordOperation(result.status, predictAccepted, step, L"stationary_predict");
                 if (!predictAccepted)
-                {
-                    break;
-                }
-
-                const bool encoderAccepted = core.updateEncoderPair(stationaryEncoder, dt, true);
-                RecordOperation(result.status, encoderAccepted, step, L"stationary_encoder");
-                if (!encoderAccepted)
                 {
                     break;
                 }
@@ -633,19 +577,11 @@ namespace MazeMap
             App::Internal::CommandVector launchControl{};
             launchControl.SetLeftCommand(0.30f);
             launchControl.SetRightCommand(0.30f);
+            SensorSnapshot::EncoderObs launchEncoder = SensorSnapshot{}.EncoderObservation();
+            SetEncoderCountDeltasForWheelSpeedsOverTick(launchEncoder, 8.0f, 8.0f, dt);
+            (void)PublishEncoderObservationToRuntime(runtime.runtimeState, launchEncoder, dt);
             const bool launchPredictAccepted = core.predict(dt, launchControl);
             RecordOperation(result.status, launchPredictAccepted, -1, L"launch_predict");
-
-            EncoderObs launchEncoder{};
-            launchEncoder.SetTotalLeftCounts(2);
-            launchEncoder.SetTotalRightCounts(2);
-            launchEncoder.SetLeftWheelSpeedRadps(8.0f);
-            launchEncoder.SetRightWheelSpeedRadps(8.0f);
-            if (launchPredictAccepted)
-            {
-                const bool launchEncoderAccepted = core.updateEncoderPair(launchEncoder, dt, true);
-                RecordOperation(result.status, launchEncoderAccepted, -1, L"launch_encoder");
-            }
 
             if (result.status.completed)
             {
@@ -656,10 +592,8 @@ namespace MazeMap
 
         inline float ExpectedZeroEncoderYawVarianceLimit()
         {
-            EstimatorTestRuntime runtime;
-            const PlantModel& plantModel = runtime.plantModel;
             const float stationaryEncoderWheelSpeedSigmaRadps =
-                plantModel.stationaryEncoderWheelSpeedSigmaRadps(kEstimatorTestStationaryEncoderVelocitySigmaMps);
+                Vehicle::WheelSpeedFromLinearVelocity(kEstimatorTestStationaryEncoderVelocitySigmaMps);
             const float stationaryYawRateSigmaRadps =
                 std::sqrt(2.0f) *
                 Vehicle::WheelLinearVelocityFromWheelSpeed(stationaryEncoderWheelSpeedSigmaRadps) /

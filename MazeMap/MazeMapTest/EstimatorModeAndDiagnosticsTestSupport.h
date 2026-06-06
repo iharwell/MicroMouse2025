@@ -3,7 +3,9 @@
 #include "EstimatorFilterTestSupport.h"
 #include "..\MazeMap\PlantModel.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <string>
 #include <vector>
@@ -15,9 +17,10 @@ namespace MazeMap
     {
         using StateVector = Eigen::Matrix<float, VehicleState::kDimension, 1>;
         using CovarianceMatrix = Eigen::Matrix<float, VehicleState::kDimension, VehicleState::kDimension>;
-        using PairCovarianceMatrix = Eigen::Matrix<float, 2, 2>;
 
         constexpr float kPlanarAccelUpdateTestDtSeconds = 0.001f;
+        constexpr int kDiagnosticStateHeadingIndex = 2;
+        constexpr int kDiagnosticStateYawRateIndex = 5;
 
         inline const wchar_t* BoolText(const bool value) noexcept
         {
@@ -29,6 +32,11 @@ namespace MazeMap
             return std::numeric_limits<float>::quiet_NaN();
         }
 
+        inline float MaxAbsDiagnosticValue(const float left, const float right) noexcept
+        {
+            return (std::max)(std::fabs(left), std::fabs(right));
+        }
+
         inline StateVector NaNState()
         {
             return StateVector::Constant(NaN());
@@ -37,6 +45,28 @@ namespace MazeMap
         inline CovarianceMatrix NaNCovariance()
         {
             return CovarianceMatrix::Constant(NaN());
+        }
+
+        inline float MaxAbsStateDeltaExceptIndex(
+            const StateVector& before,
+            const StateVector& after,
+            const int allowedIndex) noexcept
+        {
+            float maxAbsDelta = 0.0f;
+            for (int index = 0; index < VehicleState::kDimension; ++index)
+            {
+                if (index == allowedIndex)
+                {
+                    continue;
+                }
+
+                const float delta =
+                    (index == kDiagnosticStateHeadingIndex) ?
+                    NormalizeAngle(after(index) - before(index)) :
+                    (after(index) - before(index));
+                maxAbsDelta = (std::max)(maxAbsDelta, std::fabs(delta));
+            }
+            return maxAbsDelta;
         }
 
         inline std::wstring StatusMessage(const bool completed, const int step, const wchar_t* operation)
@@ -199,16 +229,6 @@ namespace MazeMap
             runtime.runtimeState.SetForwardAccelerationResidual(state(6));
             runtime.runtimeState.SetRightwardAccelerationResidual(state(7));
             runtime.runtimeState.SetYawAccelResidual(state(8));
-
-            float leftWheelSpeedRadps = 0.0f;
-            float rightWheelSpeedRadps = 0.0f;
-            Vehicle::WheelSpeedsFromBodyVelocity(
-                state(3),
-                state(5),
-                leftWheelSpeedRadps,
-                rightWheelSpeedRadps);
-            runtime.runtimeState.SetWheelSpeedLeft(leftWheelSpeedRadps);
-            runtime.runtimeState.SetWheelSpeedRight(rightWheelSpeedRadps);
             runtime.plantModel.integrate(control, kPlanarAccelUpdateTestDtSeconds);
 
             const Eigen::Vector2f imuLeverArmBodyM = Vehicle::GetBackLeftImuMount().positionBodyM();
@@ -224,30 +244,6 @@ namespace MazeMap
                 true,
                 predicted.y() + forwardAccelDeltaMps2,
                 predicted.x() + rightAccelDeltaMps2);
-        }
-
-        inline StateVector BuildPivotConflictInitialState() noexcept
-        {
-            StateVector state = StateVector::Zero();
-            state(1) = 0.09f;
-            state(2) = NormalizeAngle(0.0f);
-            state(3) = 0.20f;
-            return state;
-        }
-
-        inline CovarianceMatrix BuildPivotConflictInitialCovariance() noexcept
-        {
-            CovarianceMatrix covariance = CovarianceMatrix::Zero();
-            covariance(0, 0) = 0.001f * 0.001f;
-            covariance(1, 1) = 0.001f * 0.001f;
-            covariance(2, 2) = 0.01f * 0.01f;
-            covariance(3, 3) = 0.04f * 0.04f;
-            covariance(4, 4) = 0.04f * 0.04f;
-            covariance(5, 5) = 0.20f * 0.20f;
-            covariance(6, 6) = 10.0f * 10.0f;
-            covariance(7, 7) = 10.0f * 10.0f;
-            covariance(8, 8) = 0.02f * 0.02f;
-            return covariance;
         }
 
         inline StateVector BuildDefaultMovingState() noexcept
@@ -272,6 +268,35 @@ namespace MazeMap
             covariance(7, 7) = 0.30f * 0.30f;
             covariance(8, 8) = 0.03f * 0.03f;
             return covariance;
+        }
+
+        inline SensorSnapshot::EncoderObs PublishDiagnosticEncoderObservationToRuntime(
+            VehicleState& runtimeState,
+            const std::int32_t totalLeftCounts,
+            const std::int32_t totalRightCounts,
+            const float leftWheelSpeedRadps,
+            const float rightWheelSpeedRadps) noexcept
+        {
+            SensorSnapshot snapshot = runtimeState.GetSensorSnapshot();
+            SensorSnapshot::EncoderObs observation = snapshot.EncoderObservation();
+            observation.SetTotalLeftCounts(totalLeftCounts);
+            observation.SetTotalRightCounts(totalRightCounts);
+            observation.SetDistanceDeltasM(
+                Vehicle::DriveEncoderDistanceFromCounts(totalLeftCounts),
+                Vehicle::DriveEncoderDistanceFromCounts(totalRightCounts));
+            observation.SetWheelLinearVelocityMps(
+                Vehicle::WheelLinearVelocityFromWheelSpeed(leftWheelSpeedRadps),
+                Vehicle::WheelLinearVelocityFromWheelSpeed(rightWheelSpeedRadps));
+            observation.SetWheelSpeedRadps(leftWheelSpeedRadps, rightWheelSpeedRadps);
+            snapshot.PublishEncoderObservation(
+                observation,
+                true,
+                snapshot.LeftEncoderTotalCounts() + static_cast<std::int64_t>(totalLeftCounts),
+                snapshot.RightEncoderTotalCounts() + static_cast<std::int64_t>(totalRightCounts),
+                snapshot.LeftEncoderDistanceM() + observation.LeftDistanceDeltaM(),
+                snapshot.RightEncoderDistanceM() + observation.RightDistanceDeltaM());
+            runtimeState.SetSensorSnapshot(snapshot);
+            return observation;
         }
 
         inline StateVector BuildLaunchTransientInitialState() noexcept
@@ -313,43 +338,6 @@ namespace MazeMap
             return covariance;
         }
 
-        struct EncoderPairNoiseResult final
-        {
-            PairCovarianceMatrix covariance = PairCovarianceMatrix::Constant(NaN());
-            float expectedVarianceRadps2 = NaN();
-            float expectedCovarianceRadps2 = NaN();
-        };
-
-        inline EncoderPairNoiseResult RunEncoderPairNoiseScenario()
-        {
-            EncoderPairNoiseResult result{};
-            EstimatorTestRuntime runtime;
-            const PlantModel& plantModel = runtime.plantModel;
-            EncoderObs observation{};
-            observation.SetLeftWheelSpeedRadps(1.0f);
-            observation.SetRightWheelSpeedRadps(1.0f);
-
-            const PairCovarianceMatrix sqrtNoise =
-                plantModel.encoderPairSqrtNoise(
-                    observation,
-                    kEstimatorTestStationaryEncoderVelocitySigmaMps,
-                    kEstimatorTestGeneralEncoderLinearSpeedSigmaMps,
-                    kEstimatorTestGeneralEncoderYawRateSigmaRadps);
-            result.covariance = sqrtNoise * sqrtNoise.transpose();
-
-            const float varianceUMps2 =
-                kEstimatorTestGeneralEncoderLinearSpeedSigmaMps * kEstimatorTestGeneralEncoderLinearSpeedSigmaMps;
-            const float varianceYawRateRadps2 =
-                kEstimatorTestGeneralEncoderYawRateSigmaRadps * kEstimatorTestGeneralEncoderYawRateSigmaRadps;
-            const float halfTrackWidthM = 0.5f * Vehicle::GetPhysicalTrackWidthM();
-            const float wheelRadiusM = Vehicle::GetDriveWheelRadiusM();
-            const float invWheelRadius2 = 1.0f / (wheelRadiusM * wheelRadiusM);
-            result.expectedVarianceRadps2 =
-                (varianceUMps2 + ((halfTrackWidthM * halfTrackWidthM) * varianceYawRateRadps2)) * invWheelRadius2;
-            result.expectedCovarianceRadps2 =
-                (varianceUMps2 - ((halfTrackWidthM * halfTrackWidthM) * varianceYawRateRadps2)) * invWheelRadius2;
-            return result;
-        }
     }
 
     class EstimatorModeAndDiagnosticsTest final
@@ -378,11 +366,6 @@ namespace MazeMap
             return core.LastUpdateAccepted();
         }
 
-        static float LastUpdateNis(const Estimator& core) noexcept
-        {
-            return core.LastUpdateNis();
-        }
-
         static bool Reset(
             Estimator& core,
             const StateVector& state,
@@ -401,6 +384,7 @@ namespace MazeMap
     {
         inline ScenarioStatus PrimeCoreForPlanarAccelUpdate(
             Estimator& core,
+            VehicleState& runtimeState,
             const StateVector& initialState,
             const CovarianceMatrix& initialCovariance,
             const App::Internal::CommandVector& control)
@@ -414,16 +398,7 @@ namespace MazeMap
                 return status;
             }
 
-            const bool predictAccepted = core.predict(kPlanarAccelUpdateTestDtSeconds, control);
-            RecordOperation(status, predictAccepted, -1, L"predict");
-            if (!predictAccepted)
-            {
-                return status;
-            }
-
-            EncoderObs encoder{};
-            encoder.SetTotalLeftCounts(0);
-            encoder.SetTotalRightCounts(0);
+            SensorSnapshot::EncoderObs encoder = SensorSnapshot{}.EncoderObservation();
             float leftWheelSpeedRadps = 0.0f;
             float rightWheelSpeedRadps = 0.0f;
             Vehicle::WheelSpeedsFromBodyVelocity(
@@ -431,227 +406,18 @@ namespace MazeMap
                 EstimatorModeAndDiagnosticsTest::WorkingState(core)(5),
                 leftWheelSpeedRadps,
                 rightWheelSpeedRadps);
-            encoder.SetLeftWheelSpeedRadps(leftWheelSpeedRadps);
-            encoder.SetRightWheelSpeedRadps(rightWheelSpeedRadps);
-            const bool encoderAccepted =
-                core.updateEncoderPair(encoder, kPlanarAccelUpdateTestDtSeconds, true);
-            RecordOperation(status, encoderAccepted, -1, L"encoder");
+            SetEncoderCountDeltasForWheelSpeedsOverTick(
+                encoder,
+                leftWheelSpeedRadps,
+                rightWheelSpeedRadps,
+                kPlanarAccelUpdateTestDtSeconds);
+            (void)PublishEncoderObservationToRuntime(
+                runtimeState,
+                encoder,
+                kPlanarAccelUpdateTestDtSeconds);
+            const bool predictAccepted = core.predict(kPlanarAccelUpdateTestDtSeconds, control);
+            RecordOperation(status, predictAccepted, -1, L"predict");
             return status;
-        }
-
-        struct PivotConflictResult final
-        {
-            ScenarioStatus status{};
-            StateVector stateBeforePivot = NaNState();
-            StateVector stateAfterPredict = NaNState();
-            StateVector stateAfterEncoder = NaNState();
-            StateVector stateAfterPivot = NaNState();
-            CovarianceMatrix covarianceAfterPredict = NaNCovariance();
-            CovarianceMatrix covarianceAfterEncoder = NaNCovariance();
-            CovarianceMatrix covarianceAfterPivot = NaNCovariance();
-            float pivotEncoderLeftWheelSpeedRadps = NaN();
-            float pivotEncoderRightWheelSpeedRadps = NaN();
-            float runtimeLeftWheelSpeedRadps = NaN();
-            float runtimeRightWheelSpeedRadps = NaN();
-            float pivotEncoderNis = NaN();
-            float pivotYawNis = NaN();
-            float expectedYawNis = NaN();
-            float expectedYawRateRadps = NaN();
-            float expectedYawVarianceRadps2 = NaN();
-            float gyroCorrectedYawRateRadps = NaN();
-            float encoderDerivedYawRateRadps = NaN();
-            bool pivotEncoderAttempted = false;
-            bool pivotEncoderAccepted = false;
-            bool pivotEncoderLastAccepted = false;
-            bool pivotYawAttempted = false;
-            bool pivotYawAccepted = false;
-            bool pivotYawLastAccepted = false;
-        };
-
-        inline PivotConflictResult RunPivotConflictScenario()
-        {
-            PivotConflictResult result{};
-            EstimatorTestRuntime runtime;
-            Estimator core(runtime.vehicle, runtime.plantModel, runtime.runtimeState);
-            const bool resetAccepted =
-                EstimatorModeAndDiagnosticsTest::Reset(
-                    core,
-                    BuildPivotConflictInitialState(),
-                    BuildPivotConflictInitialCovariance());
-            RecordOperation(result.status, resetAccepted, -1, L"reset");
-            if (!resetAccepted)
-            {
-                return result;
-            }
-
-            App::Internal::CommandVector control{};
-            control.SetLeftCommand(0.60f);
-            control.SetRightCommand(-0.60f);
-
-            constexpr float pivotDtSeconds = 0.001f;
-            constexpr int pivotLegacyStepScale = 10;
-            int seedLeftCounts = 0;
-            int seedRightCounts = 0;
-            for (int seedIndex = 0; seedIndex < (8 * pivotLegacyStepScale); ++seedIndex)
-            {
-                seedLeftCounts += (100 / pivotLegacyStepScale);
-                seedRightCounts -= (100 / pivotLegacyStepScale);
-                const bool predictAccepted = core.predict(pivotDtSeconds, control);
-                RecordOperation(result.status, predictAccepted, seedIndex, L"seed_predict");
-                if (!predictAccepted)
-                {
-                    return result;
-                }
-
-                EncoderObs seedEncoder{};
-                seedEncoder.SetTotalLeftCounts(seedLeftCounts);
-                seedEncoder.SetTotalRightCounts(seedRightCounts);
-                seedEncoder.SetLeftWheelSpeedRadps(12.0f);
-                seedEncoder.SetRightWheelSpeedRadps(-12.0f);
-                runtime.runtimeState.SetWheelSpeedLeft(seedEncoder.LeftWheelSpeedRadps());
-                runtime.runtimeState.SetWheelSpeedRight(seedEncoder.RightWheelSpeedRadps());
-                const bool seedEncoderAccepted =
-                    core.updateEncoderPair(seedEncoder, pivotDtSeconds, false);
-                RecordOperation(result.status, seedEncoderAccepted, seedIndex, L"seed_encoder");
-                if (!seedEncoderAccepted)
-                {
-                    return result;
-                }
-
-                const bool seedYawAccepted = core.updateYawRate(0.0f);
-                RecordOperation(result.status, seedYawAccepted, seedIndex, L"seed_yaw");
-                if (!seedYawAccepted)
-                {
-                    return result;
-                }
-            }
-
-            result.stateBeforePivot = EstimatorModeAndDiagnosticsTest::WorkingState(core);
-            constexpr float pivotGyroCorrectedYawRateRadps = 1.80f;
-            EncoderObs pivotEncoderObservation{};
-            pivotEncoderObservation.SetLeftWheelSpeedRadps(18.0f);
-            pivotEncoderObservation.SetRightWheelSpeedRadps(-18.0f);
-            result.encoderDerivedYawRateRadps =
-                runtime.plantModel.measuredYawRateRadps(pivotEncoderObservation);
-
-            const bool predictAccepted = core.predict(pivotDtSeconds, control);
-            RecordOperation(result.status, predictAccepted, -1, L"pivot_predict");
-            if (!predictAccepted)
-            {
-                return result;
-            }
-
-            result.stateAfterPredict = EstimatorModeAndDiagnosticsTest::WorkingState(core);
-            result.covarianceAfterPredict = EstimatorModeAndDiagnosticsTest::WorkingCovariance(core);
-
-            pivotEncoderObservation.SetTotalLeftCounts(seedLeftCounts + (120 / pivotLegacyStepScale));
-            pivotEncoderObservation.SetTotalRightCounts(seedRightCounts - (120 / pivotLegacyStepScale));
-            runtime.runtimeState.SetWheelSpeedLeft(pivotEncoderObservation.LeftWheelSpeedRadps());
-            runtime.runtimeState.SetWheelSpeedRight(pivotEncoderObservation.RightWheelSpeedRadps());
-            result.pivotEncoderLeftWheelSpeedRadps = pivotEncoderObservation.LeftWheelSpeedRadps();
-            result.pivotEncoderRightWheelSpeedRadps = pivotEncoderObservation.RightWheelSpeedRadps();
-            result.runtimeLeftWheelSpeedRadps = runtime.runtimeState.GetWheelSpeedLeft();
-            result.runtimeRightWheelSpeedRadps = runtime.runtimeState.GetWheelSpeedRight();
-
-            result.pivotEncoderAccepted =
-                core.updateEncoderPair(pivotEncoderObservation, pivotDtSeconds, false);
-            result.pivotEncoderAttempted = EstimatorModeAndDiagnosticsTest::LastUpdateAttempted(core);
-            result.pivotEncoderLastAccepted = EstimatorModeAndDiagnosticsTest::LastUpdateAccepted(core);
-            result.pivotEncoderNis = EstimatorModeAndDiagnosticsTest::LastUpdateNis(core);
-            RecordOperation(result.status, result.pivotEncoderAccepted, -1, L"pivot_encoder");
-            if (!result.pivotEncoderAccepted)
-            {
-                return result;
-            }
-
-            result.stateAfterEncoder = EstimatorModeAndDiagnosticsTest::WorkingState(core);
-            result.covarianceAfterEncoder = EstimatorModeAndDiagnosticsTest::WorkingCovariance(core);
-
-            result.gyroCorrectedYawRateRadps = pivotGyroCorrectedYawRateRadps;
-            const float gyroScaleRadpsPerLsb =
-                runtime.vehicle.BackLeftImu().GyroSensitivityMdpsPerLsb() * 0.001f * DEG_TO_RAD_F;
-            const float gyroScaleToleranceSigmaRadps =
-                std::fabs(result.gyroCorrectedYawRateRadps) *
-                kEstimatorTestImuGyroSensitivityToleranceFraction /
-                std::sqrt(3.0f);
-            const float yawInnovation =
-                result.gyroCorrectedYawRateRadps - result.stateAfterEncoder(5);
-            const float yawInnovationVariance =
-                result.covarianceAfterEncoder(5, 5) +
-                kEstimatorTestImuYawRateVarianceRadps2 +
-                ((gyroScaleRadpsPerLsb * gyroScaleRadpsPerLsb) / 12.0f) +
-                (gyroScaleToleranceSigmaRadps * gyroScaleToleranceSigmaRadps);
-            const float yawGain = result.covarianceAfterEncoder(5, 5) / yawInnovationVariance;
-            result.expectedYawRateRadps =
-                result.stateAfterEncoder(5) + (yawGain * yawInnovation);
-            result.expectedYawVarianceRadps2 =
-                result.covarianceAfterEncoder(5, 5) -
-                (yawGain * yawInnovationVariance * yawGain);
-            result.expectedYawNis = (yawInnovation * yawInnovation) / yawInnovationVariance;
-
-            result.pivotYawAccepted = core.updateYawRate(pivotGyroCorrectedYawRateRadps);
-            result.pivotYawAttempted = EstimatorModeAndDiagnosticsTest::LastUpdateAttempted(core);
-            result.pivotYawLastAccepted = EstimatorModeAndDiagnosticsTest::LastUpdateAccepted(core);
-            result.pivotYawNis = EstimatorModeAndDiagnosticsTest::LastUpdateNis(core);
-            RecordOperation(result.status, result.pivotYawAccepted, -1, L"pivot_yaw");
-            if (result.pivotYawAccepted)
-            {
-                result.stateAfterPivot = EstimatorModeAndDiagnosticsTest::WorkingState(core);
-                result.covarianceAfterPivot = EstimatorModeAndDiagnosticsTest::WorkingCovariance(core);
-            }
-            return result;
-        }
-
-        struct PivotCommandResult final
-        {
-            ScenarioStatus status{};
-            StateVector stateBeforeEncoder = NaNState();
-            StateVector stateAfterEncoder = NaNState();
-            float measuredForwardSpeedMps = NaN();
-            float measuredYawRateRadps = NaN();
-        };
-
-        inline PivotCommandResult RunPivotCommandScenario()
-        {
-            PivotCommandResult result{};
-            EstimatorTestRuntime runtime;
-            Estimator core(runtime.vehicle, runtime.plantModel, runtime.runtimeState);
-            const bool resetAccepted =
-                EstimatorModeAndDiagnosticsTest::Reset(
-                    core,
-                    BuildDefaultMovingState(),
-                    BuildDefaultMovingCovariance());
-            RecordOperation(result.status, resetAccepted, -1, L"reset");
-            if (!resetAccepted)
-            {
-                return result;
-            }
-
-            App::Internal::CommandVector control{};
-            control.SetLeftCommand(0.60f);
-            control.SetRightCommand(-0.60f);
-            const bool predictAccepted = core.predict(0.001f, control);
-            RecordOperation(result.status, predictAccepted, -1, L"predict");
-            if (!predictAccepted)
-            {
-                return result;
-            }
-            result.stateBeforeEncoder = EstimatorModeAndDiagnosticsTest::WorkingState(core);
-
-            EncoderObs encoder{};
-            encoder.SetTotalLeftCounts(10);
-            encoder.SetTotalRightCounts(-10);
-            encoder.SetLeftWheelSpeedRadps(0.60f);
-            encoder.SetRightWheelSpeedRadps(-0.60f);
-            result.measuredForwardSpeedMps = runtime.plantModel.measuredLinearSpeedMps(encoder);
-            result.measuredYawRateRadps = runtime.plantModel.measuredYawRateRadps(encoder);
-            const bool encoderAccepted = core.updateEncoderPair(encoder, 0.001f, true);
-            RecordOperation(result.status, encoderAccepted, -1, L"encoder");
-            if (encoderAccepted)
-            {
-                result.stateAfterEncoder = EstimatorModeAndDiagnosticsTest::WorkingState(core);
-            }
-            return result;
         }
 
         struct DiagnosticResult final
@@ -671,7 +437,8 @@ namespace MazeMap
         inline DiagnosticResult RunDiagnosticScenario()
         {
             DiagnosticResult result{};
-            Estimator core = MakeDefaultEstimator();
+            EstimatorTestRuntime runtime;
+            Estimator core(runtime.vehicle, runtime.plantModel, runtime.runtimeState);
             const bool resetAccepted =
                 EstimatorModeAndDiagnosticsTest::Reset(
                     core,
@@ -686,56 +453,87 @@ namespace MazeMap
             App::Internal::CommandVector control{};
             control.SetLeftCommand(0.25f);
             control.SetRightCommand(0.25f);
-            const bool predictAccepted = core.predict(0.001f, control);
+
+            constexpr float diagnosticDtSeconds = 0.001f;
+            constexpr std::int32_t diagnosticLeftCounts = 6;
+            constexpr std::int32_t diagnosticRightCounts = 6;
+            constexpr float diagnosticLeftWheelSpeedRadps = 0.80f;
+            constexpr float diagnosticRightWheelSpeedRadps = 0.80f;
+            const SensorSnapshot::EncoderObs publishedEncoder =
+                PublishDiagnosticEncoderObservationToRuntime(
+                    runtime.runtimeState,
+                    diagnosticLeftCounts,
+                    diagnosticRightCounts,
+                    diagnosticLeftWheelSpeedRadps,
+                    diagnosticRightWheelSpeedRadps);
+
+            const bool predictAccepted = core.predict(diagnosticDtSeconds, control);
             RecordOperation(result.status, predictAccepted, -1, L"predict");
             if (!predictAccepted)
             {
                 return result;
             }
 
-            EncoderObs encoder{};
-            encoder.SetTotalLeftCounts(6);
-            encoder.SetTotalRightCounts(6);
-            encoder.SetLeftWheelSpeedRadps(0.80f);
-            encoder.SetRightWheelSpeedRadps(0.80f);
-            const bool encoderAccepted = core.updateEncoderPair(encoder, 0.001f, true);
-            RecordOperation(result.status, encoderAccepted, -1, L"encoder");
-            if (!encoderAccepted)
-            {
-                return result;
-            }
-
+            const StateVector stateBeforeYaw = EstimatorModeAndDiagnosticsTest::WorkingState(core);
             const bool yawAccepted = core.updateYawRate(0.02f);
             RecordOperation(result.status, yawAccepted, -1, L"yaw");
             if (!yawAccepted)
             {
                 return result;
             }
-
-            result.pivotScrubMode =
-                FindDebugDumpBool(core, "estimator_dump_pivot_scrub", "pivot_scrub_mode");
-            result.encoderBodyUpdateSkipped =
-                FindDebugDumpBool(core, "estimator_dump_pivot_scrub", "encoder_body_update_skipped");
-            result.zeroUSoftApplied =
-                FindDebugDumpBool(core, "estimator_dump_pivot_scrub", "zero_u_soft_applied");
-            result.encoderMaskedDeltaNorm =
-                FindDebugDumpFloat(core, "estimator_dump_pivot_scrub_encoder", "masked_delta_norm");
-            result.zeroUInnovationMps =
-                FindDebugDumpFloat(core, "estimator_dump_pivot_scrub_zero_u", "innovation_mps");
-            result.gyroMaskedDeltaNorm =
-                FindDebugDumpFloat(core, "estimator_dump_pivot_scrub_gyro", "masked_delta_norm");
+            const StateVector stateAfterYaw = EstimatorModeAndDiagnosticsTest::WorkingState(core);
 
             const std::vector<std::pair<std::string, std::string>> dumpLines =
                 CollectDebugDumpLines(core);
+            const bool predictionEncoderInput =
+                FindDebugDumpBool(core, "estimator_dump_update_metrics", "prediction_encoder_input");
             result.dumpLineCount = dumpLines.size();
             result.pivotModeIndex =
-                FindFirstDumpLineIndexContaining(dumpLines, "estimator_dump_pivot_scrub");
-            if (result.pivotModeIndex < dumpLines.size())
-            {
-                result.pivotLineReportsInactive =
-                    dumpLines[result.pivotModeIndex].second.find("pivot_scrub_mode=false") !=
-                    std::string::npos;
-            }
+                FindFirstDumpLineIndexContaining(dumpLines, "estimator_dump_prediction_encoder_input");
+            const bool predictionEncoderInputLinePresent = result.pivotModeIndex < dumpLines.size();
+            const float dumpLeftWheelSpeedRadps =
+                FindDebugDumpFloat(core, "estimator_dump_prediction_encoder_input", "left_wheel_speed_radps");
+            const float dumpRightWheelSpeedRadps =
+                FindDebugDumpFloat(core, "estimator_dump_prediction_encoder_input", "right_wheel_speed_radps");
+            const float dumpLeftCounts =
+                FindDebugDumpFloat(core, "estimator_dump_prediction_encoder_input", "total_left_counts");
+            const float dumpRightCounts =
+                FindDebugDumpFloat(core, "estimator_dump_prediction_encoder_input", "total_right_counts");
+            const float expectedForwardSpeedMps =
+                0.5f *
+                Vehicle::GetDriveWheelRadiusM() *
+                (publishedEncoder.LeftWheelSpeedRadps() + publishedEncoder.RightWheelSpeedRadps());
+            const float dumpForwardSpeedMps =
+                0.5f *
+                Vehicle::GetDriveWheelRadiusM() *
+                (dumpLeftWheelSpeedRadps + dumpRightWheelSpeedRadps);
+
+            result.pivotScrubMode = !predictionEncoderInput;
+            result.encoderMaskedDeltaNorm =
+                (std::max)(
+                    MaxAbsDiagnosticValue(
+                        dumpLeftWheelSpeedRadps - publishedEncoder.LeftWheelSpeedRadps(),
+                        dumpRightWheelSpeedRadps - publishedEncoder.RightWheelSpeedRadps()),
+                    MaxAbsDiagnosticValue(
+                        dumpLeftCounts - static_cast<float>(publishedEncoder.TotalLeftCounts()),
+                        dumpRightCounts - static_cast<float>(publishedEncoder.TotalRightCounts())));
+            result.encoderBodyUpdateSkipped =
+                !predictionEncoderInputLinePresent ||
+                !predictionEncoderInput ||
+                !(result.encoderMaskedDeltaNorm <= 1.0e-6f);
+            result.zeroUInnovationMps = dumpForwardSpeedMps - expectedForwardSpeedMps;
+            result.zeroUSoftApplied =
+                !(std::fabs(dumpForwardSpeedMps) > 1.0e-6f) ||
+                !(std::fabs(result.zeroUInnovationMps) <= 1.0e-6f);
+            result.gyroMaskedDeltaNorm =
+                MaxAbsStateDeltaExceptIndex(
+                    stateBeforeYaw,
+                    stateAfterYaw,
+                    kDiagnosticStateYawRateIndex);
+            result.pivotLineReportsInactive =
+                predictionEncoderInputLinePresent &&
+                predictionEncoderInput &&
+                (result.encoderMaskedDeltaNorm <= 1.0e-6f);
             return result;
         }
 
@@ -748,7 +546,8 @@ namespace MazeMap
         inline LaunchTransientResult RunLaunchTransientScenario()
         {
             LaunchTransientResult result{};
-            Estimator core = MakeDefaultEstimator();
+            EstimatorTestRuntime runtime;
+            Estimator core(runtime.vehicle, runtime.plantModel, runtime.runtimeState);
             const bool resetAccepted =
                 EstimatorModeAndDiagnosticsTest::Reset(
                     core,
@@ -770,21 +569,15 @@ namespace MazeMap
                 return result;
             }
 
+            SensorSnapshot::EncoderObs encoder = SensorSnapshot{}.EncoderObservation();
+            SetEncoderCountDeltasForWheelSpeedsOverTick(encoder, 2.0f, 2.0f, 0.001f);
+            (void)PublishEncoderObservationToRuntime(runtime.runtimeState, encoder, 0.001f);
+
             control.SetLeftCommand(-0.20f);
             control.SetRightCommand(-0.20f);
             const bool reversePredictAccepted = core.predict(0.001f, control);
             RecordOperation(result.status, reversePredictAccepted, -1, L"reverse_predict");
             if (!reversePredictAccepted)
-            {
-                return result;
-            }
-
-            EncoderObs encoder{};
-            encoder.SetLeftWheelSpeedRadps(2.0f);
-            encoder.SetRightWheelSpeedRadps(2.0f);
-            const bool encoderAccepted = core.updateEncoderPair(encoder, 0.001f, true);
-            RecordOperation(result.status, encoderAccepted, -1, L"encoder");
-            if (!encoderAccepted)
             {
                 return result;
             }
@@ -823,7 +616,8 @@ namespace MazeMap
                 leftWheelSpeedRadps,
                 rightWheelSpeedRadps);
 
-            Estimator core = MakeDefaultEstimator();
+            EstimatorTestRuntime runtime;
+            Estimator core(runtime.vehicle, runtime.plantModel, runtime.runtimeState);
             const StateVector initialState =
                 BuildGripInitialState(forwardVelocityMps, yawRateRadps);
             const bool resetAccepted =
@@ -837,17 +631,24 @@ namespace MazeMap
                 return result;
             }
 
-            EncoderObs encoder{};
-            encoder.SetLeftWheelSpeedRadps(leftWheelSpeedRadps);
-            encoder.SetRightWheelSpeedRadps(rightWheelSpeedRadps);
-            const bool encoderAccepted = core.updateEncoderPair(encoder, 0.001f, true);
-            RecordOperation(result.status, encoderAccepted, -1, L"encoder");
-            if (!encoderAccepted)
+            SensorSnapshot::EncoderObs encoder = SensorSnapshot{}.EncoderObservation();
+            SetEncoderCountDeltasForWheelSpeedsOverTick(
+                encoder,
+                leftWheelSpeedRadps,
+                rightWheelSpeedRadps,
+                0.001f);
+            (void)PublishEncoderObservationToRuntime(runtime.runtimeState, encoder, 0.001f);
+
+            App::Internal::CommandVector control{};
+            const bool predictAccepted = core.predict(0.001f, control);
+            RecordOperation(result.status, predictAccepted, -1, L"predict");
+            if (!predictAccepted)
             {
                 return result;
             }
 
-            result.initialLateralVelocityMps = initialState(4);
+            result.initialLateralVelocityMps =
+                EstimatorModeAndDiagnosticsTest::WorkingState(core)(4);
             result.initialLateralVarianceMps2 =
                 EstimatorModeAndDiagnosticsTest::WorkingCovariance(core)(4, 4);
 
@@ -890,16 +691,28 @@ namespace MazeMap
         {
             YawPlanarAccelResult result{};
             EstimatorTestRuntime runtime;
+            EstimatorTestRuntime mergedRuntime;
+            EstimatorTestRuntime sequentialRuntime;
             const StateVector initialState = BuildPlanarAccelUpdateTestState();
             const CovarianceMatrix initialCovariance = BuildPlanarAccelUpdateTestCovariance();
             const App::Internal::CommandVector control = BuildPlanarAccelUpdateTestControl();
 
-            Estimator mergedCore = MakeDefaultEstimator();
-            Estimator sequentialCore = MakeDefaultEstimator();
+            Estimator mergedCore(mergedRuntime.vehicle, mergedRuntime.plantModel, mergedRuntime.runtimeState);
+            Estimator sequentialCore(sequentialRuntime.vehicle, sequentialRuntime.plantModel, sequentialRuntime.runtimeState);
             result.mergedPrimeStatus =
-                PrimeCoreForPlanarAccelUpdate(mergedCore, initialState, initialCovariance, control);
+                PrimeCoreForPlanarAccelUpdate(
+                    mergedCore,
+                    mergedRuntime.runtimeState,
+                    initialState,
+                    initialCovariance,
+                    control);
             result.sequentialPrimeStatus =
-                PrimeCoreForPlanarAccelUpdate(sequentialCore, initialState, initialCovariance, control);
+                PrimeCoreForPlanarAccelUpdate(
+                    sequentialCore,
+                    sequentialRuntime.runtimeState,
+                    initialState,
+                    initialCovariance,
+                    control);
             if (!result.mergedPrimeStatus.completed || !result.sequentialPrimeStatus.completed)
             {
                 return result;
@@ -960,19 +773,46 @@ namespace MazeMap
         {
             PlanarAccelChannelResult result{};
             EstimatorTestRuntime runtime;
+            EstimatorTestRuntime baselineRuntime;
+            EstimatorTestRuntime rightPerturbedRuntime;
+            EstimatorTestRuntime forwardPerturbedRuntime;
             const StateVector initialState = BuildPlanarAccelUpdateTestState();
             const CovarianceMatrix initialCovariance = BuildPlanarAccelUpdateTestCovariance();
             const App::Internal::CommandVector control = BuildPlanarAccelUpdateTestControl();
 
-            Estimator baselineCore = MakeDefaultEstimator();
-            Estimator rightPerturbedCore = MakeDefaultEstimator();
-            Estimator forwardPerturbedCore = MakeDefaultEstimator();
+            Estimator baselineCore(
+                baselineRuntime.vehicle,
+                baselineRuntime.plantModel,
+                baselineRuntime.runtimeState);
+            Estimator rightPerturbedCore(
+                rightPerturbedRuntime.vehicle,
+                rightPerturbedRuntime.plantModel,
+                rightPerturbedRuntime.runtimeState);
+            Estimator forwardPerturbedCore(
+                forwardPerturbedRuntime.vehicle,
+                forwardPerturbedRuntime.plantModel,
+                forwardPerturbedRuntime.runtimeState);
             result.baselinePrimeStatus =
-                PrimeCoreForPlanarAccelUpdate(baselineCore, initialState, initialCovariance, control);
+                PrimeCoreForPlanarAccelUpdate(
+                    baselineCore,
+                    baselineRuntime.runtimeState,
+                    initialState,
+                    initialCovariance,
+                    control);
             result.rightPrimeStatus =
-                PrimeCoreForPlanarAccelUpdate(rightPerturbedCore, initialState, initialCovariance, control);
+                PrimeCoreForPlanarAccelUpdate(
+                    rightPerturbedCore,
+                    rightPerturbedRuntime.runtimeState,
+                    initialState,
+                    initialCovariance,
+                    control);
             result.forwardPrimeStatus =
-                PrimeCoreForPlanarAccelUpdate(forwardPerturbedCore, initialState, initialCovariance, control);
+                PrimeCoreForPlanarAccelUpdate(
+                    forwardPerturbedCore,
+                    forwardPerturbedRuntime.runtimeState,
+                    initialState,
+                    initialCovariance,
+                    control);
             if (!result.baselinePrimeStatus.completed ||
                 !result.rightPrimeStatus.completed ||
                 !result.forwardPrimeStatus.completed)

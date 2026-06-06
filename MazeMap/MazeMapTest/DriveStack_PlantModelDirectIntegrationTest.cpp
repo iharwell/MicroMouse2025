@@ -12,6 +12,25 @@ namespace MazeMap
 {
     using namespace DriveStackPlantModelPhysicsTestSupport;
 
+    namespace
+    {
+        float LeftBodyWheelSpeedRadps(const VehicleState& state) noexcept
+        {
+            return Vehicle::WheelSpeedFromLinearVelocity(
+                Vehicle::LeftWheelLinearVelocityFromBody(
+                    state.GetForwardVelocity(),
+                    state.GetYawRate()));
+        }
+
+        float RightBodyWheelSpeedRadps(const VehicleState& state) noexcept
+        {
+            return Vehicle::WheelSpeedFromLinearVelocity(
+                Vehicle::RightWheelLinearVelocityFromBody(
+                    state.GetForwardVelocity(),
+                    state.GetYawRate()));
+        }
+    }
+
     TEST_CLASS(DriveStack_PlantModelDirectIntegrationTest)
     {
     public:
@@ -160,10 +179,11 @@ namespace MazeMap
             runtime.runtimeState = initial;
             runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.0f);
             const VehicleState actual = runtime.runtimeState;
-            const float actualDelta = actual.GetWheelSpeedLeft() - initial.GetWheelSpeedLeft();
+            const float actualDelta =
+                LeftBodyWheelSpeedRadps(actual) - LeftBodyWheelSpeedRadps(initial);
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
-                << L"\nfield=left_wheel_speed_delta_radps"
+                << L"\nfield=left_body_wheel_speed_delta_radps"
                 << L"\nexpected=0"
                 << L"\nactual=" << actualDelta
                 << L"\ntolerance=0"
@@ -183,10 +203,11 @@ namespace MazeMap
             runtime.runtimeState = initial;
             runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.0f);
             const VehicleState actual = runtime.runtimeState;
-            const float actualDelta = actual.GetWheelSpeedRight() - initial.GetWheelSpeedRight();
+            const float actualDelta =
+                RightBodyWheelSpeedRadps(actual) - RightBodyWheelSpeedRadps(initial);
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
-                << L"\nfield=right_wheel_speed_delta_radps"
+                << L"\nfield=right_body_wheel_speed_delta_radps"
                 << L"\nexpected=0"
                 << L"\nactual=" << actualDelta
                 << L"\ntolerance=0"
@@ -378,17 +399,18 @@ namespace MazeMap
             runtime.runtimeState = initial;
             runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.004f);
             const VehicleState state = runtime.runtimeState;
-            const float actual = state.GetWheelSpeedLeft();
+            const float actual = LeftBodyWheelSpeedRadps(state);
+            const float initialLeftWheelSpeedRadps = LeftBodyWheelSpeedRadps(initial);
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
-                << L"\nfield=left_wheel_speed_radps"
-                << L"\ninitial=" << initial.GetWheelSpeedLeft()
+                << L"\nfield=left_body_wheel_speed_radps"
+                << L"\ninitial=" << initialLeftWheelSpeedRadps
                 << L"\nactual=" << actual
                 << L"\ncriterion=actual>initial"
                 << L"\ndt_seconds=0.004";
 
             Assert::IsTrue(
-                actual > initial.GetWheelSpeedLeft(),
+                actual > initialLeftWheelSpeedRadps,
                 message.str().c_str());
         }
 
@@ -399,17 +421,18 @@ namespace MazeMap
             runtime.runtimeState = initial;
             runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.004f);
             const VehicleState state = runtime.runtimeState;
-            const float actual = state.GetWheelSpeedRight();
+            const float actual = RightBodyWheelSpeedRadps(state);
+            const float initialRightWheelSpeedRadps = RightBodyWheelSpeedRadps(initial);
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
-                << L"\nfield=right_wheel_speed_radps"
-                << L"\ninitial=" << initial.GetWheelSpeedRight()
+                << L"\nfield=right_body_wheel_speed_radps"
+                << L"\ninitial=" << initialRightWheelSpeedRadps
                 << L"\nactual=" << actual
                 << L"\ncriterion=actual>initial"
                 << L"\ndt_seconds=0.004";
 
             Assert::IsTrue(
-                actual > initial.GetWheelSpeedRight(),
+                actual > initialRightWheelSpeedRadps,
                 message.str().c_str());
         }
 
@@ -580,18 +603,19 @@ namespace MazeMap
                 runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.001f);
                 state = runtime.runtimeState;
             }
-            const float actual = state.GetWheelSpeedLeft();
+            const float actual = LeftBodyWheelSpeedRadps(state);
+            const float initialLeftWheelSpeedRadps = LeftBodyWheelSpeedRadps(initial);
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
-                << L"\nfield=left_wheel_speed_radps"
-                << L"\ninitial=" << initial.GetWheelSpeedLeft()
+                << L"\nfield=left_body_wheel_speed_radps"
+                << L"\ninitial=" << initialLeftWheelSpeedRadps
                 << L"\nactual=" << actual
                 << L"\ncriterion=actual>initial"
                 << L"\nsubsteps=4"
                 << L"\ndt_seconds=0.001";
 
             Assert::IsTrue(
-                actual > initial.GetWheelSpeedLeft(),
+                actual > initialLeftWheelSpeedRadps,
                 message.str().c_str());
         }
 
@@ -606,18 +630,19 @@ namespace MazeMap
                 runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.001f);
                 state = runtime.runtimeState;
             }
-            const float actual = state.GetWheelSpeedRight();
+            const float actual = RightBodyWheelSpeedRadps(state);
+            const float initialRightWheelSpeedRadps = RightBodyWheelSpeedRadps(initial);
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
-                << L"\nfield=right_wheel_speed_radps"
-                << L"\ninitial=" << initial.GetWheelSpeedRight()
+                << L"\nfield=right_body_wheel_speed_radps"
+                << L"\ninitial=" << initialRightWheelSpeedRadps
                 << L"\nactual=" << actual
                 << L"\ncriterion=actual>initial"
                 << L"\nsubsteps=4"
                 << L"\ndt_seconds=0.001";
 
             Assert::IsTrue(
-                actual > initial.GetWheelSpeedRight(),
+                actual > initialRightWheelSpeedRadps,
                 message.str().c_str());
         }
 

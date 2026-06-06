@@ -27,13 +27,6 @@ namespace MazeMap
             Assert::IsTrue(scenario.firstPredictAccepted, L"first predict rejected torque-refresh scenario");
         }
 
-        TEST_METHOD(TorqueRefreshFirstEncoderAccepted)
-        {
-            const TorqueRefreshScenario scenario = RunTorqueRefreshScenario();
-
-            Assert::IsTrue(scenario.firstEncoderAccepted, L"first encoder update rejected torque-refresh scenario");
-        }
-
         TEST_METHOD(TorqueRefreshFirstControlResetAccepted)
         {
             const TorqueRefreshScenario scenario = RunTorqueRefreshScenario();

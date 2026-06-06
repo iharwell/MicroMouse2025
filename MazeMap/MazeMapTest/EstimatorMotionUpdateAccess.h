@@ -48,10 +48,6 @@ namespace MazeMap
             return core.LastUpdateAccepted();
         }
 
-        static float LastUpdateNis(const Estimator& core) noexcept
-        {
-            return core.LastUpdateNis();
-        }
     };
 
     namespace EstimatorMotionUpdateSupport
@@ -229,13 +225,6 @@ namespace MazeMap
             VehicleState& runtimeState,
             const StateVector& state) noexcept
         {
-            float leftWheelSpeedRadps = 0.0f;
-            float rightWheelSpeedRadps = 0.0f;
-            Vehicle::WheelSpeedsFromBodyVelocity(
-                state(3),
-                state(5),
-                leftWheelSpeedRadps,
-                rightWheelSpeedRadps);
             runtimeState.SetPosition(Eigen::Vector2f(state(0), state(1)));
             runtimeState.SetHeading(state(2));
             runtimeState.SetForwardVelocity(state(3));
@@ -244,8 +233,6 @@ namespace MazeMap
             runtimeState.SetForwardAccelerationResidual(state(6));
             runtimeState.SetRightwardAccelerationResidual(state(7));
             runtimeState.SetYawAccelResidual(state(8));
-            runtimeState.SetWheelSpeedLeft(leftWheelSpeedRadps);
-            runtimeState.SetWheelSpeedRight(rightWheelSpeedRadps);
         }
 
         inline CovarianceMatrix BuildTightInitialCovariance()

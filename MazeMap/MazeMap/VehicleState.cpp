@@ -26,6 +26,25 @@ static float EstimatorStationaryWheelSpeedThresholdRadps() noexcept
 
 namespace MazeMap
 {
+    void VehicleState::PublishEncoderWheelSpeedsRadps(
+        const float leftWheelSpeedRadps,
+        const float rightWheelSpeedRadps,
+        const bool valid) noexcept
+    {
+        SensorSnapshot::EncoderObs observation = _sensorSnapshot.EncoderObservation();
+        observation.SetWheelSpeedRadps(leftWheelSpeedRadps, rightWheelSpeedRadps);
+        observation.SetWheelLinearVelocityMps(
+            Vehicle::WheelLinearVelocityFromWheelSpeed(leftWheelSpeedRadps),
+            Vehicle::WheelLinearVelocityFromWheelSpeed(rightWheelSpeedRadps));
+        _sensorSnapshot.PublishEncoderObservation(
+            observation,
+            valid,
+            _sensorSnapshot.LeftEncoderTotalCounts(),
+            _sensorSnapshot.RightEncoderTotalCounts(),
+            _sensorSnapshot.LeftEncoderDistanceM(),
+            _sensorSnapshot.RightEncoderDistanceM());
+    }
+
     bool VehicleState::IsStationary() const noexcept
     {
         const float wheelSpeedThresholdRadps = EstimatorStationaryWheelSpeedThresholdRadps();

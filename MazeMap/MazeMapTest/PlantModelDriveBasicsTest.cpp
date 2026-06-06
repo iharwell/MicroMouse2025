@@ -116,8 +116,10 @@ namespace MazeMap
             state.SetForwardVelocity(forwardVelocityMps);
             state.SetRightwardVelocity(0.0f);
             state.SetYawRate(0.0f);
-            state.SetWheelSpeedLeft(Vehicle::WheelSpeedFromLinearVelocity(forwardVelocityMps));
-            state.SetWheelSpeedRight(Vehicle::WheelSpeedFromLinearVelocity(forwardVelocityMps));
+            PublishEncoderObservationForWheelSpeedsRadps(
+                state,
+                Vehicle::WheelSpeedFromLinearVelocity(forwardVelocityMps),
+                Vehicle::WheelSpeedFromLinearVelocity(forwardVelocityMps));
             PlantModel plant(vehicle, state);
             const float initialYawRateRadps = state.GetYawRate();
 
@@ -152,8 +154,10 @@ namespace MazeMap
             state.SetForwardVelocity(forwardVelocityMps);
             state.SetRightwardVelocity(0.0f);
             state.SetYawRate(0.0f);
-            state.SetWheelSpeedLeft(Vehicle::WheelSpeedFromLinearVelocity(forwardVelocityMps));
-            state.SetWheelSpeedRight(Vehicle::WheelSpeedFromLinearVelocity(forwardVelocityMps));
+            PublishEncoderObservationForWheelSpeedsRadps(
+                state,
+                Vehicle::WheelSpeedFromLinearVelocity(forwardVelocityMps),
+                Vehicle::WheelSpeedFromLinearVelocity(forwardVelocityMps));
             PlantModel plant(vehicle, state);
 
             const App::Internal::CommandVector coastCommand{};
@@ -186,8 +190,10 @@ namespace MazeMap
             state.SetForwardVelocity(forwardVelocityMps);
             state.SetRightwardVelocity(0.0f);
             state.SetYawRate(0.0f);
-            state.SetWheelSpeedLeft(Vehicle::WheelSpeedFromLinearVelocity(forwardVelocityMps));
-            state.SetWheelSpeedRight(Vehicle::WheelSpeedFromLinearVelocity(forwardVelocityMps));
+            PublishEncoderObservationForWheelSpeedsRadps(
+                state,
+                Vehicle::WheelSpeedFromLinearVelocity(forwardVelocityMps),
+                Vehicle::WheelSpeedFromLinearVelocity(forwardVelocityMps));
             PlantModel plant(vehicle, state);
 
             const App::Internal::CommandVector coastCommand{};
