@@ -133,6 +133,7 @@ namespace MazeMap::App::Internal
             &StaticMeasurementRegime::SharedInstance(),
             &LaunchMeasurementRegime::SharedInstance(),
             &YawLaunchMeasurementRegime::SharedInstance(),
+			& MixedLaunchMeasurementRegime::SharedInstance(),
             &StraightMeasurementRegime::SharedInstance(),
             &YawMeasurementRegime::SharedInstance(),
             &SmoothMeasurementRegime::SharedInstance(),
@@ -1200,10 +1201,6 @@ namespace MazeMap::App::Internal
         {
             controller.FinalizeSuccessfulRun();
             loopController.HaltExecutionEndProgram();
-            return StopControlVector();
-        }
-        if (CheckFault(controller))
-        {
             return StopControlVector();
         }
 

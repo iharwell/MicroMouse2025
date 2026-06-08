@@ -2,7 +2,7 @@
 #include "Defines.h"
 #include "Imu.h"
 #include "Maze.h"
-#include "PDCluster.h"
+#include "DriveBaseTrackingTuning.h"
 #include "Vehicle.h"
 
 namespace MazeMap::Config
@@ -414,28 +414,17 @@ namespace MazeMap::Config
     // [High] Smooth-turn yaw-rate derivative gain. This damps yaw-rate error directly so the robot follows the
     // maneuver's sample-by-sample turn-rate target rather than lagging wide through the corner.
     constexpr float kSmoothTurnYawRateKd = 5.0f;
-    // [High] DriveBase state-feedback gains tuned against the expanded high-performance PdTuning envelope. These are
-    // deliberately local to the DriveBase PD cluster so straight/turn shared tuning constants keep their existing
-    // meaning for other callers.
-    constexpr float kDriveBaseVelocityStateKp = 5.5f;
-    constexpr float kDriveBaseVelocityStateKd = 0.01f;
-    constexpr float kDriveBaseHeadingStateKp = 9718.0f;
-    constexpr float kDriveBaseHeadingStateKd = 0.0f;
-    constexpr float kDriveBaseYawRateStateKp = 320.0f;
-    constexpr float kDriveBaseYawRateStateKd = 5.0f;
-    // Shared DriveBase proportional-derivative cluster. This is the authoritative home for the
-    // current DriveBase PD setup family, with concrete starting values for every supported
-    // control/signal pairing already represented by the new naming scheme.
-    inline constexpr MazeMap::PDCluster kDriveBasePDCluster(
-        /* headingStatePD */ MazeMap::ProportionalDerivative(kDriveBaseHeadingStateKp, kDriveBaseHeadingStateKd),
-        /* velocityStatePD */ MazeMap::ProportionalDerivative(kDriveBaseVelocityStateKp, kDriveBaseVelocityStateKd),
-        /* velocityEncoderAveragePD */ MazeMap::ProportionalDerivative(kEncoderVelocityKp, kEncoderVelocityKd),
-        /* yawRateStatePD */ MazeMap::ProportionalDerivative(kDriveBaseYawRateStateKp, kDriveBaseYawRateStateKd),
-        /* yawRateGyroPD */ MazeMap::ProportionalDerivative(kSmoothTurnYawRateKp, kSmoothTurnYawRateKd),
-        /* yawRateEncoderDeltaPD */ MazeMap::ProportionalDerivative(0.30f, 0.01f),
-        /* yawRateIMULateralAccelPD */ MazeMap::ProportionalDerivative(1.0f, 0.01f),
-        /* longitudinalAccelerationStatePD */ MazeMap::ProportionalDerivative(1.0f, 0.0f),
-        /* longitudinalAccelerationIMUForwardAccelPD */ MazeMap::ProportionalDerivative(1.0f, 0.0f));
+    // [High] DriveBase tracking gains compose position, velocity, and acceleration error directly
+    // into the body acceleration requested from PlantModel.
+    inline constexpr MazeMap::DriveBaseTrackingTuning kDriveBaseTrackingTuning(
+        MazeMap::DriveAxisTrackingTuning(
+            0.0f,
+            5.5f,
+            0.0f),
+        MazeMap::DriveAxisTrackingTuning(
+            9718.0f,
+            320.0f,
+            0.0f));
     // [Medium] Position tolerance used to declare straight and arc profiles complete. Tighten it if stop error is too
     // large and the robot can settle cleanly; loosen it if profiles dither near the endpoint.
     constexpr float kDistanceToleranceM = 0.003f;

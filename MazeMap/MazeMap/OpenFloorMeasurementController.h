@@ -191,7 +191,7 @@ namespace MazeMap::App::Internal
 
         using MeasurementLogId = std::uint8_t;
         static constexpr MeasurementLogId kTimingLogId = 0U;
-        static constexpr std::size_t kMainRegimeCount = 8U;
+        static constexpr std::size_t kMainRegimeCount = 9U;
         using MainRegimeArray = std::array<MeasurementRegimeSequencer::Regime*, kMainRegimeCount>;
 
         class MainStage;
@@ -315,7 +315,7 @@ namespace MazeMap::App::Internal
                     // In this regime, no need to wait to prime drive since we won't use it for anything but the closing hold.
                     controller._driveService.StartHold(350U, false);
 				}
-                if (_counter < 350U)
+                if (_counter < 1000U)
                 {
                     _counter++;
 					// Since the actual drive values are already calculated for logging purposes,
@@ -363,6 +363,102 @@ namespace MazeMap::App::Internal
 
             uint8_t _donesDetected{};
         };
+
+		class MixedLaunchMeasurementRegime final : public MainMeasurementRegime
+		{
+		public:
+			static MixedLaunchMeasurementRegime& SharedInstance() noexcept
+			{
+				static MixedLaunchMeasurementRegime regime{};
+				return regime;
+			}
+
+			const char* Name() const noexcept override { return "Mixed Launch"; }
+			MeasurementLogId Id() const noexcept override { return kLogId; }
+			std::uint16_t PrimitiveCount() const noexcept override { return 2U; }
+			/*
+			* [ 0.3, 0.4]
+			* [-0.3,-0.4]
+			* [ 0.3, 0.5]
+			* [-0.3,-0.5]
+			* [ 0.3, 0.6]
+			* [-0.3,-0.6]
+			* [ 0.3, 0.7]
+			* [-0.3,-0.7]
+			* [ 0.3, 0.8]
+			* [-0.3,-0.8]
+			* 
+			* [ 0.4, 0.3]
+			* [-0.4,-0.3]
+			* [ 0.5, 0.3]
+			* [-0.5,-0.3]
+			* [ 0.6, 0.3]
+			* [-0.6,-0.3]
+			* [ 0.7, 0.3]
+			* [-0.7,-0.3]
+			* [ 0.8, 0.3]
+			* [-0.8,-0.3]
+			*/
+
+			std::uint8_t SpeedBinCount() const noexcept override { return 10U; }
+			std::uint16_t RepeatCount() const noexcept override { return 2U; }
+			MazeMap::ManeuverCode PrimitiveCode(
+				std::uint16_t primitiveIndex,
+				std::uint8_t speedBinIndex) const noexcept override
+			{
+				(void)primitiveIndex;
+				(void)speedBinIndex;
+				return ManeuverCode::MC_NONE;
+			}
+			float SpeedBinValue(
+				std::uint16_t primitiveIndex,
+				std::uint8_t speedBinIndex) const noexcept override
+			{
+				return primitiveIndex+speedBinIndex*PrimitiveCount();
+			}
+			CommandVector GetNextControls(
+				std::uint16_t primitiveIndex,
+				std::uint8_t speedBinIndex,
+				std::uint16_t repeatIndex,
+				bool& done) override
+			{
+				(void)repeatIndex;
+				done = false;
+				OpenFloorMeasurementController& controller = Controller();
+				// This is guaranteed to catch on the first tick because all
+				// regimes end on a hold completion, and it's also true at boot.
+				if (controller._driveService.IsEffectivelyComplete())
+				{
+					_counter = 0U;
+					// In this regime, no need to wait to prime drive since we won't use it for anything but the closing hold.
+					controller._driveService.StartHold(350U, false);
+				}
+				if (_counter < 350U)
+				{
+					_counter++;
+					float low = 0.3f;
+					float offset = _commandValues[speedBinIndex>>1];
+					CommandVector commandVal = CommandVector(std::max(low,low-offset), std::max(low,low+offset));
+
+					if (primitiveIndex == 0)
+					{
+						return commandVal;
+					}
+					return -commandVal;
+				}
+				else
+				{
+					// No need to keep incrementing a counter we don't use.
+					return controller._driveService.GetNextControls(done);
+				}
+			}
+
+		private:
+			static constexpr MeasurementLogId kLogId = 20U;
+
+			std::uint32_t _counter{ 0 };
+			std::array<float, 10> _commandValues{ 0.1f, 0.2f, 0.3f, 0.4f, 0.5f, -0.1f, -0.2f, -0.3f, -0.4f, -0.5f };
+		};
 
         class YawMeasurementRegime final : public MainMeasurementRegime
         {

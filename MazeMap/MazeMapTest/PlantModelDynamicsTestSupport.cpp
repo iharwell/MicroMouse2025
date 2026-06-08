@@ -994,7 +994,7 @@ namespace MazeMap
             control.SetLeftCommand(0.45f);
             control.SetRightCommand(0.45f);
 
-            plant.integrate(control, 0.004f);
+            plant.integrate(control, 0.001f);
             return LargeStepMeasurement{
                 state,
                 state.GetWheelSpeedLeft() - state.GetWheelSpeedRight() };

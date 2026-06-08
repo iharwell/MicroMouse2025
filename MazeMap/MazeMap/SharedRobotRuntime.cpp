@@ -451,7 +451,7 @@ namespace MazeMap::App::Internal
         , runtimeState()
         , plantModel(vehicle, runtimeState)
         , estimator(vehicle, plantModel, runtimeState)
-        , driveBase(plantModel, runtimeState, MazeMap::Config::kDriveBasePDCluster)
+        , driveBase(plantModel, runtimeState, MazeMap::Config::kDriveBaseTrackingTuning)
         , driveService(nominalCommandPeriodSeconds)
         , startupCalibrationService()
         , wallTouchService()

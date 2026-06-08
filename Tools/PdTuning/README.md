@@ -1,16 +1,16 @@
 # PdTuning
 
-`PdTuning.exe` evaluates candidate `PDCluster` gains against the current C++
+`PdTuning.exe` evaluates candidate `DriveBaseTrackingTuning` gains against the current C++
 `DriveBase` and `PlantModel` implementation. The tool keeps `Vehicle`,
 `PlantModel`, feedforward, and physical parameters fixed; only these
-`Config::kDriveBasePDCluster` entries are varied:
+`Config::kDriveBaseTrackingTuning` entries are varied:
 
-- `VelocityStatePD.kp`
-- `VelocityStatePD.kd`
-- `HeadingStatePD.kp`
-- `HeadingStatePD.kd`
-- `YawRateStatePD.kp`
-- `YawRateStatePD.kd`
+- forward-axis position-to-acceleration gain
+- forward-axis velocity-to-acceleration gain
+- forward-axis acceleration-error gain
+- yaw-axis position-to-acceleration gain
+- yaw-axis velocity-to-acceleration gain
+- yaw-axis acceleration-error gain
 
 The evaluator advances the canonical `DriveBase::ProposeBodyTick(...)` path at
 an explicit `0.001 s` command tick. For each command tick, the tool evaluates
@@ -55,25 +55,28 @@ Tools\PdTuning\x64\Release\PdTuning.exe
 ```
 
 Evaluate explicit gains, with omitted values defaulting to
-`Config::kDriveBasePDCluster`:
+`Config::kDriveBaseTrackingTuning`:
 
 ```powershell
 Tools\PdTuning\x64\Release\PdTuning.exe `
-  --velocity-kp 30 --velocity-kd 0.02 `
-  --heading-kp 18 --heading-kd 3 `
-  --yawrate-kp 45 --yawrate-kd 6
+  --forward-position-to-accel-gain 0 `
+  --forward-velocity-to-accel-gain 30 `
+  --forward-acceleration-error-gain 0.02 `
+  --yaw-position-to-accel-gain 2000 `
+  --yaw-velocity-to-accel-gain 45 `
+  --yaw-acceleration-error-gain 6
 ```
 
 Run the built-in bounded coordinate search:
 
 ```powershell
 Tools\PdTuning\x64\Release\PdTuning.exe --search --search-passes 4 --search-points 9 `
-  --velocity-kp-min 1 --velocity-kp-max 20 `
-  --velocity-kd-min 0 --velocity-kd-max 1 `
-  --heading-kp-min 100 --heading-kp-max 2000 `
-  --heading-kd-min 0 --heading-kd-max 1 `
-  --yawrate-kp-min 100 --yawrate-kp-max 1000 `
-  --yawrate-kd-min 0 --yawrate-kd-max 1
+  --forward-position-to-accel-gain-min 0 --forward-position-to-accel-gain-max 20 `
+  --forward-velocity-to-accel-gain-min 1 --forward-velocity-to-accel-gain-max 20 `
+  --forward-acceleration-error-gain-min 0 --forward-acceleration-error-gain-max 1 `
+  --yaw-position-to-accel-gain-min 100 --yaw-position-to-accel-gain-max 2000 `
+  --yaw-velocity-to-accel-gain-min 100 --yaw-velocity-to-accel-gain-max 1000 `
+  --yaw-acceleration-error-gain-min 0 --yaw-acceleration-error-gain-max 1
 ```
 
 The search grid is logarithmic for positive gain values and keeps zero as an
@@ -95,7 +98,7 @@ evidence.
 
 ## Scenario Envelope
 
-The evaluator stresses `PDCluster` through the same `DriveBase::ProposeBodyTick`
+The evaluator stresses `DriveBaseTrackingTuning` through the same `DriveBase::ProposeBodyTick`
 and `PlantModel::integrate` path used by the previous tool, but the scenarios
 now cover the real high-performance operating envelope instead of small
 perturbations:
@@ -166,7 +169,7 @@ envelope alone does not see:
   with completion, command-evidence, shift, heading, and elapsed-time gates.
   Shift is reported against 0.020 m, heading error is reported against
   3 degrees, and elapsed time is reported against the `MotionLimits` kinematic
-  minimum. These threshold rows are informational for the current PD ripple
+  minimum. These threshold rows are informational for the current tracking ripple
   tuning pass: they do not block candidate acceptance and do not contribute
   score.
 - DriveManeuver smooth coverage: `S45LS`, `S45LD`, `S45SS`, `S45SD`, `S90LS`,
@@ -174,7 +177,7 @@ envelope alone does not see:
   `S180SS`, each with completion, command-evidence, velocity-variation,
   yaw-acceleration-variation, yaw-rate-variation, final-position, and
   final-heading gates. The variation, final-position, and final-heading
-  threshold rows are informational for the current PD ripple tuning pass.
+  threshold rows are informational for the current tracking ripple tuning pass.
 
 The maneuver checks use the same smooth-entry and sensor publication path as
 `DriveManeuverTests`, without importing the test harness. `PdTuning` records one
@@ -206,7 +209,7 @@ The top-level `oscillation_flagged` value is broader than a single scenario's
 target-crossing classifier. It is true when any scenario is oscillatory or when
 any smooth maneuver variation row reports `ripple_oscillatory=true`.
 
-Current `DriveBase` uses `VelocityStatePD` and `YawRateStatePD` with a zero
-error-rate argument, so their `kd` values are accepted and reported but are
-expected to be score-insensitive until that controller path changes. Heading
-`kd` is active through the yaw-rate error term.
+Current `DriveBase` supplies no forward position error, so the forward-axis
+position-to-acceleration gain is accepted and reported but is expected to be
+score-insensitive until that controller path changes. Acceleration-error gains
+are active only when the corresponding target acceleration is finite.

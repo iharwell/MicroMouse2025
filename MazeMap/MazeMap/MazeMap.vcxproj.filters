@@ -429,10 +429,7 @@
     <ClInclude Include="WallSensorPreprocessor.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="ProportionalDerivative.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="PDCluster.h">
+    <ClInclude Include="DriveBaseTrackingTuning.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
@@ -641,10 +638,7 @@
     <ClCompile Include="WallDistanceCalibration.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="ProportionalDerivative.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="PDCluster.cpp">
+    <ClCompile Include="DriveBaseTrackingTuning.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

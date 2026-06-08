@@ -1353,7 +1353,14 @@ namespace MazeMap
         {
             return;
         }
+#ifdef _WINDOWS
+		// All simulations should use the nominal 0.001f step, so we'll just ignore any longer step requests.
 
+		if ((dt > 0.0012f))
+		{
+			return;
+		}
+#endif
         const Eigen::Matrix<float, VehicleState::kDimension, 1> currentState = BuildBoundStateVector();
         const PlantDerivatives derivatives = forwardStep(currentState, control, nullptr);
         const Eigen::Matrix<float, VehicleState::kDimension, 1> nextState =

@@ -105,12 +105,15 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(ComposedForwardAccelerationUsesProductionPDOnce)
+        TEST_METHOD(ComposedForwardAccelerationUsesProductionTrackingOnce)
         {
             const FeedbackScenario scenario;
             const float expected =
-                0.30f +
-                Config::kDriveBasePDCluster.VelocityStatePD.Compute(0.80f - 0.20f, 0.0f);
+                Config::kDriveBaseTrackingTuning.ComposeForwardAccelerationMps2(
+                    0.30f,
+                    kNaN,
+                    0.80f - 0.20f,
+                    0.30f - 0.0f);
             std::wstringstream message;
             message << L"DRV30_FEEDBACK_DOUBLE_APPLY"
                 << L"\nfield=composed_forward_accel_mps2"
@@ -125,13 +128,15 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(ComposedYawAccelerationUsesProductionPDOnce)
+        TEST_METHOD(ComposedYawAccelerationUsesProductionTrackingOnce)
         {
             const FeedbackScenario scenario;
             const float expected =
-                0.40f +
-                Config::kDriveBasePDCluster.YawRateStatePD.Compute(0.25f - -0.15f, 0.0f) +
-                Config::kDriveBasePDCluster.HeadingStatePD.Compute(0.18f - 0.10f, 0.25f - -0.15f);
+                Config::kDriveBaseTrackingTuning.ComposeYawAccelerationRadps2(
+                    0.40f,
+                    AngleDifference(0.10f, 0.18f),
+                    0.25f - -0.15f,
+                    0.40f - 0.0f);
             std::wstringstream message;
             message << L"DRV30_FEEDBACK_DOUBLE_APPLY"
                 << L"\nfield=composed_yaw_accel_radps2"

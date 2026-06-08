@@ -7,7 +7,6 @@
 #include "Maze.h"
 #include "MissionStartPolicy.h"
 #include "MotionLimits.h"
-#include "PDCluster.h"
 #include "Vehicle.h"
 #include "VehicleState.h"
 #include "WallDetectionThresholds.h"

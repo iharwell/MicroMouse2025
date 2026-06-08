@@ -271,7 +271,7 @@ namespace MazeMap
             TestRuntime runtime;
             const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
             runtime.runtimeState = initial;
-            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.004f);
+            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.001f);
             const VehicleState state = runtime.runtimeState;
             const float actual = state.GetPositionX();
             std::wstringstream message;
@@ -292,7 +292,7 @@ namespace MazeMap
             TestRuntime runtime;
             const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
             runtime.runtimeState = initial;
-            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.004f);
+            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.001f);
             const VehicleState state = runtime.runtimeState;
             const float actual = state.GetPositionY();
             std::wstringstream message;
@@ -313,7 +313,7 @@ namespace MazeMap
             TestRuntime runtime;
             const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
             runtime.runtimeState = initial;
-            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.004f);
+            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.001f);
             const VehicleState state = runtime.runtimeState;
             const float actual = state.GetHeading();
             std::wstringstream message;
@@ -334,7 +334,7 @@ namespace MazeMap
             TestRuntime runtime;
             const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
             runtime.runtimeState = initial;
-            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.004f);
+            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.001f);
             const VehicleState state = runtime.runtimeState;
             const float actual = state.GetForwardVelocity();
             std::wstringstream message;
@@ -355,7 +355,7 @@ namespace MazeMap
             TestRuntime runtime;
             const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
             runtime.runtimeState = initial;
-            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.004f);
+            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.001f);
             const VehicleState state = runtime.runtimeState;
             const float actual = state.GetRightwardVelocity();
             std::wstringstream message;
@@ -376,7 +376,7 @@ namespace MazeMap
             TestRuntime runtime;
             const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
             runtime.runtimeState = initial;
-            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.004f);
+            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.001f);
             const VehicleState state = runtime.runtimeState;
             const float actual = state.GetYawRate();
             std::wstringstream message;
@@ -397,7 +397,7 @@ namespace MazeMap
             TestRuntime runtime;
             const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
             runtime.runtimeState = initial;
-            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.004f);
+            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.001f);
             const VehicleState state = runtime.runtimeState;
             const float actual = LeftBodyWheelSpeedRadps(state);
             const float initialLeftWheelSpeedRadps = LeftBodyWheelSpeedRadps(initial);
@@ -419,7 +419,7 @@ namespace MazeMap
             TestRuntime runtime;
             const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
             runtime.runtimeState = initial;
-            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.004f);
+            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.001f);
             const VehicleState state = runtime.runtimeState;
             const float actual = RightBodyWheelSpeedRadps(state);
             const float initialRightWheelSpeedRadps = RightBodyWheelSpeedRadps(initial);
@@ -650,7 +650,7 @@ namespace MazeMap
         {
             TestRuntime runtime;
             runtime.runtimeState = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
-            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.004f);
+            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.001f);
             const VehicleState singleStep = runtime.runtimeState;
             VehicleState substeps = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
             for (int step = 0; step < 4; ++step)
@@ -678,7 +678,7 @@ namespace MazeMap
         {
             TestRuntime runtime;
             runtime.runtimeState = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
-            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.004f);
+            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.001f);
             const VehicleState singleStep = runtime.runtimeState;
             VehicleState substeps = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
             for (int step = 0; step < 4; ++step)
@@ -706,7 +706,7 @@ namespace MazeMap
         {
             TestRuntime runtime;
             runtime.runtimeState = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
-            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.004f);
+            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.001f);
             const VehicleState singleStep = runtime.runtimeState;
             VehicleState substeps = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
             for (int step = 0; step < 4; ++step)
@@ -734,7 +734,7 @@ namespace MazeMap
         {
             TestRuntime runtime;
             runtime.runtimeState = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
-            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.004f);
+            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.001f);
             const VehicleState singleStep = runtime.runtimeState;
             VehicleState substeps = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
             for (int step = 0; step < 4; ++step)

@@ -28,6 +28,7 @@
 #include <string>
 #include <vector>
 
+#include "CppUnitTest.h"
 namespace MazeMap::App::DriveManeuverContractTestSupport
 {
     using CommandVector = Internal::CommandVector;
@@ -322,6 +323,7 @@ namespace MazeMap::App::DriveManeuverContractTestSupport
         const float dtSeconds,
         const CommandVector& control)
     {
+		Microsoft::VisualStudio::CppUnitTestFramework::Assert::AreEqual(dtSeconds, 0.001f, 1e-9f, L"SimulateRuntimeDriveCycle should be called with the canonical dt");
         float previousLeftWheelSpeedRadps = 0.0f;
         float previousRightWheelSpeedRadps = 0.0f;
         ComputeWheelSpeedsFromBodyState(

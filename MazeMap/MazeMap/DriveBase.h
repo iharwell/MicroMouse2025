@@ -2,8 +2,8 @@
 
 #include "CommandVector.h"
 #include "Defines.h"
+#include "DriveBaseTrackingTuning.h"
 #include "DriveTelemetry.h"
-#include "PDCluster.h"
 #include "PlantModel.h"
 #include "VehicleState.h"
 
@@ -17,7 +17,7 @@ namespace MazeMap
         explicit DriveBase(
             const MazeMap::PlantModel& plant,
             const MazeMap::VehicleState& runtimeState,
-            const MazeMap::PDCluster& feedbackTuning) noexcept;
+            const MazeMap::DriveBaseTrackingTuning& feedbackTuning) noexcept;
 
         DriveBase(const DriveBase&) = delete;
         DriveBase& operator=(const DriveBase&) = delete;
@@ -36,21 +36,6 @@ namespace MazeMap
         const DriveTelemetry& LastTelemetry() const noexcept;
 
     private:
-        static float ComposeAccelerationObjective(
-            float requestedAccel,
-            float feedbackAccel,
-            bool hasFeedback) noexcept;
-        static float ComputeForwardVelocityFeedbackAccelMps2(
-            const MazeMap::PDCluster& feedbackTuning,
-            float forwardVelocityErrorMps) noexcept;
-        static float ComputeYawRateFeedbackAccelRadps2(
-            const MazeMap::PDCluster& feedbackTuning,
-            float yawRateErrorRadps) noexcept;
-        static float ComputeHeadingFeedbackAccelRadps2(
-            const MazeMap::PDCluster& feedbackTuning,
-            float headingErrorRad,
-            float headingErrorRateRadps) noexcept;
-
         DriveTelemetry BuildBaseTelemetry(
             std::uint16_t commandKindFlags,
             float targetForwardMps,
@@ -61,7 +46,7 @@ namespace MazeMap
 
         const MazeMap::PlantModel& _plant;
         const MazeMap::VehicleState& _runtimeState;
-        const MazeMap::PDCluster& _feedbackTuning;
+        const MazeMap::DriveBaseTrackingTuning& _feedbackTuning;
         DriveTelemetry _lastTelemetry{};
         std::uint32_t _nextProposalSequenceId = 1U;
     };

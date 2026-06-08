@@ -3,6 +3,7 @@
 
 #include "..\MazeMap\CoreConfig.h"
 #include "..\MazeMap\DriveBase.h"
+#include "..\MazeMap\DriveBaseTrackingTuning.h"
 #include "..\MazeMap\PlantModel.h"
 #include "..\MazeMap\Vehicle.h"
 #include "..\MazeMap\VehicleState.h"
@@ -27,14 +28,15 @@ namespace MazeMap
             Vehicle vehicle;
             VehicleState runtimeState;
             PlantModel plant;
-            PDCluster feedbackTuning;
+            DriveBaseTrackingTuning feedbackTuning;
             DriveBase drive;
 
-            explicit DriveBaseHarness(const PDCluster& cluster = Config::kDriveBasePDCluster) noexcept
+            explicit DriveBaseHarness(
+                const DriveBaseTrackingTuning& tuning = Config::kDriveBaseTrackingTuning) noexcept
                 : vehicle()
                 , runtimeState()
                 , plant(vehicle, runtimeState)
-                , feedbackTuning(cluster)
+                , feedbackTuning(tuning)
                 , drive(plant, runtimeState, feedbackTuning)
             {
             }
@@ -150,8 +152,14 @@ namespace MazeMap
 
             Assert::AreEqual(1.0f, telemetry.requestedForwardMps, 1.0e-6f);
             Assert::AreEqual(0.50f, telemetry.requestedForwardAccelMps2, 1.0e-6f);
+            const float expectedComposedForwardAccelMps2 =
+                harness.feedbackTuning.ComposeForwardAccelerationMps2(
+                    0.50f,
+                    kNaN,
+                    1.0f - 0.20f,
+                    0.50f - harness.runtimeState.GetForwardAcceleration());
             Assert::AreEqual(
-                0.50f + harness.feedbackTuning.VelocityStatePD.Compute(1.0f - 0.20f, 0.0f),
+                expectedComposedForwardAccelMps2,
                 telemetry.composedForwardAccelMps2,
                 1.0e-6f);
             Assert::IsTrue(std::isnan(telemetry.requestedYawRateRadps));
@@ -170,10 +178,14 @@ namespace MazeMap
 
             Assert::AreEqual(1.0f, telemetry.requestedYawRateRadps, 1.0e-6f);
             Assert::AreEqual(0.75f, telemetry.requestedYawRad, 1.0e-6f);
+            const float expectedComposedYawAccelRadps2 =
+                harness.feedbackTuning.ComposeYawAccelerationRadps2(
+                    0.30f,
+                    AngleDifference(0.25f, 0.75f),
+                    1.0f - 0.40f,
+                    0.30f - harness.runtimeState.GetYawAccel());
             Assert::AreEqual(
-                0.30f +
-                    harness.feedbackTuning.YawRateStatePD.Compute(1.0f - 0.40f, 0.0f) +
-                    harness.feedbackTuning.HeadingStatePD.Compute(0.75f - 0.25f, 1.0f - 0.40f),
+                expectedComposedYawAccelRadps2,
                 telemetry.composedYawAccelRadps2,
                 1.0e-6f);
             Assert::IsTrue(std::isnan(telemetry.composedForwardAccelMps2));

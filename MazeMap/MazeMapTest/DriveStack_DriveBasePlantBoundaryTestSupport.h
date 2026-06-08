@@ -145,7 +145,7 @@ namespace MazeMap
                 : vehicle()
                 , runtimeState()
                 , plant(vehicle, runtimeState)
-                , drive(plant, runtimeState, MazeMap::Config::kDriveBasePDCluster)
+                , drive(plant, runtimeState, MazeMap::Config::kDriveBaseTrackingTuning)
             {
                 vehicle.SetFanDuty(0.80f);
             }

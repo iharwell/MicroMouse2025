@@ -22,7 +22,7 @@ namespace MazeMap
             const VehicleState state =
                 MakeRollingState(0.50f, 0.0f, 0.0f, 0.0f);
             runtime.runtimeState = state;
-            runtime.plant.integrate(coast, 0.004f);
+            runtime.plant.integrate(coast, 0.001f);
             const VehicleState integrated = runtime.runtimeState;
             std::wstringstream message;
             message << L"PM20_AXIS_CONVENTION"
@@ -43,7 +43,7 @@ namespace MazeMap
             const VehicleState state =
                 MakeRollingState(0.50f, 0.0f, 0.0f, 0.0f);
             runtime.runtimeState = state;
-            runtime.plant.integrate(coast, 0.004f);
+            runtime.plant.integrate(coast, 0.001f);
             const VehicleState integrated = runtime.runtimeState;
             std::wstringstream message;
             message << L"PM20_AXIS_CONVENTION"
@@ -66,7 +66,7 @@ namespace MazeMap
             const VehicleState state =
                 MakeRollingState(0.50f, 0.0f, 0.0f, 0.5f * PI_F);
             runtime.runtimeState = state;
-            runtime.plant.integrate(coast, 0.004f);
+            runtime.plant.integrate(coast, 0.001f);
             const VehicleState integrated = runtime.runtimeState;
             std::wstringstream message;
             message << L"PM20_AXIS_CONVENTION"
@@ -87,7 +87,7 @@ namespace MazeMap
             const VehicleState state =
                 MakeRollingState(0.50f, 0.0f, 0.0f, 0.5f * PI_F);
             runtime.runtimeState = state;
-            runtime.plant.integrate(coast, 0.004f);
+            runtime.plant.integrate(coast, 0.001f);
             const VehicleState integrated = runtime.runtimeState;
             std::wstringstream message;
             message << L"PM20_AXIS_CONVENTION"
@@ -110,7 +110,7 @@ namespace MazeMap
             const VehicleState state =
                 MakeState(0.0f, 0.0f, 0.0f, 0.0f, 0.30f, 0.0f, 0.0f, 0.0f);
             runtime.runtimeState = state;
-            runtime.plant.integrate(coast, 0.004f);
+            runtime.plant.integrate(coast, 0.001f);
             const VehicleState integrated = runtime.runtimeState;
             std::wstringstream message;
             message << L"PM20_AXIS_CONVENTION"
@@ -131,7 +131,7 @@ namespace MazeMap
             const VehicleState state =
                 MakeRollingState(0.25f, 1.20f);
             runtime.runtimeState = state;
-            runtime.plant.integrate(coast, 0.004f);
+            runtime.plant.integrate(coast, 0.001f);
             const VehicleState integrated = runtime.runtimeState;
             std::wstringstream message;
             message << L"PM20_AXIS_CONVENTION"

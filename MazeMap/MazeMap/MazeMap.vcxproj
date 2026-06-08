@@ -198,6 +198,7 @@
     <ClInclude Include="DirectionalPathFinder.h" />
     <ClInclude Include="Drive.h" />
     <ClInclude Include="DriveBase.h" />
+    <ClInclude Include="DriveBaseTrackingTuning.h" />
     <ClInclude Include="DriveTelemetry.h" />
     <ClInclude Include="EigenCompat.h" />
     <ClInclude Include="EncoderProgressWatchdog.h" />
@@ -263,8 +264,6 @@
     <ClInclude Include="Pins.h" />
     <ClInclude Include="PlantModel.h" />
     <ClInclude Include="ImuAccelObs.h" />
-    <ClInclude Include="ProportionalDerivative.h" />
-    <ClInclude Include="PDCluster.h" />
     <ClInclude Include="RollingAverageWindow.h" />
     <ClInclude Include="RuntimeSensorSuite.h" />
     <ClInclude Include="ShowcasingDonutController.h" />
@@ -307,6 +306,7 @@
     <ClCompile Include="DirectionalPathFinder.cpp" />
     <ClCompile Include="Drive.cpp" />
     <ClCompile Include="DriveBase.cpp" />
+    <ClCompile Include="DriveBaseTrackingTuning.cpp" />
     <ClCompile Include="DriveTelemetry.cpp" />
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="EncoderProgressWatchdog.cpp" />
@@ -381,8 +381,6 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="PlantModel.cpp" />
-    <ClCompile Include="ProportionalDerivative.cpp" />
-    <ClCompile Include="PDCluster.cpp" />
     <ClCompile Include="SigmaPointSetSimplex.cpp" />
     <ClCompile Include="SoftOdometryAid.cpp" />
     <ClCompile Include="WallGeometryModel.cpp" />

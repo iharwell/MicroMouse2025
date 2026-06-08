@@ -3,6 +3,7 @@
 #include "..\..\MazeMap\MazeMap\DirectionalLocation.h"
 #include "..\..\MazeMap\MazeMap\Drive.h"
 #include "..\..\MazeMap\MazeMap\DriveBase.h"
+#include "..\..\MazeMap\MazeMap\DriveBaseTrackingTuning.h"
 #include "..\..\MazeMap\MazeMap\DriveTelemetry.h"
 #include "..\..\MazeMap\MazeMap\Estimator.h"
 #include "..\..\MazeMap\MazeMap\ManeuverInstance.h"
@@ -10,7 +11,6 @@
 #include "..\..\MazeMap\MazeMap\MazeLocation.h"
 #include "..\..\MazeMap\MazeMap\MazeMapRuntimeCore.h"
 #include "..\..\MazeMap\MazeMap\MotionLimits.h"
-#include "..\..\MazeMap\MazeMap\PDCluster.h"
 #include "..\..\MazeMap\MazeMap\PlantModel.h"
 #include "..\..\MazeMap\MazeMap\SensorSnapshot.h"
 #include "..\..\MazeMap\MazeMap\SharedRobotRuntime.h"
@@ -91,24 +91,24 @@
 
     enum class GainIndex : std::size_t
     {
-        VelocityKp = 0U,
-        VelocityKd,
-        HeadingKp,
-        HeadingKd,
-        YawRateKp,
-        YawRateKd,
+        ForwardPositionToAccel = 0U,
+        ForwardVelocityToAccel,
+        ForwardAccelerationError,
+        YawPositionToAccel,
+        YawVelocityToAccel,
+        YawAccelerationError,
         Count
     };
 
     class GainSet
     {
     public:
-        float velocityKp = 0.0f;
-        float velocityKd = 0.0f;
-        float headingKp = 0.0f;
-        float headingKd = 0.0f;
-        float yawRateKp = 0.0f;
-        float yawRateKd = 0.0f;
+        float forwardPositionToAccelGain = 0.0f;
+        float forwardVelocityToAccelGain = 0.0f;
+        float forwardAccelerationErrorGain = 0.0f;
+        float yawPositionToAccelGain = 0.0f;
+        float yawVelocityToAccelGain = 0.0f;
+        float yawAccelerationErrorGain = 0.0f;
     };
 
     class ScenarioSpec
@@ -367,18 +367,18 @@
     {
         switch (index)
         {
-        case GainIndex::VelocityKp:
-            return "velocity_kp";
-        case GainIndex::VelocityKd:
-            return "velocity_kd";
-        case GainIndex::HeadingKp:
-            return "heading_kp";
-        case GainIndex::HeadingKd:
-            return "heading_kd";
-        case GainIndex::YawRateKp:
-            return "yawrate_kp";
-        case GainIndex::YawRateKd:
-            return "yawrate_kd";
+        case GainIndex::ForwardPositionToAccel:
+            return "forward_position_to_accel_gain";
+        case GainIndex::ForwardVelocityToAccel:
+            return "forward_velocity_to_accel_gain";
+        case GainIndex::ForwardAccelerationError:
+            return "forward_acceleration_error_gain";
+        case GainIndex::YawPositionToAccel:
+            return "yaw_position_to_accel_gain";
+        case GainIndex::YawVelocityToAccel:
+            return "yaw_velocity_to_accel_gain";
+        case GainIndex::YawAccelerationError:
+            return "yaw_acceleration_error_gain";
         case GainIndex::Count:
         default:
             return "unknown";
@@ -460,34 +460,34 @@
 
     static bool ResolveGainOption(const std::string& name, GainIndex& index) noexcept
     {
-        if ((name == "--velocity-kp") || (name == "--vel-kp"))
+        if (name == "--forward-position-to-accel-gain")
         {
-            index = GainIndex::VelocityKp;
+            index = GainIndex::ForwardPositionToAccel;
             return true;
         }
-        if ((name == "--velocity-kd") || (name == "--vel-kd"))
+        if (name == "--forward-velocity-to-accel-gain")
         {
-            index = GainIndex::VelocityKd;
+            index = GainIndex::ForwardVelocityToAccel;
             return true;
         }
-        if (name == "--heading-kp")
+        if (name == "--forward-acceleration-error-gain")
         {
-            index = GainIndex::HeadingKp;
+            index = GainIndex::ForwardAccelerationError;
             return true;
         }
-        if (name == "--heading-kd")
+        if (name == "--yaw-position-to-accel-gain")
         {
-            index = GainIndex::HeadingKd;
+            index = GainIndex::YawPositionToAccel;
             return true;
         }
-        if ((name == "--yawrate-kp") || (name == "--yaw-rate-kp"))
+        if (name == "--yaw-velocity-to-accel-gain")
         {
-            index = GainIndex::YawRateKp;
+            index = GainIndex::YawVelocityToAccel;
             return true;
         }
-        if ((name == "--yawrate-kd") || (name == "--yaw-rate-kd"))
+        if (name == "--yaw-acceleration-error-gain")
         {
-            index = GainIndex::YawRateKd;
+            index = GainIndex::YawAccelerationError;
             return true;
         }
         return false;
@@ -495,75 +495,75 @@
 
     static bool ResolveSearchBoundOption(const std::string& name, GainIndex& index, bool& minimum) noexcept
     {
-        if ((name == "--velocity-kp-min") || (name == "--vel-kp-min"))
+        if (name == "--forward-position-to-accel-gain-min")
         {
-            index = GainIndex::VelocityKp;
+            index = GainIndex::ForwardPositionToAccel;
             minimum = true;
             return true;
         }
-        if ((name == "--velocity-kp-max") || (name == "--vel-kp-max"))
+        if (name == "--forward-position-to-accel-gain-max")
         {
-            index = GainIndex::VelocityKp;
+            index = GainIndex::ForwardPositionToAccel;
             minimum = false;
             return true;
         }
-        if ((name == "--velocity-kd-min") || (name == "--vel-kd-min"))
+        if (name == "--forward-velocity-to-accel-gain-min")
         {
-            index = GainIndex::VelocityKd;
+            index = GainIndex::ForwardVelocityToAccel;
             minimum = true;
             return true;
         }
-        if ((name == "--velocity-kd-max") || (name == "--vel-kd-max"))
+        if (name == "--forward-velocity-to-accel-gain-max")
         {
-            index = GainIndex::VelocityKd;
+            index = GainIndex::ForwardVelocityToAccel;
             minimum = false;
             return true;
         }
-        if (name == "--heading-kp-min")
+        if (name == "--forward-acceleration-error-gain-min")
         {
-            index = GainIndex::HeadingKp;
+            index = GainIndex::ForwardAccelerationError;
             minimum = true;
             return true;
         }
-        if (name == "--heading-kp-max")
+        if (name == "--forward-acceleration-error-gain-max")
         {
-            index = GainIndex::HeadingKp;
+            index = GainIndex::ForwardAccelerationError;
             minimum = false;
             return true;
         }
-        if (name == "--heading-kd-min")
+        if (name == "--yaw-position-to-accel-gain-min")
         {
-            index = GainIndex::HeadingKd;
+            index = GainIndex::YawPositionToAccel;
             minimum = true;
             return true;
         }
-        if (name == "--heading-kd-max")
+        if (name == "--yaw-position-to-accel-gain-max")
         {
-            index = GainIndex::HeadingKd;
+            index = GainIndex::YawPositionToAccel;
             minimum = false;
             return true;
         }
-        if ((name == "--yawrate-kp-min") || (name == "--yaw-rate-kp-min"))
+        if (name == "--yaw-velocity-to-accel-gain-min")
         {
-            index = GainIndex::YawRateKp;
+            index = GainIndex::YawVelocityToAccel;
             minimum = true;
             return true;
         }
-        if ((name == "--yawrate-kp-max") || (name == "--yaw-rate-kp-max"))
+        if (name == "--yaw-velocity-to-accel-gain-max")
         {
-            index = GainIndex::YawRateKp;
+            index = GainIndex::YawVelocityToAccel;
             minimum = false;
             return true;
         }
-        if ((name == "--yawrate-kd-min") || (name == "--yaw-rate-kd-min"))
+        if (name == "--yaw-acceleration-error-gain-min")
         {
-            index = GainIndex::YawRateKd;
+            index = GainIndex::YawAccelerationError;
             minimum = true;
             return true;
         }
-        if ((name == "--yawrate-kd-max") || (name == "--yaw-rate-kd-max"))
+        if (name == "--yaw-acceleration-error-gain-max")
         {
-            index = GainIndex::YawRateKd;
+            index = GainIndex::YawAccelerationError;
             minimum = false;
             return true;
         }
@@ -581,23 +581,23 @@
         value = std::isfinite(value) ? (std::max)(0.0f, value) : 0.0f;
         switch (index)
         {
-        case GainIndex::VelocityKp:
-            gains.velocityKp = value;
+        case GainIndex::ForwardPositionToAccel:
+            gains.forwardPositionToAccelGain = value;
             break;
-        case GainIndex::VelocityKd:
-            gains.velocityKd = value;
+        case GainIndex::ForwardVelocityToAccel:
+            gains.forwardVelocityToAccelGain = value;
             break;
-        case GainIndex::HeadingKp:
-            gains.headingKp = value;
+        case GainIndex::ForwardAccelerationError:
+            gains.forwardAccelerationErrorGain = value;
             break;
-        case GainIndex::HeadingKd:
-            gains.headingKd = value;
+        case GainIndex::YawPositionToAccel:
+            gains.yawPositionToAccelGain = value;
             break;
-        case GainIndex::YawRateKp:
-            gains.yawRateKp = value;
+        case GainIndex::YawVelocityToAccel:
+            gains.yawVelocityToAccelGain = value;
             break;
-        case GainIndex::YawRateKd:
-            gains.yawRateKd = value;
+        case GainIndex::YawAccelerationError:
+            gains.yawAccelerationErrorGain = value;
             break;
         case GainIndex::Count:
         default:
@@ -633,55 +633,64 @@
     static void PrintUsage()
     {
         std::cout
-            << "PdTuning evaluates DriveBase PDCluster candidates against the current C++ PlantModel.\n\n"
+            << "PdTuning evaluates DriveBaseTrackingTuning candidates against the current C++ PlantModel.\n\n"
             << "Usage:\n"
             << "  PdTuning.exe [gain options]\n"
             << "  PdTuning.exe --search [--search-passes N] [--search-points N] [search bounds]\n\n"
-            << "Gain options default to Config::kDriveBasePDCluster values:\n"
-            << "  --velocity-kp V  --velocity-kd V\n"
-            << "  --heading-kp V   --heading-kd V\n"
-            << "  --yawrate-kp V   --yawrate-kd V\n\n"
+            << "Gain options default to Config::kDriveBaseTrackingTuning named gain values:\n"
+            << "  --forward-position-to-accel-gain V      --forward-velocity-to-accel-gain V\n"
+            << "  --forward-acceleration-error-gain V\n"
+            << "  --yaw-position-to-accel-gain V          --yaw-velocity-to-accel-gain V\n"
+            << "  --yaw-acceleration-error-gain V\n\n"
             << "Search bounds use matching min/max option pairs:\n"
-            << "  --velocity-kp-min V  --velocity-kp-max V\n"
-            << "  --velocity-kd-min V  --velocity-kd-max V\n"
-            << "  --heading-kp-min V   --heading-kp-max V\n"
-            << "  --heading-kd-min V   --heading-kd-max V\n"
-            << "  --yawrate-kp-min V   --yawrate-kp-max V\n"
-            << "  --yawrate-kd-min V   --yawrate-kd-max V\n\n"
+            << "  --forward-position-to-accel-gain-min V  --forward-position-to-accel-gain-max V\n"
+            << "  --forward-velocity-to-accel-gain-min V  --forward-velocity-to-accel-gain-max V\n"
+            << "  --forward-acceleration-error-gain-min V --forward-acceleration-error-gain-max V\n"
+            << "  --yaw-position-to-accel-gain-min V      --yaw-position-to-accel-gain-max V\n"
+            << "  --yaw-velocity-to-accel-gain-min V      --yaw-velocity-to-accel-gain-max V\n"
+            << "  --yaw-acceleration-error-gain-min V     --yaw-acceleration-error-gain-max V\n\n"
             << "Search uses log-spaced positive gain values with zero retained as an explicit candidate.\n\n"
             << "Stdout is JSON. Errors and this help text are not part of optimizer output.\n";
     }
 
-    static GainSet ExtractTunedGains(const MazeMap::PDCluster& cluster) noexcept
+    static GainSet ExtractProductionTunedGains() noexcept
     {
         GainSet gains{};
-        gains.velocityKp = cluster.VelocityStatePD.GetProportionalGain();
-        gains.velocityKd = cluster.VelocityStatePD.GetDerivativeGain();
-        gains.headingKp = cluster.HeadingStatePD.GetProportionalGain();
-        gains.headingKd = cluster.HeadingStatePD.GetDerivativeGain();
-        gains.yawRateKp = cluster.YawRateStatePD.GetProportionalGain();
-        gains.yawRateKd = cluster.YawRateStatePD.GetDerivativeGain();
+        const MazeMap::DriveAxisTrackingTuning& forward =
+            MazeMap::Config::kDriveBaseTrackingTuning.ForwardAxis();
+        const MazeMap::DriveAxisTrackingTuning& yaw =
+            MazeMap::Config::kDriveBaseTrackingTuning.YawAxis();
+        gains.forwardPositionToAccelGain = forward.PositionErrorToAccelerationGain();
+        gains.forwardVelocityToAccelGain = forward.VelocityErrorToAccelerationGain();
+        gains.forwardAccelerationErrorGain = forward.AccelerationErrorToAccelerationGain();
+        gains.yawPositionToAccelGain = yaw.PositionErrorToAccelerationGain();
+        gains.yawVelocityToAccelGain = yaw.VelocityErrorToAccelerationGain();
+        gains.yawAccelerationErrorGain = yaw.AccelerationErrorToAccelerationGain();
         return gains;
     }
 
-    static MazeMap::PDCluster BuildCandidateCluster(const GainSet& gains) noexcept
+    static MazeMap::DriveBaseTrackingTuning BuildCandidateTrackingTuning(const GainSet& gains) noexcept
     {
-        MazeMap::PDCluster cluster = MazeMap::Config::kDriveBasePDCluster;
-        cluster.VelocityStatePD = MazeMap::ProportionalDerivative(gains.velocityKp, gains.velocityKd);
-        cluster.HeadingStatePD = MazeMap::ProportionalDerivative(gains.headingKp, gains.headingKd);
-        cluster.YawRateStatePD = MazeMap::ProportionalDerivative(gains.yawRateKp, gains.yawRateKd);
-        return cluster;
+        return MazeMap::DriveBaseTrackingTuning(
+            MazeMap::DriveAxisTrackingTuning(
+                gains.forwardPositionToAccelGain,
+                gains.forwardVelocityToAccelGain,
+                gains.forwardAccelerationErrorGain),
+            MazeMap::DriveAxisTrackingTuning(
+                gains.yawPositionToAccelGain,
+                gains.yawVelocityToAccelGain,
+                gains.yawAccelerationErrorGain));
     }
 
     static void RebuildRuntimeDriveBaseForCandidate(
         MazeMap::App::Internal::SharedRobotRuntime& runtime,
-        const MazeMap::PDCluster& cluster) noexcept
+        const MazeMap::DriveBaseTrackingTuning& trackingTuning) noexcept
     {
         // Tool-only candidate injection: keep Drive attached to the runtime-owned DriveBase address.
         MazeMap::DriveBase& driveBase = runtime.DriveBase();
         driveBase.~DriveBase();
         (void)::new (static_cast<void*>(&driveBase))
-            MazeMap::DriveBase(runtime.Plant(), runtime.RuntimeState(), cluster);
+            MazeMap::DriveBase(runtime.Plant(), runtime.RuntimeState(), trackingTuning);
         runtime.DriveBase().ClearCommandEvidence();
     }
 
@@ -701,18 +710,18 @@
     {
         switch (index)
         {
-        case GainIndex::VelocityKp:
-            return gains.velocityKp;
-        case GainIndex::VelocityKd:
-            return gains.velocityKd;
-        case GainIndex::HeadingKp:
-            return gains.headingKp;
-        case GainIndex::HeadingKd:
-            return gains.headingKd;
-        case GainIndex::YawRateKp:
-            return gains.yawRateKp;
-        case GainIndex::YawRateKd:
-            return gains.yawRateKd;
+        case GainIndex::ForwardPositionToAccel:
+            return gains.forwardPositionToAccelGain;
+        case GainIndex::ForwardVelocityToAccel:
+            return gains.forwardVelocityToAccelGain;
+        case GainIndex::ForwardAccelerationError:
+            return gains.forwardAccelerationErrorGain;
+        case GainIndex::YawPositionToAccel:
+            return gains.yawPositionToAccelGain;
+        case GainIndex::YawVelocityToAccel:
+            return gains.yawVelocityToAccelGain;
+        case GainIndex::YawAccelerationError:
+            return gains.yawAccelerationErrorGain;
         case GainIndex::Count:
         default:
             return 0.0f;
@@ -724,23 +733,23 @@
         value = std::isfinite(value) ? (std::max)(0.0f, value) : 0.0f;
         switch (index)
         {
-        case GainIndex::VelocityKp:
-            gains.velocityKp = value;
+        case GainIndex::ForwardPositionToAccel:
+            gains.forwardPositionToAccelGain = value;
             break;
-        case GainIndex::VelocityKd:
-            gains.velocityKd = value;
+        case GainIndex::ForwardVelocityToAccel:
+            gains.forwardVelocityToAccelGain = value;
             break;
-        case GainIndex::HeadingKp:
-            gains.headingKp = value;
+        case GainIndex::ForwardAccelerationError:
+            gains.forwardAccelerationErrorGain = value;
             break;
-        case GainIndex::HeadingKd:
-            gains.headingKd = value;
+        case GainIndex::YawPositionToAccel:
+            gains.yawPositionToAccelGain = value;
             break;
-        case GainIndex::YawRateKp:
-            gains.yawRateKp = value;
+        case GainIndex::YawVelocityToAccel:
+            gains.yawVelocityToAccelGain = value;
             break;
-        case GainIndex::YawRateKd:
-            gains.yawRateKd = value;
+        case GainIndex::YawAccelerationError:
+            gains.yawAccelerationErrorGain = value;
             break;
         case GainIndex::Count:
         default:
@@ -1482,9 +1491,9 @@
 
     static AcceptanceMetrics RunStartStraightAcceptance(const GainSet& gains)
     {
-        MazeMap::PDCluster cluster = BuildCandidateCluster(gains);
+        MazeMap::DriveBaseTrackingTuning trackingTuning = BuildCandidateTrackingTuning(gains);
         MazeMap::App::Internal::SharedRobotRuntime runtime(kTickSeconds);
-        RebuildRuntimeDriveBaseForCandidate(runtime, cluster);
+        RebuildRuntimeDriveBaseForCandidate(runtime, trackingTuning);
         ScopedFanDuty fanDuty(runtime.Vehicle(), kFanDuty);
 
         WheelObservationState wheels{};
@@ -1710,9 +1719,9 @@
         const MazeMap::ManeuverCode code,
         const bool smoothTurn)
     {
-        MazeMap::PDCluster cluster = BuildCandidateCluster(gains);
+        MazeMap::DriveBaseTrackingTuning trackingTuning = BuildCandidateTrackingTuning(gains);
         MazeMap::App::Internal::SharedRobotRuntime runtime(kTickSeconds);
-        RebuildRuntimeDriveBaseForCandidate(runtime, cluster);
+        RebuildRuntimeDriveBaseForCandidate(runtime, trackingTuning);
         ScopedFanDuty fanDuty(runtime.Vehicle(), kFanDuty);
 
         float leftEncoderRemainderCounts = 0.0f;
@@ -2353,8 +2362,8 @@
         vehicle.SetFanDuty(kFanDuty);
         MazeMap::VehicleState runtimeState = BuildInitialState(spec);
         MazeMap::PlantModel plant(vehicle, runtimeState);
-        MazeMap::PDCluster cluster = BuildCandidateCluster(gains);
-        MazeMap::DriveBase driveBase(plant, runtimeState, cluster);
+        MazeMap::DriveBaseTrackingTuning trackingTuning = BuildCandidateTrackingTuning(gains);
+        MazeMap::DriveBase driveBase(plant, runtimeState, trackingTuning);
 
         WheelObservationState wheels{};
         PublishTruthToRuntime(runtimeState, runtimeState, wheels, 0.0f, 0.0f, 0.0f, true);
@@ -2763,12 +2772,12 @@
         const Options& options) noexcept
     {
         std::array<SearchRange, static_cast<std::size_t>(GainIndex::Count)> ranges = {{
-            BuildRange(seed.velocityKp, 120.0f, 5.0f),
-            BuildRange(seed.velocityKd, 8.0f, 500.0f),
-            BuildRange(seed.headingKp, 120.0f, 5.0f),
-            BuildRange(seed.headingKd, 40.0f, 5.0f),
-            BuildRange(seed.yawRateKp, 220.0f, 5.0f),
-            BuildRange(seed.yawRateKd, 60.0f, 5.0f)
+            BuildRange(seed.forwardPositionToAccelGain, 120.0f, 5.0f),
+            BuildRange(seed.forwardVelocityToAccelGain, 120.0f, 5.0f),
+            BuildRange(seed.forwardAccelerationErrorGain, 8.0f, 500.0f),
+            BuildRange(seed.yawPositionToAccelGain, 120.0f, 5.0f),
+            BuildRange(seed.yawVelocityToAccelGain, 220.0f, 5.0f),
+            BuildRange(seed.yawAccelerationErrorGain, 60.0f, 5.0f)
         }};
         for (std::size_t rawIndex = 0U; rawIndex < static_cast<std::size_t>(GainIndex::Count); ++rawIndex)
         {
@@ -3004,7 +3013,7 @@
 
     static bool ParseArgs(int argc, char* argv[], Options& options, std::string& error)
     {
-        options.candidate = ExtractTunedGains(MazeMap::Config::kDriveBasePDCluster);
+        options.candidate = ExtractProductionTunedGains();
         for (int index = 1; index < argc; ++index)
         {
             const std::string arg = argv[index];
@@ -3222,20 +3231,19 @@
     {
         const std::string pad(static_cast<std::size_t>(indent), ' ');
         output << "{\n"
-            << pad << "  \"velocity_state_pd\": { \"kp\": ";
-        WriteJsonNumber(output, gains.velocityKp);
-        output << ", \"kd\": ";
-        WriteJsonNumber(output, gains.velocityKd);
+            << pad << "  \"forward_axis\": { \"position_to_accel_gain\": ";
+        WriteJsonNumber(output, gains.forwardPositionToAccelGain);
+        output << ", \"velocity_to_accel_gain\": ";
+        WriteJsonNumber(output, gains.forwardVelocityToAccelGain);
+        output << ", \"acceleration_error_gain\": ";
+        WriteJsonNumber(output, gains.forwardAccelerationErrorGain);
         output << " },\n"
-            << pad << "  \"heading_state_pd\": { \"kp\": ";
-        WriteJsonNumber(output, gains.headingKp);
-        output << ", \"kd\": ";
-        WriteJsonNumber(output, gains.headingKd);
-        output << " },\n"
-            << pad << "  \"yaw_rate_state_pd\": { \"kp\": ";
-        WriteJsonNumber(output, gains.yawRateKp);
-        output << ", \"kd\": ";
-        WriteJsonNumber(output, gains.yawRateKd);
+            << pad << "  \"yaw_axis\": { \"position_to_accel_gain\": ";
+        WriteJsonNumber(output, gains.yawPositionToAccelGain);
+        output << ", \"velocity_to_accel_gain\": ";
+        WriteJsonNumber(output, gains.yawVelocityToAccelGain);
+        output << ", \"acceleration_error_gain\": ";
+        WriteJsonNumber(output, gains.yawAccelerationErrorGain);
         output << " }\n"
             << pad << "}";
     }
@@ -3671,11 +3679,11 @@
         WriteJsonNumber(std::cout, kRippleOscillationDeadband);
         std::cout << "\n"
             << "  },\n"
-            << "  \"baseline_source\": \"Config::kDriveBasePDCluster\",\n"
+            << "  \"baseline_source\": \"Config::kDriveBaseTrackingTuning\",\n"
             << "  \"current_drivebase_feedback_path\": {\n"
-            << "    \"velocity_state_pd_kd_sampled\": false,\n"
-            << "    \"heading_state_pd_kd_uses_yaw_rate_error\": true,\n"
-            << "    \"yaw_rate_state_pd_kd_sampled\": false\n"
+            << "    \"forward_axis_position_error_supplied\": false,\n"
+            << "    \"forward_axis_acceleration_error_supplied_when_target_is_finite\": true,\n"
+            << "    \"yaw_axis_acceleration_error_supplied_when_target_is_finite\": true\n"
             << "  },\n"
             << "  \"optimized_dimensions\": [\n";
         for (std::size_t index = 0U; index < static_cast<std::size_t>(GainIndex::Count); ++index)
@@ -3729,7 +3737,7 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    const GainSet baselineGains = ExtractTunedGains(MazeMap::Config::kDriveBasePDCluster);
+    const GainSet baselineGains = ExtractProductionTunedGains();
     const EvaluationResult baseline = Evaluate(baselineGains);
     const EvaluationResult candidate = Evaluate(options.candidate);
 

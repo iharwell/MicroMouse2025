@@ -18,7 +18,7 @@ namespace MazeMap::DiagnosticConfig
     // from placement when logging begins; decrease if startup idle time is unnecessary.
     constexpr uint16_t kStartupSettleMs = 250U;
     // [Medium] Static-hold duration used by SEC_10_STATIC.
-    constexpr uint16_t kStaticHoldMs = 15000U;
+    constexpr uint16_t kStaticHoldMs = 30000U;
     // [Medium] Idle capture window used for baseline noise and bias logging. Increase if you want better stationary
     // statistics; decrease if the diagnostic routine spends too long collecting idle data.
     constexpr uint16_t kBaselineHoldMs = 2500U;
