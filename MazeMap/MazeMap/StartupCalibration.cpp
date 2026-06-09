@@ -211,7 +211,11 @@ namespace MazeMap::App::Internal
 
         if (!BeginImuCalibration())
         {
-            FailCalibration("StartupCalibration could not begin IMU calibration");
+            LogIssue("StartupCalibration could not begin IMU calibration; continuing without IMU calibration");
+            if (!BeginMazeWallCalibration())
+            {
+                CompleteBestEffort("StartupCalibration could not begin wall calibration after IMU calibration setup failed");
+            }
         }
     }
 
@@ -392,21 +396,6 @@ namespace MazeMap::App::Internal
         _phase = Phase::ReportCompletion;
     }
 
-    [[noreturn]] void StartupCalibration::FailCalibration(const char* const reason) noexcept
-    {
-        if (_vehicle != nullptr)
-        {
-            _vehicle->BackLeftImu().DisableSelfTest();
-        }
-        if (_runtime != nullptr)
-        {
-            _runtime->FailActiveMode(reason);
-        }
-        while (true)
-        {
-        }
-    }
-
     void StartupCalibration::RefreshSensorsCalibrated() noexcept
     {
         SensorCalibration calibrated = _imuCalibrationComplete ? SensorCalibration::Imu : SensorCalibration::None;
@@ -535,7 +524,11 @@ namespace MazeMap::App::Internal
         LogIssue(reason);
         if (!BeginImuCalibration())
         {
-            FailCalibration("StartupCalibration could not restart IMU calibration after encoder motion");
+            LogIssue("StartupCalibration could not restart IMU calibration after encoder motion; continuing without IMU calibration");
+            if (!BeginMazeWallCalibration())
+            {
+                CompleteBestEffort("StartupCalibration could not begin wall calibration after IMU calibration restart failed");
+            }
         }
     }
 
@@ -640,7 +633,14 @@ namespace MazeMap::App::Internal
             {
                 if (!ValidateAndStoreStimulatedSelfTestAverage())
                 {
-                    FailCalibration("StartupCalibration IMU self-test failed");
+                    LogIssue("StartupCalibration IMU self-test failed; continuing without IMU calibration");
+                    _vehicle->BackLeftImu().DisableSelfTest();
+                    if (!BeginMazeWallCalibration())
+                    {
+                        CompleteBestEffort("StartupCalibration could not begin wall calibration after IMU self-test failed");
+                    }
+                    UpdateDoneState(done);
+                    return CommandVector::Brake();
                 }
                 _vehicle->BackLeftImu().DisableSelfTest();
                 BeginImuSettlePhase(Phase::ImuDisabledSettle);
@@ -649,7 +649,13 @@ namespace MazeMap::App::Internal
 
             if (!CompleteImuBiasMeasurement())
             {
-                FailCalibration("StartupCalibration could not complete IMU bias measurement");
+                LogIssue("StartupCalibration could not complete IMU bias measurement; continuing without IMU calibration");
+                if (!BeginMazeWallCalibration())
+                {
+                    CompleteBestEffort("StartupCalibration could not begin wall calibration after IMU bias measurement failed");
+                }
+                UpdateDoneState(done);
+                return CommandVector::Brake();
             }
             if (!BeginMazeWallCalibration())
             {

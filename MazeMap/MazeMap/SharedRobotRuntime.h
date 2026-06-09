@@ -62,8 +62,8 @@ namespace MazeMap::App::Internal
     // shared runtime.
     //
     // Failure model:
-    // One top-level mode may register one fault-time cleanup callback. FailActiveMode(...) runs
-    // that cleanup if present, shuts down shared runtime resources, and traps execution
+    // One top-level mode may register one fault-time cleanup callback. FailActiveMode(...) records
+    // the fault, closes runtime logs, then runs that cleanup if present and traps execution
     // permanently. It is not a recoverable status-return API.
     class EXPORT SharedRobotRuntime final
     {
@@ -79,8 +79,8 @@ namespace MazeMap::App::Internal
         // Terminal fault reason forwarded from FailActiveMode(...).
         //
         // Behavior:
-        // The callback runs only on the terminal FailActiveMode(...) path, after the runtime has
-        // already decided that ordinary control flow is over and before execution is trapped.
+        // The callback runs only on the terminal FailActiveMode(...) path, after runtime logs have
+        // already been closed and before execution is trapped.
         using ModeFaultCleanupCallback = void (*)(void* context, const char* reason) noexcept;
 
         // Constructs the one production runtime object and wires shared services back to it.
@@ -570,7 +570,6 @@ namespace MazeMap::App::Internal
         //
         // Behavior:
         // - Clears LastRuntimeLogError() first.
-        // - Returns `false` immediately once logs are fault-closed.
         // - If a text-log or utility-log transfer is already busy, returns `true` without forcing
         //   more work.
         // - Prioritizes draining full logging.txt sectors before servicing the utility logger.
@@ -685,7 +684,7 @@ namespace MazeMap::App::Internal
         void SetLastRuntimeLogError(const char* message) noexcept;
         void SetLastRuntimeLogErrorFromUtilityDataLogger(const char* fallback) noexcept;
         void LogUtilityDataLoggerFailure(const char* type) noexcept;
-        void CloseRuntimeLogsForFault() noexcept;
+        void CloseRuntimeLogs() noexcept;
 
         static constexpr std::size_t kTextLogSourceLength = 64U;
 
@@ -713,7 +712,6 @@ namespace MazeMap::App::Internal
 #endif
         bool textLogFaulted{};                           // Whether logging.txt has faulted irrecoverably.
         bool textLogInitialized{};                       // Whether logging.txt has been opened at least once.
-        bool runtimeLogsClosedForFault{};                // Whether fault-path shutdown already closed logs.
         bool modeFaultHandlerRegistered{};               // Whether the active top-level mode installed cleanup.
         bool modeFaulted{};                              // Whether FailActiveMode(...) has already taken ownership.
         ModeFaultCleanupCallback modeFaultCleanupCallback{}; // Optional top-level mode fault-time cleanup.

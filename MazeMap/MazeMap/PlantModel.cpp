@@ -34,19 +34,26 @@ namespace MazeMap
 
     float PlantModel::SignedDirection(float preferredValue, float fallbackValue) noexcept
     {
-        const int preferredSign = (preferredValue > kSignEpsilon) - (preferredValue < -kSignEpsilon);
-        if (preferredSign != 0)
-        {
-            return static_cast<float>(preferredSign);
-        }
-
-        const int fallbackSign = (fallbackValue > kSignEpsilon) - (fallbackValue < -kSignEpsilon);
-        return static_cast<float>(fallbackSign);
+        const float preferredScale =
+            preferredValue /
+            MazeMap::Math::Sqrtf((preferredValue * preferredValue) + (kSignEpsilon * kSignEpsilon));
+        const float fallbackScale =
+            fallbackValue /
+            MazeMap::Math::Sqrtf((fallbackValue * fallbackValue) + (kSignEpsilon * kSignEpsilon));
+        const float fallbackWeight =
+            (kSignEpsilon * kSignEpsilon) /
+            ((preferredValue * preferredValue) + (kSignEpsilon * kSignEpsilon));
+        return ((1.0f - fallbackWeight) * preferredScale) + (fallbackWeight * fallbackScale);
     }
 
     float PlantModel::PositivePart(const float value) noexcept
     {
-        return (value <= 0.0f) ? 0.0f : value;
+        return
+            0.5f *
+            (value +
+                MazeMap::Math::Sqrtf(
+                    (value * value) +
+                    1.0e-18f));
     }
 
     float PlantModel::PositiveFiniteOrDefault(const float value, const float fallback) noexcept
@@ -108,7 +115,7 @@ namespace MazeMap
             (speedFade2 > 0.0f) ? (speedFade2 / (speedFade2 + PositivePart(speedV2))) : 0.0f;
         const float forceBranchContactYawMomentCorrectionAlongYawNm =
             speedRelief * _aggregateContactYawMomentCorrectionForceSlidingMomentNm;
-        const float blend = (std::clamp)(speedLow * forceGate, 0.0f, 1.0f);
+        const float blend = speedLow * forceGate;
         const float contactYawMomentCorrectionAlongYawNm =
             variantCContactYawMomentCorrectionAlongYawNm +
             (blend *
@@ -193,11 +200,7 @@ namespace MazeMap
             1.0f /
             (1.0f + ((forwardVelocityMps * forwardVelocityMps) / (forwardKnee * forwardKnee)));
         const float highForward = 1.0f - lowForward;
-        const float utilization =
-            (std::clamp)(
-                maxProjectedContactUtilization,
-                0.0f,
-                5.0f);
+        const float utilization = PositivePart(maxProjectedContactUtilization);
         const float utilSmooth = utilization / (1.0f + utilization);
         const float projectedYawMomentAlongCorrectionDirectionNm = -yawDirection * projectedMomentNm;
 
@@ -277,13 +280,7 @@ namespace MazeMap
             (_leftDrive.getResistance() > 0.0f) ?
             (_leftDrive.getVoltage() / _leftDrive.getResistance()) :
             2.4f;
-        const float staticFrictionTorqueNm =
-            (std::max)(
-                0.0f,
-                _leftDrive.getTorqueFromCommand(
-                    kReliableLaunchDriveCommand,
-                    0.0f,
-                    _vehicle.GetBatteryVoltage()));
+        const float staticFrictionTorqueDumpNm = staticFrictionTorqueNm();
 
         if (!WriteDebugTextLine(
                 context,
@@ -328,7 +325,7 @@ namespace MazeMap
                 sink,
                 "plant_dump_params_static_friction",
                 "static_friction_torque_nm=%.9g;static_friction_max_speed_mps=%.9g",
-                static_cast<double>(staticFrictionTorqueNm),
+                static_cast<double>(staticFrictionTorqueDumpNm),
                 static_cast<double>(kStaticFrictionMaxSpeedMps)) ||
             !WriteDebugTextLine(
                 context,
@@ -465,8 +462,16 @@ namespace MazeMap
             activeBrakeCommand ? 0.0f : control.LeftCommand();
         const float rightMotorCommand =
             activeBrakeCommand ? 0.0f : control.RightCommand();
+        const float averageMotorCommand =
+            activeBrakeCommand ? 0.0f : (0.5f * (leftMotorCommand + rightMotorCommand));
+        const float differentialMotorCommand =
+            activeBrakeCommand ? 0.0f : (0.5f * (leftMotorCommand - rightMotorCommand));
+        const float commandRadius =
+            MazeMap::Math::Sqrtf(
+                (averageMotorCommand * averageMotorCommand) +
+                (differentialMotorCommand * differentialMotorCommand) +
+                1.0e-8f);
         const float batteryVoltageV = _vehicle.GetBatteryVoltage();
-        const float staticLaunchTorqueNm = staticFrictionTorqueNm();
 
         const float leftDirectTorqueNm =
             activeBrakeCommand ?
@@ -492,10 +497,22 @@ namespace MazeMap
                         -1.0f,
                         leftWheelSpeedRadps,
                         batteryVoltageV));
-            leftCurrentLimitedTorqueNm =
-                (leftPositiveLimitNm > leftNegativeLimitNm) ?
-                (std::clamp)(leftDirectTorqueNm, leftNegativeLimitNm, leftPositiveLimitNm) :
-                leftDirectTorqueNm;
+            if (leftPositiveLimitNm > leftNegativeLimitNm)
+            {
+                const float leftTorqueLimitCenterNm =
+                    0.5f * (leftPositiveLimitNm + leftNegativeLimitNm);
+                const float leftTorqueLimitHalfRangeNm =
+                    0.5f * (leftPositiveLimitNm - leftNegativeLimitNm);
+                const float leftTorqueLimitDeltaNm =
+                    leftDirectTorqueNm - leftTorqueLimitCenterNm;
+                const float leftTorqueLimitRatio =
+                    leftTorqueLimitDeltaNm / (leftTorqueLimitHalfRangeNm + kSignEpsilon);
+                leftCurrentLimitedTorqueNm =
+                    leftTorqueLimitCenterNm +
+                    (leftTorqueLimitHalfRangeNm *
+                        static_cast<float>(
+                            std::tanh(static_cast<double>(leftTorqueLimitRatio))));
+            }
         }
         const float leftTorqueCorrectionDeltaNm = 0.0f;
         leftCurrentLimitedTorqueNm += leftTorqueCorrectionDeltaNm;
@@ -504,15 +521,30 @@ namespace MazeMap
             (kStaticFrictionMaxSpeedMps > 0.0f) ?
             (std::fabs(leftWheelSurfaceSpeedMps) / kStaticFrictionMaxSpeedMps) :
             0.0f;
-        const float leftLaunchTorqueNm =
-            staticLaunchTorqueNm *
+        const float leftLaunchCommandThreshold =
+            kReliableLaunchDriveCommand *
             std::exp(-(leftSlowLaunchRatio * leftSlowLaunchRatio));
-        const float leftLaunchDirection =
-            SignedDirection(leftCurrentLimitedTorqueNm, leftWheelSpeedRadps);
-        const float leftLaunchExcessTorqueNm =
-            PositivePart(std::fabs(leftCurrentLimitedTorqueNm) - leftLaunchTorqueNm);
-        leftAppliedBankTorqueNm = leftLaunchDirection * leftLaunchExcessTorqueNm;
-        const float leftLossDirection = SignedDirection(leftWheelSpeedRadps, leftAppliedBankTorqueNm);
+        const float leftLaunchCommandDelta =
+            commandRadius - leftLaunchCommandThreshold;
+        const float leftLaunchCommandExcess =
+            0.5f *
+            (leftLaunchCommandDelta +
+                MazeMap::Math::Sqrtf(
+                    (leftLaunchCommandDelta * leftLaunchCommandDelta) +
+                    1.0e-6f));
+        const float leftLaunchTransmission =
+            activeBrakeCommand ?
+            1.0f :
+            (leftLaunchCommandExcess / (commandRadius + 1.0e-3f));
+        leftAppliedBankTorqueNm = leftCurrentLimitedTorqueNm * leftLaunchTransmission;
+        const float leftStaticFrictionSpeedThresholdRadps =
+            (wheelRadiusM > 0.0f) ? (kStaticFrictionMaxSpeedMps / wheelRadiusM) : 1.0f;
+        const float leftLossDirection =
+            leftWheelSpeedRadps /
+            MazeMap::Math::Sqrtf(
+                (leftWheelSpeedRadps * leftWheelSpeedRadps) +
+                (leftStaticFrictionSpeedThresholdRadps * leftStaticFrictionSpeedThresholdRadps) +
+                1.0e-8f);
         const float leftRollingLossTorqueNm =
             (kRollingFrictionTorqueNm * leftLossDirection) +
             (kViscousFrictionNmPerRadps * leftWheelSpeedRadps);
@@ -542,10 +574,22 @@ namespace MazeMap
                         -1.0f,
                         rightWheelSpeedRadps,
                         batteryVoltageV));
-            rightCurrentLimitedTorqueNm =
-                (rightPositiveLimitNm > rightNegativeLimitNm) ?
-                (std::clamp)(rightDirectTorqueNm, rightNegativeLimitNm, rightPositiveLimitNm) :
-                rightDirectTorqueNm;
+            if (rightPositiveLimitNm > rightNegativeLimitNm)
+            {
+                const float rightTorqueLimitCenterNm =
+                    0.5f * (rightPositiveLimitNm + rightNegativeLimitNm);
+                const float rightTorqueLimitHalfRangeNm =
+                    0.5f * (rightPositiveLimitNm - rightNegativeLimitNm);
+                const float rightTorqueLimitDeltaNm =
+                    rightDirectTorqueNm - rightTorqueLimitCenterNm;
+                const float rightTorqueLimitRatio =
+                    rightTorqueLimitDeltaNm / (rightTorqueLimitHalfRangeNm + kSignEpsilon);
+                rightCurrentLimitedTorqueNm =
+                    rightTorqueLimitCenterNm +
+                    (rightTorqueLimitHalfRangeNm *
+                        static_cast<float>(
+                            std::tanh(static_cast<double>(rightTorqueLimitRatio))));
+            }
         }
         const float rightTorqueCorrectionDeltaNm = 0.0f;
         rightCurrentLimitedTorqueNm += rightTorqueCorrectionDeltaNm;
@@ -554,15 +598,30 @@ namespace MazeMap
             (kStaticFrictionMaxSpeedMps > 0.0f) ?
             (std::fabs(rightWheelSurfaceSpeedMps) / kStaticFrictionMaxSpeedMps) :
             0.0f;
-        const float rightLaunchTorqueNm =
-            staticLaunchTorqueNm *
+        const float rightLaunchCommandThreshold =
+            kReliableLaunchDriveCommand *
             std::exp(-(rightSlowLaunchRatio * rightSlowLaunchRatio));
-        const float rightLaunchDirection =
-            SignedDirection(rightCurrentLimitedTorqueNm, rightWheelSpeedRadps);
-        const float rightLaunchExcessTorqueNm =
-            PositivePart(std::fabs(rightCurrentLimitedTorqueNm) - rightLaunchTorqueNm);
-        rightAppliedBankTorqueNm = rightLaunchDirection * rightLaunchExcessTorqueNm;
-        const float rightLossDirection = SignedDirection(rightWheelSpeedRadps, rightAppliedBankTorqueNm);
+        const float rightLaunchCommandDelta =
+            commandRadius - rightLaunchCommandThreshold;
+        const float rightLaunchCommandExcess =
+            0.5f *
+            (rightLaunchCommandDelta +
+                MazeMap::Math::Sqrtf(
+                    (rightLaunchCommandDelta * rightLaunchCommandDelta) +
+                    1.0e-6f));
+        const float rightLaunchTransmission =
+            activeBrakeCommand ?
+            1.0f :
+            (rightLaunchCommandExcess / (commandRadius + 1.0e-3f));
+        rightAppliedBankTorqueNm = rightCurrentLimitedTorqueNm * rightLaunchTransmission;
+        const float rightStaticFrictionSpeedThresholdRadps =
+            (wheelRadiusM > 0.0f) ? (kStaticFrictionMaxSpeedMps / wheelRadiusM) : 1.0f;
+        const float rightLossDirection =
+            rightWheelSpeedRadps /
+            MazeMap::Math::Sqrtf(
+                (rightWheelSpeedRadps * rightWheelSpeedRadps) +
+                (rightStaticFrictionSpeedThresholdRadps * rightStaticFrictionSpeedThresholdRadps) +
+                1.0e-8f);
         const float rightRollingLossTorqueNm =
             (kRollingFrictionTorqueNm * rightLossDirection) +
             (kViscousFrictionNmPerRadps * rightWheelSpeedRadps);
@@ -814,60 +873,64 @@ namespace MazeMap
                 (frontLeftRawForwardForceN * frontLeftRawForwardForceN) +
                 (frontLeftRawRightForceN * frontLeftRawRightForceN));
         const float frontLeftMaxForceN = PositivePart(peakFrontMu * frontLeftContact._normalForceN);
+        const float frontLeftUtilization =
+            frontLeftRawMagnitudeN / (frontLeftMaxForceN + kForceEpsilonN);
+        const float frontLeftSaturation =
+            static_cast<float>(std::tanh(static_cast<double>(frontLeftUtilization)));
         const float frontLeftScale =
-            (frontLeftRawMagnitudeN > frontLeftMaxForceN && frontLeftRawMagnitudeN > kForceEpsilonN) ?
-            (frontLeftMaxForceN / frontLeftRawMagnitudeN) :
-            1.0f;
+            frontLeftSaturation / (frontLeftUtilization + 1.0e-6f);
         frontLeftContact._forwardForceN = frontLeftScale * frontLeftRawForwardForceN;
         frontLeftContact._rightForceN = frontLeftScale * frontLeftRawRightForceN;
-        frontLeftContact._preProjectionUtilization =
-            frontLeftRawMagnitudeN / (std::max)(frontLeftMaxForceN, kForceEpsilonN);
-        frontLeftContact._saturation = (std::min)(frontLeftContact._preProjectionUtilization, 1.0f);
+        frontLeftContact._preProjectionUtilization = frontLeftUtilization;
+        frontLeftContact._saturation = frontLeftSaturation;
 
         const float frontRightRawMagnitudeN =
             MazeMap::Math::Sqrtf(
                 (frontRightRawForwardForceN * frontRightRawForwardForceN) +
                 (frontRightRawRightForceN * frontRightRawRightForceN));
         const float frontRightMaxForceN = PositivePart(peakFrontMu * frontRightContact._normalForceN);
+        const float frontRightUtilization =
+            frontRightRawMagnitudeN / (frontRightMaxForceN + kForceEpsilonN);
+        const float frontRightSaturation =
+            static_cast<float>(std::tanh(static_cast<double>(frontRightUtilization)));
         const float frontRightScale =
-            (frontRightRawMagnitudeN > frontRightMaxForceN && frontRightRawMagnitudeN > kForceEpsilonN) ?
-            (frontRightMaxForceN / frontRightRawMagnitudeN) :
-            1.0f;
+            frontRightSaturation / (frontRightUtilization + 1.0e-6f);
         frontRightContact._forwardForceN = frontRightScale * frontRightRawForwardForceN;
         frontRightContact._rightForceN = frontRightScale * frontRightRawRightForceN;
-        frontRightContact._preProjectionUtilization =
-            frontRightRawMagnitudeN / (std::max)(frontRightMaxForceN, kForceEpsilonN);
-        frontRightContact._saturation = (std::min)(frontRightContact._preProjectionUtilization, 1.0f);
+        frontRightContact._preProjectionUtilization = frontRightUtilization;
+        frontRightContact._saturation = frontRightSaturation;
 
         const float rearLeftRawMagnitudeN =
             MazeMap::Math::Sqrtf(
                 (rearLeftRawForwardForceN * rearLeftRawForwardForceN) +
                 (rearLeftRawRightForceN * rearLeftRawRightForceN));
         const float rearLeftMaxForceN = PositivePart(peakRearMu * rearLeftContact._normalForceN);
+        const float rearLeftUtilization =
+            rearLeftRawMagnitudeN / (rearLeftMaxForceN + kForceEpsilonN);
+        const float rearLeftSaturation =
+            static_cast<float>(std::tanh(static_cast<double>(rearLeftUtilization)));
         const float rearLeftScale =
-            (rearLeftRawMagnitudeN > rearLeftMaxForceN && rearLeftRawMagnitudeN > kForceEpsilonN) ?
-            (rearLeftMaxForceN / rearLeftRawMagnitudeN) :
-            1.0f;
+            rearLeftSaturation / (rearLeftUtilization + 1.0e-6f);
         rearLeftContact._forwardForceN = rearLeftScale * rearLeftRawForwardForceN;
         rearLeftContact._rightForceN = rearLeftScale * rearLeftRawRightForceN;
-        rearLeftContact._preProjectionUtilization =
-            rearLeftRawMagnitudeN / (std::max)(rearLeftMaxForceN, kForceEpsilonN);
-        rearLeftContact._saturation = (std::min)(rearLeftContact._preProjectionUtilization, 1.0f);
+        rearLeftContact._preProjectionUtilization = rearLeftUtilization;
+        rearLeftContact._saturation = rearLeftSaturation;
 
         const float rearRightRawMagnitudeN =
             MazeMap::Math::Sqrtf(
                 (rearRightRawForwardForceN * rearRightRawForwardForceN) +
                 (rearRightRawRightForceN * rearRightRawRightForceN));
         const float rearRightMaxForceN = PositivePart(peakRearMu * rearRightContact._normalForceN);
+        const float rearRightUtilization =
+            rearRightRawMagnitudeN / (rearRightMaxForceN + kForceEpsilonN);
+        const float rearRightSaturation =
+            static_cast<float>(std::tanh(static_cast<double>(rearRightUtilization)));
         const float rearRightScale =
-            (rearRightRawMagnitudeN > rearRightMaxForceN && rearRightRawMagnitudeN > kForceEpsilonN) ?
-            (rearRightMaxForceN / rearRightRawMagnitudeN) :
-            1.0f;
+            rearRightSaturation / (rearRightUtilization + 1.0e-6f);
         rearRightContact._forwardForceN = rearRightScale * rearRightRawForwardForceN;
         rearRightContact._rightForceN = rearRightScale * rearRightRawRightForceN;
-        rearRightContact._preProjectionUtilization =
-            rearRightRawMagnitudeN / (std::max)(rearRightMaxForceN, kForceEpsilonN);
-        rearRightContact._saturation = (std::min)(rearRightContact._preProjectionUtilization, 1.0f);
+        rearRightContact._preProjectionUtilization = rearRightUtilization;
+        rearRightContact._saturation = rearRightSaturation;
 
         const std::array<float, 4> projectedForwardForceN = {
             frontLeftContact._forwardForceN,
@@ -903,7 +966,7 @@ namespace MazeMap
             maxProjectedContactUtilization =
                 (std::max)(
                     maxProjectedContactUtilization,
-                    projectedMagnitudeN / (std::max)(projectedMaxForceN[contactIndex], kForceEpsilonN));
+                    projectedMagnitudeN / (projectedMaxForceN[contactIndex] + kForceEpsilonN));
         }
         const float leftBankForwardForceN = frontLeftContact._forwardForceN + rearLeftContact._forwardForceN;
         const float rightBankForwardForceN = frontRightContact._forwardForceN + rearRightContact._forwardForceN;
@@ -922,7 +985,12 @@ namespace MazeMap
         const float projectedYawMomentNm =
             (contactYawHalfTrackWidthM * (leftBankForwardForceN - rightBankForwardForceN)) +
             (contactYawLongitudinalOffsetM * (frontRightForceN - rearRightForceN));
-        const float yawDirection = SignedDirection(yawRateRadps, projectedYawMomentNm);
+        const float yawDirectionBasis =
+            yawRateRadps +
+            ((0.001f * projectedYawMomentNm) / (yawInertiaKgM2 + kForceEpsilonN));
+        const float yawDirection =
+            yawDirectionBasis /
+            MazeMap::Math::Sqrtf((yawDirectionBasis * yawDirectionBasis) + 1.0e-8f);
         const float variantCContactYawMomentCorrectionAlongYawNm =
             variantCAggregateContactYawMomentCorrectionAlongYawNm(
                 yawDirection,
@@ -966,14 +1034,32 @@ namespace MazeMap
             (yawInertiaKgM2 + (wheelSpinupMassKg * contactYawHalfTrackWidthM * contactYawHalfTrackWidthM));
         const float maxForwardAccelMps2 = _vehicle.GetMaxForwardAcceleration();
         const float maxYawAccelRadps2 = _vehicle.GetMaxYawAccel();
+        const float forwardAccelLimitRatio =
+            (maxForwardAccelMps2 > 0.0f) ? (rawForwardAccelMps2 / maxForwardAccelMps2) : 0.0f;
+        const float forwardAccelLimitRatio2 = forwardAccelLimitRatio * forwardAccelLimitRatio;
+        const float forwardAccelLimitRatio4 = forwardAccelLimitRatio2 * forwardAccelLimitRatio2;
+        const float forwardAccelLimitRatio8 = forwardAccelLimitRatio4 * forwardAccelLimitRatio4;
+        const float yawAccelLimitRatio =
+            (maxYawAccelRadps2 > 0.0f) ? (rawYawAccelRadps2 / maxYawAccelRadps2) : 0.0f;
+        const float yawAccelLimitRatio2 = yawAccelLimitRatio * yawAccelLimitRatio;
+        const float yawAccelLimitRatio4 = yawAccelLimitRatio2 * yawAccelLimitRatio2;
+        const float yawAccelLimitRatio8 = yawAccelLimitRatio4 * yawAccelLimitRatio4;
         const float forwardAccelMps2 =
             (maxForwardAccelMps2 > 0.0f) ?
-            (std::clamp)(rawForwardAccelMps2, -maxForwardAccelMps2, maxForwardAccelMps2) :
+            (rawForwardAccelMps2 /
+                static_cast<float>(
+                    std::pow(
+                        static_cast<double>(1.0f + forwardAccelLimitRatio8),
+                        0.125))) :
             rawForwardAccelMps2;
         const float rightAccelMps2 = rawRightAccelMps2;
         const float yawAccelRadps2 =
             (maxYawAccelRadps2 > 0.0f) ?
-            (std::clamp)(rawYawAccelRadps2, -maxYawAccelRadps2, maxYawAccelRadps2) :
+            (rawYawAccelRadps2 /
+                static_cast<float>(
+                    std::pow(
+                        static_cast<double>(1.0f + yawAccelLimitRatio8),
+                        0.125))) :
             rawYawAccelRadps2;
         const float resolvedForwardAccelMps2 = forwardAccelMps2 + forwardAccelResidualMps2;
         const float resolvedRightAccelMps2 = rightAccelMps2 + rightAccelResidualMps2;
@@ -1041,8 +1127,9 @@ namespace MazeMap
     {
         float leftAppliedBankTorqueNm = 0.0f;
         float rightAppliedBankTorqueNm = 0.0f;
+        (void)referenceState;
         resolveAppliedBankTorques(
-            referenceState,
+            state,
             control,
             leftAppliedBankTorqueNm,
             rightAppliedBankTorqueNm,
@@ -1495,7 +1582,12 @@ namespace MazeMap
              (rearLeftRightForceN + rearRightRightForceN));
 
         const float desiredYawMomentNm = yawInertiaKgM2 * desiredYawAccelRadps2;
-        const float yawDirection = SignedDirection(yawRateRadps, desiredYawMomentNm);
+        const float yawDirectionBasis =
+            yawRateRadps +
+            (0.001f * desiredYawAccelRadps2);
+        const float yawDirection =
+            yawDirectionBasis /
+            MazeMap::Math::Sqrtf((yawDirectionBasis * yawDirectionBasis) + 1.0e-8f);
         const auto variantCAtProjectedMoment = [&](const float projectedMomentAlongYawNm) noexcept -> float
         {
             if (yawDirection == 0.0f || !(trackWidthM > 0.0f))
@@ -1537,7 +1629,7 @@ namespace MazeMap
                 maxUtilization =
                     (std::max)(
                         maxUtilization,
-                        magnitudeN / (std::max)(maxForceN, kForceEpsilonN));
+                        magnitudeN / (maxForceN + kForceEpsilonN));
             }
 
             return variantCAggregateContactYawMomentCorrectionAlongYawNm(
@@ -1673,16 +1765,10 @@ namespace MazeMap
         const float rightRollingLossTorqueNm =
             (kRollingFrictionTorqueNm * rightLossDirection) +
             (kViscousFrictionNmPerRadps * rightWheelSpeedRadps);
-        float leftCommandTorqueNm = leftWheelTorqueRequestNm;
-        float rightCommandTorqueNm = rightWheelTorqueRequestNm;
-        if (SignedDirection(leftWheelTorqueRequestNm, leftWheelSpeedRadps) != 0.0f)
-        {
-            leftCommandTorqueNm += (leftLaunchDirection * leftLaunchTorqueNm) + leftRollingLossTorqueNm;
-        }
-        if (SignedDirection(rightWheelTorqueRequestNm, rightWheelSpeedRadps) != 0.0f)
-        {
-            rightCommandTorqueNm += (rightLaunchDirection * rightLaunchTorqueNm) + rightRollingLossTorqueNm;
-        }
+        const float leftCommandTorqueNm =
+            leftWheelTorqueRequestNm + (leftLaunchDirection * leftLaunchTorqueNm) + leftRollingLossTorqueNm;
+        const float rightCommandTorqueNm =
+            rightWheelTorqueRequestNm + (rightLaunchDirection * rightLaunchTorqueNm) + rightRollingLossTorqueNm;
 
         return App::Internal::CommandVector(
             _leftDrive.getCommandFromTorque(
@@ -1894,21 +1980,23 @@ namespace MazeMap
         const float staticFrictionSpeedThresholdRadps =
             (wheelRadiusM > 0.0f) ? (kStaticFrictionMaxSpeedMps / wheelRadiusM) : 0.0f;
         const float viscousFrictionTorqueNm = kViscousFrictionNmPerRadps * wheelBankSpeedRadps;
-        if (std::fabs(wheelBankSpeedRadps) <= staticFrictionSpeedThresholdRadps)
-        {
-            const float sign = SignedDirection(wheelTorqueRequestNm, wheelBankSpeedRadps);
-            return (staticFrictionTorqueNm() * sign) + viscousFrictionTorqueNm;
-        }
-
-        const float sign = SignedDirection(wheelBankSpeedRadps, wheelTorqueRequestNm);
-        return (kRollingFrictionTorqueNm * sign) + viscousFrictionTorqueNm;
+        const float speedRatio =
+            wheelBankSpeedRadps /
+            (staticFrictionSpeedThresholdRadps + kSignEpsilon);
+        const float speedRatio2 = speedRatio * speedRatio;
+        const float lowSpeedWeight = 1.0f / (1.0f + speedRatio2);
+        const float staticDirection = SignedDirection(wheelTorqueRequestNm, wheelBankSpeedRadps);
+        const float rollingDirection = SignedDirection(wheelBankSpeedRadps, wheelTorqueRequestNm);
+        return
+            ((lowSpeedWeight * staticFrictionTorqueNm() * staticDirection) +
+                ((1.0f - lowSpeedWeight) * kRollingFrictionTorqueNm * rollingDirection) +
+                viscousFrictionTorqueNm);
     }
 
     float PlantModel::staticFrictionTorqueNm() const noexcept
     {
         return
-            (std::max)(
-                0.0f,
+            PositivePart(
                 _leftDrive.getTorqueFromCommand(
                     kReliableLaunchDriveCommand,
                     0.0f,

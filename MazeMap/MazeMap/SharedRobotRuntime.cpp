@@ -142,6 +142,15 @@ static bool FlushPartialTextLogTail(
     // Keep physical writes sector-sized, then trim the file back to the true byte count.
     return FinalizeTextLogFileLength(file, logicalLength);
 }
+
+static bool FinalizeTextLogClose(SharedRuntimeTextLogFileHandle& file) noexcept
+{
+    while (TextLogTransferBusy(file))
+    {
+    }
+
+    return FinalizeTextLogFileLength(file, file.curPosition());
+}
 #elif defined(ARDUINO)
 static bool OpenFreshTextLogFile(SharedRuntimeTextLogFileHandle& file, const char* const path) noexcept
 {
@@ -189,6 +198,11 @@ static void CloseTextLogFile(SharedRuntimeTextLogFileHandle& file) noexcept
     {
         file.close();
     }
+}
+
+static bool FinalizeTextLogClose(SharedRuntimeTextLogFileHandle& file) noexcept
+{
+    return FlushTextLogFile(file);
 }
 #else
 static bool OpenFreshTextLogFile(SharedRuntimeTextLogFileHandle& file, const char* const path) noexcept
@@ -260,6 +274,11 @@ static void CloseTextLogFile(SharedRuntimeTextLogFileHandle& file) noexcept
         std::fclose(file);
         file = nullptr;
     }
+}
+
+static bool FinalizeTextLogClose(SharedRuntimeTextLogFileHandle& file) noexcept
+{
+    return FlushTextLogFile(file);
 }
 #endif
 
@@ -464,7 +483,6 @@ namespace MazeMap::App::Internal
         , textLogQueue()
         , textLogFaulted(false)
         , textLogInitialized(false)
-        , runtimeLogsClosedForFault(false)
         , modeFaultHandlerRegistered(false)
         , modeFaulted(false)
         , modeFaultCleanupCallback(nullptr)
@@ -492,7 +510,7 @@ namespace MazeMap::App::Internal
 
     SharedRobotRuntime::~SharedRobotRuntime()
     {
-        CloseRuntimeLogsForFault();
+        CloseRuntimeLogs();
     }
 
     MazeMap::Vehicle& SharedRobotRuntime::Vehicle() noexcept
@@ -629,7 +647,7 @@ namespace MazeMap::App::Internal
 
     bool SharedRobotRuntime::EnsureTextLogOpen()
     {
-        if (textLogFaulted || runtimeLogsClosedForFault)
+        if (textLogFaulted)
         {
             return false;
         }
@@ -646,7 +664,7 @@ namespace MazeMap::App::Internal
         if (!opened)
         {
             textLogFaulted = true;
-            CloseRuntimeLogsForFault();
+            CloseRuntimeLogs();
             return false;
         }
         textLogInitialized = true;
@@ -675,7 +693,7 @@ namespace MazeMap::App::Internal
         {
             SetLastRuntimeLogError("logging.txt queue overflow.");
             textLogFaulted = true;
-            CloseRuntimeLogsForFault();
+            CloseRuntimeLogs();
             return false;
         }
         return true;
@@ -830,7 +848,7 @@ namespace MazeMap::App::Internal
             {
                 SetLastRuntimeLogError("logging.txt flush failed.");
                 textLogFaulted = true;
-                CloseRuntimeLogsForFault();
+                CloseRuntimeLogs();
             }
         }
     }
@@ -842,9 +860,8 @@ namespace MazeMap::App::Internal
         ClearLastRuntimeLogError();
         if (TextLogFileIsOpen(textLogFile))
         {
-            if ((!textLogQueue.empty() &&
-                 !FlushTextLogQueueToFile(textLogFile, textLogQueue)) ||
-                !FlushTextLogFile(textLogFile))
+            if (!FlushTextLogQueueToFile(textLogFile, textLogQueue) ||
+                !FinalizeTextLogClose(textLogFile))
             {
                 SetLastRuntimeLogError("logging.txt close failed.");
                 textLogFaulted = true;
@@ -906,12 +923,11 @@ namespace MazeMap::App::Internal
             "fault",
             (reason != nullptr) ? reason : "unknown");
 
+        CloseRuntimeLogs();
         if (modeFaultCleanupCallback != nullptr)
         {
             modeFaultCleanupCallback(modeFaultCleanupContext, reason);
         }
-
-        CloseRuntimeLogsForFault();
         StartRuntimeFaultIndicatorBlink();
         while (true)
         {
@@ -920,7 +936,7 @@ namespace MazeMap::App::Internal
 
     void SharedRobotRuntime::FinalizeSuccessfulModeExit() noexcept
     {
-        if (modeFaulted || runtimeLogsClosedForFault)
+        if (modeFaulted)
         {
             return;
         }
@@ -991,11 +1007,6 @@ namespace MazeMap::App::Internal
         // arbitrates logging.txt first, then delegates sidecar/primary arbitration to the
         // one runtime-owned MmLogLogger instance.
         ClearLastRuntimeLogError();
-        if (runtimeLogsClosedForFault)
-        {
-            return false;
-        }
-
         if (TextLogTransferBusy(textLogFile) || UtilityDataLogger().isTransferBusy())
         {
             return true;
@@ -1008,7 +1019,7 @@ namespace MazeMap::App::Internal
             {
                 SetLastRuntimeLogError("logging.txt service drain failed.");
                 textLogFaulted = true;
-                CloseRuntimeLogsForFault();
+                CloseRuntimeLogs();
                 return false;
             }
 
@@ -1054,26 +1065,21 @@ namespace MazeMap::App::Internal
         return ok;
     }
 
-    void SharedRobotRuntime::CloseRuntimeLogsForFault() noexcept
+    void SharedRobotRuntime::CloseRuntimeLogs() noexcept
     {
-        runtimeLogsClosedForFault = true;
-
         if (TextLogFileIsOpen(textLogFile))
         {
-            (void)CloseTextLog();
+            CloseTextLog();
         }
-        textLogQueue.clear();
+        else
+        {
+            textLogQueue.clear();
+        }
 
         if (UtilityDataLogger().isOpen())
         {
-            (void)UtilityDataLogger().close();
+            (void)CloseUtilityDataLog();
         }
-
-        ResetUtilityLogIdentity(
-            activeDataLogFileName,
-            sizeof(activeDataLogFileName),
-            activeDataLogSource,
-            sizeof(activeDataLogSource));
     }
 
     void SharedRobotRuntime::CaptureUtilityDataLogFailure(bool& overflowed, bool& writeFailed) const noexcept

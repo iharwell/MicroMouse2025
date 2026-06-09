@@ -282,8 +282,8 @@ namespace MazeMap::App::Internal
             const char* Name() const noexcept override { return "Yaw Launch"; }
             MeasurementLogId Id() const noexcept override { return kLogId; }
             std::uint16_t PrimitiveCount() const noexcept override { return 2U; }
-            std::uint8_t SpeedBinCount() const noexcept override { return 5U; }
-            std::uint16_t RepeatCount() const noexcept override { return 10U; }
+            std::uint8_t SpeedBinCount() const noexcept override { return 7U; }
+            std::uint16_t RepeatCount() const noexcept override { return 3U; }
             MazeMap::ManeuverCode PrimitiveCode(
                 std::uint16_t primitiveIndex,
                 std::uint8_t speedBinIndex) const noexcept override
@@ -454,10 +454,10 @@ namespace MazeMap::App::Internal
 			}
 
 		private:
-			static constexpr MeasurementLogId kLogId = 20U;
+			static constexpr MeasurementLogId kLogId = 25U;
 
 			std::uint32_t _counter{ 0 };
-			std::array<float, 10> _commandValues{ 0.1f, 0.2f, 0.3f, 0.4f, 0.5f, -0.1f, -0.2f, -0.3f, -0.4f, -0.5f };
+			std::array<float, 10> _commandValues{ 0.1f, -0.1f, 0.2f, -0.2f, 0.3f, -0.3f, 0.4f, -0.4f, 0.5f, -0.5f };
 		};
 
         class YawMeasurementRegime final : public MainMeasurementRegime
@@ -614,7 +614,6 @@ namespace MazeMap::App::Internal
                 OpenFloorMeasurementController& controller,
                 const char* failureReason);
             void BufferRow(const Runtime::OpenFloorMainRow& row);
-            bool CheckFault(OpenFloorMeasurementController& controller);
 
             MainRegimeArray _regimes{};
             MeasurementRegimeSequencer _sequencer{};

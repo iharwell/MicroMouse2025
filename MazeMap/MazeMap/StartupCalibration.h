@@ -93,7 +93,6 @@ namespace MazeMap::App::Internal
         void UpdateDoneState(bool& done) noexcept;
         void LogIssue(const char* reason) noexcept;
         void CompleteBestEffort(const char* reason) noexcept;
-        [[noreturn]] void FailCalibration(const char* reason) noexcept;
         void RefreshSensorsCalibrated() noexcept;
         void RestoreSideReferenceStateFromCalibration() noexcept;
         static float StartupCellCenterCoordinateM() noexcept;
@@ -177,8 +176,8 @@ namespace MazeMap::App::Internal
 
         static constexpr const char* kLogSource = "startup_calibration";
         static constexpr std::uint32_t kImuSelfTestSettleUs = 50000U;
-        static constexpr unsigned long kImuSelfTestAverageSamples = 64UL;
-        static constexpr std::uint32_t kImuCalibrationSampleIntervalUs = 2000U;
+        static constexpr unsigned long kImuSelfTestAverageSamples = 128UL;
+        static constexpr std::uint32_t kImuCalibrationSampleIntervalUs = 1000U;
         static constexpr std::uint16_t kWallCalibrationSampleCount =
             static_cast<std::uint16_t>(Config::kWallCalibrationAverageSampleCount);
         static constexpr std::uint16_t kWallCalibrationPairSamplingTimeoutMs = 250U;

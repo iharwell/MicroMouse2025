@@ -1003,18 +1003,11 @@ namespace MazeMap::App::Internal
             controller._runtime.FailActiveMode("Open-floor measurement timing log write failed");
             return stopControl;
         }
-        if (controller._bootFramework != nullptr &&
-            !controller._bootFramework->IsSelectedModeSelectorInstalled())
-        {
-            controller._runtime.FailActiveMode(kOpenFloorMeasurementSelectorRemovedReason);
-            return stopControl;
-        }
         if (controller._runtime.Estimator().HasFault())
         {
             controller._runtime.FailActiveMode("Estimator fault during timing capture");
             return stopControl;
         }
-
         Runtime::OpenFloorTimingRow row{};
         controller.PopulateTimingRowFromState(state, row);
         BufferRow(row);
@@ -1263,26 +1256,6 @@ namespace MazeMap::App::Internal
         _bufferedRow = row;
     }
 
-    bool OpenFloorMeasurementController::MainStage::CheckFault(
-        OpenFloorMeasurementController& controller)
-    {
-        if (controller._bootFramework != nullptr &&
-            !controller._bootFramework->IsSelectedModeSelectorInstalled())
-        {
-            controller._runtime.FailActiveMode(kOpenFloorMeasurementSelectorRemovedReason);
-			//unreachable
-			//return true;
-        }
-        if (!controller._runtime.Estimator().HasFault())
-        {
-            return false;
-        }
-
-        controller._runtime.FailActiveMode("Estimator fault during open-floor main stage");
-		//unreachable
-		//return true;
-    }
-
     void OpenFloorMeasurementController::SetupMode(BootFramework& framework)
     {
         _bootFramework = &framework;
@@ -1339,6 +1312,13 @@ namespace MazeMap::App::Internal
         const MazeMap::VehicleState& state,
         LoopController& loopController)
     {
+        if (_bootFramework != nullptr &&
+            !_bootFramework->IsSelectedModeSelectorInstalled())
+        {
+            _runtime.FailActiveMode(kOpenFloorMeasurementSelectorRemovedReason);
+            return StopControlVector();
+        }
+
         return (this->*_activeStageTick)(loopEndTimeUs, state, loopController);
     }
 
