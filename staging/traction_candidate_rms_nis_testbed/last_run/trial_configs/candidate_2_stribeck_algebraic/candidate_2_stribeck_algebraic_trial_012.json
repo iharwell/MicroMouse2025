@@ -1,0 +1,14 @@
+{
+  "candidate_id": "candidate_2_stribeck_algebraic",
+  "covariance_policy": "fixed_testbed_estimator_covariance_not_tuned",
+  "is_nominal": false,
+  "parameters": {
+    "dynamic_to_static_grip_ratio": 0.7556521739130435,
+    "low_speed_blend_mps": 0.10608695652173915,
+    "peak_friction_coefficient_at_80pct_fan": 1.8217391304347825,
+    "stribeck_velocity_mps": 0.10954679676386972,
+    "viscous_slip_damping_n_per_mps": 5.739130434782609
+  },
+  "schema_version": 1,
+  "trial_id": "candidate_2_stribeck_algebraic:trial_012"
+}

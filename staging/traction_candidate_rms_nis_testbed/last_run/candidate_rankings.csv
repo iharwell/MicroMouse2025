@@ -1,0 +1,5 @@
+rank,candidate_id,selection_score,sample_count
+1,baseline_holdover,inf,0
+2,candidate_1_algebraic_envelope,inf,0
+3,candidate_2_stribeck_algebraic,inf,0
+4,candidate_3_load_sensitive_anisotropic,inf,0

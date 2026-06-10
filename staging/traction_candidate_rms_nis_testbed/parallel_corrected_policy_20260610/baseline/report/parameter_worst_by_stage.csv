@@ -1,0 +1,10 @@
+stage,parameter_field,parameter_value_kind,parameter_value,launch_command_signature,count,rms_nis,sqrt_mean_nis,rejected_rate,accepted_only_rms_nis,physical_residual_rms,segment_count
+SEC_20_LAUNCH,observed_drive_command_magnitude,observed_drive_command_magnitude,0.25,"pair=0.24,0.24;linear=0.24;yaw=0",31150,24.3749165558,3.40587254565,0.0599357945425,16.6779580863,3.80869221354,25
+SEC_30_STRAIGHT,straight_speed_mps,legacy_straight_speed_bin_mps,0.55,"pair=1,1;mag=0.237663;linear=0.550000011921;yaw=-0.0940739512444",3725,108.287721132,6.01030494285,0.0461744966443,107.73600512,5.9634409098,1
+SEC_40_YAW,yaw_rate_radps,legacy_yaw_rate_bin_radps,9,"pair=1,-1;mag=0.336708;linear=0;yaw=9",22020,4391.95491999,51.1434176166,0.052906448683,4512.65606504,50.0052882901,1
+SEC_50_SMOOTH,smooth_speed_mps,legacy_smooth_speed_bin_mps,0.4,"pair=0,0;mag=0.2000185;linear=0.40000000596;yaw=-12.9624204636",1100,1713.40106668,31.5213223196,0.0663636363636,1772.63303139,29.7587590149,1
+launch,drive_command_bin,logged_drive_command_bin,-0.25,"pair=-0.24,-0.24;linear=-0.24;yaw=0",11250,27.4577434546,3.85485598212,0.0696888888889,19.4493866838,4.30276711167,9
+mixed_launch,observed_drive_command_pair,observed_drive_command_pair,"0.3,0.6","pair=0.3,0.6;linear=0.46;yaw=0.16",14000,43.5449231445,3.73967882764,0.0159285714286,43.1259225951,3.69039623446,8
+smooth,speed_mps,logged_speed_mps,0.4,"pair=1,-1;mag=1;linear=0.40000000596;yaw=0",21220,710.291185496,19.3166535394,0.380537229029,880.460300174,13.7860384287,1
+straight,speed_mps,logged_speed_mps,0.55,"pair=1,-1;mag=0.6089715;linear=0.550000011921;yaw=0",5475,397.515319493,9.53725985879,0.0445662100457,405.742076917,9.4684768416,1
+yaw_launch,drive_command_bin,logged_drive_command_bin,0.8,"pair=0.8,-0.8;linear=0;yaw=-0.8",30000,600.490950872,15.5490519195,0.185433333333,646.864641187,15.6738470997,6

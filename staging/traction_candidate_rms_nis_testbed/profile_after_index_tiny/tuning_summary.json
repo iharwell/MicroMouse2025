@@ -1,0 +1,265 @@
+{
+  "active_metric_weights": {
+    "launch_active_pulse": 1.0,
+    "mixed_launch": 1.0,
+    "smooth_turn_active": 1.0,
+    "straight_active": 1.0,
+    "yaw_calibration": 1.0,
+    "yaw_launch": 1.0
+  },
+  "bootstrap_rows": [],
+  "boundary_policy": "primary_active_rows_before_explicit_corruption_boundaries_are_valid",
+  "candidate_count": 4,
+  "config_path": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\fair_tuning_config.json",
+  "covariance_path": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\covariance_conservative.json",
+  "covariance_policy": "fixed_testbed_covariance_not_tuned",
+  "final_samples_per_candidate": 64,
+  "final_segments": 8,
+  "final_selected_candidate_count": 4,
+  "limits": {
+    "final_max_rows_per_segment": 8,
+    "final_max_segments": 8,
+    "launch_weight": 1.0,
+    "stress_max_rows_per_segment": 8,
+    "train_subset_target": 5,
+    "trial_count_per_candidate": 1,
+    "tuning_max_rows_per_segment": 8,
+    "validation_subset_target": 3,
+    "validation_top_k_per_candidate": 1
+  },
+  "manifest_path": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_segments\\segment_manifest.json",
+  "primary_metric_policy": "metric_balanced_active_traction_and_yaw_calibration_first",
+  "primary_metric_scope": "active_traction_rows",
+  "primary_metric_scope_config": "active",
+  "primary_row_weighted_selection": false,
+  "production_or_hardware_hooks": false,
+  "replay_mode": "aggregate_only_residual_tail",
+  "sample_source_cache": {
+    "cache_hits": 0,
+    "cache_misses": 1706,
+    "cached_samples": 13648,
+    "cached_segments": 1706,
+    "loaded_samples": 13648,
+    "source_log_files_read": 65,
+    "source_log_indexed_rows": 3992068,
+    "source_log_indexes_built": 51,
+    "source_log_scan_batches": 4,
+    "streamed_uncached_segments": 0
+  },
+  "schema_version": 1,
+  "selected_trials": [
+    {
+      "candidate_id": "baseline/current_holdover",
+      "parameters": {
+        "combined_slip_envelope_exponent": 2.0,
+        "lateral_slip_gain_n_per_mps": 16.0,
+        "longitudinal_slip_gain_n_per_mps": 16.0,
+        "low_speed_blend_mps": 0.07,
+        "peak_friction_coefficient_at_80pct_fan": 1.65
+      },
+      "train_score": 5.376652431926116,
+      "trial_id": "baseline/current_holdover:fixed",
+      "validation_score": 4.141515903520024
+    },
+    {
+      "candidate_id": "candidate_1_algebraic_envelope",
+      "parameters": {
+        "combined_slip_envelope_exponent": 2.0,
+        "lateral_slip_gain_n_per_mps": 18.0,
+        "longitudinal_slip_gain_n_per_mps": 18.0,
+        "low_speed_blend_mps": 0.08,
+        "peak_friction_coefficient_at_80pct_fan": 1.68
+      },
+      "train_score": 4.830699640688264,
+      "trial_id": "candidate_1_algebraic_envelope:nominal",
+      "validation_score": 3.9402417667654404
+    },
+    {
+      "candidate_id": "candidate_2_stribeck",
+      "parameters": {
+        "dynamic_to_static_grip_ratio": 0.82,
+        "low_speed_blend_mps": 0.06,
+        "peak_friction_coefficient_at_80pct_fan": 1.72,
+        "stribeck_velocity_mps": 0.16,
+        "viscous_slip_damping_n_per_mps": 2.0
+      },
+      "train_score": 4.03554576127584,
+      "trial_id": "candidate_2_stribeck:nominal",
+      "validation_score": 5.620647723209393
+    },
+    {
+      "candidate_id": "candidate_3_load_sensitive",
+      "parameters": {
+        "lateral_load_sensitivity": 0.26,
+        "lateral_slip_gain_n_per_mps": 16.0,
+        "longitudinal_load_sensitivity": 0.18,
+        "longitudinal_slip_gain_n_per_mps": 22.0,
+        "low_speed_blend_mps": 0.05,
+        "peak_friction_coefficient_at_80pct_fan": 1.78,
+        "yaw_coupling_gain": 0.12
+      },
+      "train_score": 4.0335286720406724,
+      "trial_id": "candidate_3_load_sensitive:nominal",
+      "validation_score": 5.870403751023959
+    }
+  ],
+  "source_log_count": 51,
+  "split_counts": [
+    {
+      "family": "static_hold",
+      "segments": 9,
+      "split": "held_out",
+      "stage": "SEC_10_STATIC",
+      "total_rows": 102401
+    },
+    {
+      "family": "launch",
+      "segments": 230,
+      "split": "held_out",
+      "stage": "SEC_20_LAUNCH",
+      "total_rows": 141068
+    },
+    {
+      "family": "launch",
+      "segments": 18,
+      "split": "held_out",
+      "stage": "launch",
+      "total_rows": 13565
+    },
+    {
+      "family": "static_hold",
+      "segments": 1,
+      "split": "held_out",
+      "stage": "static",
+      "total_rows": 15503
+    },
+    {
+      "family": "launch",
+      "segments": 110,
+      "split": "held_out",
+      "stage": "yaw_launch",
+      "total_rows": 171183
+    },
+    {
+      "family": "static_hold",
+      "segments": 26,
+      "split": "train",
+      "stage": "SEC_10_STATIC",
+      "total_rows": 311885
+    },
+    {
+      "family": "launch",
+      "segments": 699,
+      "split": "train",
+      "stage": "SEC_20_LAUNCH",
+      "total_rows": 887547
+    },
+    {
+      "family": "recovery",
+      "segments": 2,
+      "split": "train",
+      "stage": "SEC_20_LAUNCH",
+      "total_rows": 1388
+    },
+    {
+      "family": "straight",
+      "segments": 12,
+      "split": "train",
+      "stage": "SEC_30_STRAIGHT",
+      "total_rows": 397512
+    },
+    {
+      "family": "static_hold",
+      "segments": 1,
+      "split": "train",
+      "stage": "SEC_50_SMOOTH",
+      "total_rows": 254
+    },
+    {
+      "family": "launch",
+      "segments": 36,
+      "split": "train",
+      "stage": "launch",
+      "total_rows": 26913
+    },
+    {
+      "family": "launch",
+      "segments": 30,
+      "split": "train",
+      "stage": "mixed_launch",
+      "total_rows": 35753
+    },
+    {
+      "family": "static_hold",
+      "segments": 4,
+      "split": "train",
+      "stage": "static",
+      "total_rows": 42315
+    },
+    {
+      "family": "launch",
+      "segments": 188,
+      "split": "train",
+      "stage": "yaw_launch",
+      "total_rows": 169632
+    },
+    {
+      "family": "static_hold",
+      "segments": 9,
+      "split": "validation",
+      "stage": "SEC_10_STATIC",
+      "total_rows": 88336
+    },
+    {
+      "family": "launch",
+      "segments": 226,
+      "split": "validation",
+      "stage": "SEC_20_LAUNCH",
+      "total_rows": 211445
+    },
+    {
+      "family": "straight",
+      "segments": 6,
+      "split": "validation",
+      "stage": "SEC_30_STRAIGHT",
+      "total_rows": 198756
+    },
+    {
+      "family": "launch",
+      "segments": 18,
+      "split": "validation",
+      "stage": "launch",
+      "total_rows": 13330
+    },
+    {
+      "family": "launch",
+      "segments": 10,
+      "split": "validation",
+      "stage": "mixed_launch",
+      "total_rows": 11944
+    },
+    {
+      "family": "static_hold",
+      "segments": 1,
+      "split": "validation",
+      "stage": "static",
+      "total_rows": 30523
+    },
+    {
+      "family": "launch",
+      "segments": 54,
+      "split": "validation",
+      "stage": "yaw_launch",
+      "total_rows": 49190
+    }
+  ],
+  "stress_metric_policy": "full_row_weighted_residual_tail_diagnostic_only",
+  "stress_samples_per_candidate": 13520,
+  "stress_segments": 1690,
+  "train_subset_boundary_ended_segments": 1,
+  "train_subset_segments": 5,
+  "trial_count": 7,
+  "uses_logged_ukf_state": false,
+  "validation_subset_boundary_ended_segments": 1,
+  "validation_subset_segments": 3
+}

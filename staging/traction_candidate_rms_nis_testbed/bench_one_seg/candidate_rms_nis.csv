@@ -1,0 +1,3 @@
+candidate_id,split,count,sum_nis,sum_nis_sq,rms_nis,sqrt_mean_nis,accepted_count,rejected_count,segment_count
+baseline/current_holdover,all,1344,305.317476905,397.074904108,0.543546352195,0.476624319296,1344,0,1
+baseline/current_holdover,held_out,1344,305.317476905,397.074904108,0.543546352195,0.476624319296,1344,0,1

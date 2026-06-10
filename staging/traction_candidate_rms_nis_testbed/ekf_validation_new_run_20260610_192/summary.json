@@ -1,0 +1,97 @@
+{
+  "aggregate_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\ekf_validation_new_run_20260610_192\\nis_aggregates.csv",
+  "bias_segment_manifest": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\representative_corpus\\segment_manifest.json",
+  "bias_summary_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\ekf_validation_new_run_20260610_192\\bias_summary.csv",
+  "candidate_rms_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\ekf_validation_new_run_20260610_192\\candidate_rms_nis.csv",
+  "candidates": {
+    "baseline/current_holdover": {
+      "accepted_count": 137901,
+      "nis_count": 184785,
+      "rejected_count": 46884,
+      "rejected_rate": 0.25372189301079634,
+      "rejected_rate_penalty": 0.5074437860215927,
+      "residual_rms": {
+        "forward_accel_mps2": 12.480511822313963,
+        "right_accel_mps2": 5.643288121549166,
+        "yaw_accel_radps2": 128.58966520035474,
+        "yaw_rate_radps": 0.3217054173060772
+      },
+      "rms_nis": 116.89678175422291,
+      "segment_count": 101,
+      "sqrt_mean_nis": 5.492760547304168
+    },
+    "candidate_1_algebraic_envelope": {
+      "accepted_count": 150340,
+      "nis_count": 184785,
+      "rejected_count": 34445,
+      "rejected_rate": 0.18640582298346728,
+      "rejected_rate_penalty": 0.37281164596693456,
+      "residual_rms": {
+        "forward_accel_mps2": 12.821162705751313,
+        "right_accel_mps2": 9.644801357060816,
+        "yaw_accel_radps2": 211.08165352812358,
+        "yaw_rate_radps": 0.3891947250229276
+      },
+      "rms_nis": 184.4101534851897,
+      "segment_count": 101,
+      "sqrt_mean_nis": 5.417050688209676
+    },
+    "candidate_2_stribeck": {
+      "accepted_count": 156547,
+      "nis_count": 184785,
+      "rejected_count": 28238,
+      "rejected_rate": 0.1528154341532051,
+      "rejected_rate_penalty": 0.3056308683064102,
+      "residual_rms": {
+        "forward_accel_mps2": 11.613587844348864,
+        "right_accel_mps2": 8.10691119876362,
+        "yaw_accel_radps2": 180.05962446382685,
+        "yaw_rate_radps": 0.3712965403978834
+      },
+      "rms_nis": 171.04824559558259,
+      "segment_count": 101,
+      "sqrt_mean_nis": 5.235269750258336
+    },
+    "candidate_3_load_sensitive": {
+      "accepted_count": 155440,
+      "nis_count": 184785,
+      "rejected_count": 29345,
+      "rejected_rate": 0.15880618015531564,
+      "rejected_rate_penalty": 0.3176123603106313,
+      "residual_rms": {
+        "forward_accel_mps2": 13.533396951308138,
+        "right_accel_mps2": 9.767035701593075,
+        "yaw_accel_radps2": 229.9487331864478,
+        "yaw_rate_radps": 0.44154055881342186
+      },
+      "rms_nis": 224.52262489689485,
+      "segment_count": 101,
+      "sqrt_mean_nis": 5.842067770254346
+    }
+  },
+  "diagnostics_csv": null,
+  "itemized_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\ekf_validation_new_run_20260610_192\\itemized_rms_nis.csv",
+  "jobs_requested": 8,
+  "jobs_used": 1,
+  "nis_csv": null,
+  "processed_samples": 61595,
+  "processed_segments": 101,
+  "replay_mode": "ekf",
+  "report_md": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\ekf_validation_new_run_20260610_192\\report.md",
+  "row_artifacts_enabled": false,
+  "schema_version": 1,
+  "skipped_corrupted_segments": 0,
+  "source_log_count": 1,
+  "state_names": [
+    "px_m",
+    "py_m",
+    "heading_rad",
+    "vf_mps",
+    "vr_mps",
+    "yaw_rate_radps",
+    "delta_af_mps2",
+    "delta_ar_mps2",
+    "delta_yaw_accel_radps2"
+  ],
+  "uses_logged_ukf_state": false
+}

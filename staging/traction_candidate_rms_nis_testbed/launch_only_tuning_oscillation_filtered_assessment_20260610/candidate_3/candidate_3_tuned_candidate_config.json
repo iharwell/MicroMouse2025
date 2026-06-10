@@ -1,0 +1,24 @@
+{
+  "candidate_specific_covariance_or_noise": false,
+  "candidates": [
+    {
+      "enabled": true,
+      "id": "candidate_3_load_sensitive",
+      "label": "Candidate 3 load-sensitive launch-only tuned",
+      "model": "load_sensitive_anisotropic",
+      "parameters": {
+        "lateral_load_sensitivity": 0.327290064992592,
+        "lateral_slip_gain_n_per_mps": 24.695725146213764,
+        "longitudinal_load_sensitivity": 0.2980636468680996,
+        "longitudinal_slip_gain_n_per_mps": 25.560975712043764,
+        "low_speed_blend_mps": 0.026906575566924003,
+        "peak_friction_coefficient_at_80pct_fan": 2.8951939005588283,
+        "yaw_coupling_gain": 0.07967341087798074
+      }
+    }
+  ],
+  "description": "Candidate 3 load-sensitive tuned from launch-only manifest for oscillation-filtered EKF assessment. Standalone host-only testbed config; covariance/noise fixed externally.",
+  "schema_version": 1,
+  "source_trial_id": "candidate_3_load_sensitive:trial_133",
+  "source_tuned_parameters": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\launch_only_tuning_oscillation_filtered_assessment_20260610\\candidate_3\\tuning\\tuned_parameters.json"
+}

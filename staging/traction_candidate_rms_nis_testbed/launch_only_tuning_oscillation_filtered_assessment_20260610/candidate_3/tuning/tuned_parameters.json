@@ -1,0 +1,35 @@
+{
+  "candidate_specific_covariance_or_noise": false,
+  "candidates": [
+    {
+      "id": "baseline/current_holdover",
+      "model": "current_holdover_approximation",
+      "parameters": {
+        "combined_slip_envelope_exponent": 2.0,
+        "lateral_slip_gain_n_per_mps": 16.0,
+        "longitudinal_slip_gain_n_per_mps": 16.0,
+        "low_speed_blend_mps": 0.07,
+        "peak_friction_coefficient_at_80pct_fan": 1.65
+      },
+      "trial_id": "baseline/current_holdover:fixed"
+    },
+    {
+      "id": "candidate_3_load_sensitive",
+      "model": "load_sensitive_anisotropic",
+      "parameters": {
+        "lateral_load_sensitivity": 0.327290064992592,
+        "lateral_slip_gain_n_per_mps": 24.695725146213764,
+        "longitudinal_load_sensitivity": 0.2980636468680996,
+        "longitudinal_slip_gain_n_per_mps": 25.560975712043764,
+        "low_speed_blend_mps": 0.026906575566924003,
+        "peak_friction_coefficient_at_80pct_fan": 2.8951939005588283,
+        "yaw_coupling_gain": 0.07967341087798074
+      },
+      "trial_id": "candidate_3_load_sensitive:trial_133"
+    }
+  ],
+  "covariance_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\covariance_conservative.json",
+  "covariance_policy": "fixed_testbed_covariance_not_tuned",
+  "description": "Standalone traction residual-tail tuned candidate parameters. Not production configuration.",
+  "schema_version": 1
+}

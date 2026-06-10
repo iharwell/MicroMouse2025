@@ -1,0 +1,123 @@
+{
+  "schema_version": 1,
+  "description": "Fixed 5-log UKF sigma-point validation corpus for the standalone traction RMS/NIS testbed. Rows are cropped to representative active windows where available.",
+  "selection": "one compact representative segment from each of five source logs",
+  "source_manifests": [
+    "staging/traction_candidate_rms_nis_testbed/stratified_all_stage_manifest.json",
+    "staging/traction_candidate_rms_nis_testbed/representative_subset_manifest.json"
+  ],
+  "segments": [
+    {
+      "segment_id": "ukf5_launch_2026-05-27",
+      "source_segment_id": "ofnis_001497",
+      "log_id": "mmlog_decode_2026-05-27_04-44-04",
+      "log_path": "TestResults/mmlog_decode_2026-05-27_04-44-04/open_floor_main.csv",
+      "stage": "launch",
+      "family": "launch",
+      "split": "validation",
+      "segment_start_row_index": 15501,
+      "segment_end_row_index": 15750,
+      "parameter_fields": {
+        "parameter": "drive_command_bin",
+        "test_value_kind": "logged_drive_command_bin",
+        "test_value": 0.25
+      },
+      "observed_command": {
+        "observed_command_pair_mode": [
+          0.25,
+          0.25
+        ],
+        "observed_command_magnitude_median": 0.25
+      }
+    },
+    {
+      "segment_id": "ukf5_mixed_launch_2026-06-08",
+      "source_segment_id": "ofnis_001687",
+      "log_id": "mmlog_decode_2026-06-08_23-37-25",
+      "log_path": "TestResults/mmlog_decode_2026-06-08_23-37-25/open_floor_main.csv",
+      "stage": "mixed_launch",
+      "family": "launch",
+      "split": "validation",
+      "segment_start_row_index": 115654,
+      "segment_end_row_index": 116003,
+      "parameter_fields": {
+        "parameter": "observed_drive_command_pair",
+        "test_value_kind": "observed_drive_command_pair",
+        "test_value": [
+          -0.4,
+          -0.3
+        ]
+      },
+      "observed_command": {
+        "observed_command_pair_mode": [
+          -0.4,
+          -0.3
+        ],
+        "observed_command_magnitude_median": 0.4
+      }
+    },
+    {
+      "segment_id": "ukf5_straight_2026-04-15",
+      "source_segment_id": "ofnis_001048",
+      "log_id": "mmlog_decode_2026-04-15_02-09-58",
+      "log_path": "TestResults/mmlog_decode_2026-04-15_02-09-58/open_floor_main.csv",
+      "stage": "SEC_30_STRAIGHT",
+      "family": "straight",
+      "split": "validation",
+      "segment_start_row_index": 62889,
+      "segment_end_row_index": 66384,
+      "parameter_fields": {
+        "parameter": "straight_speed_mps",
+        "test_value_kind": "legacy_straight_speed_bin_mps",
+        "test_value": 0.1
+      },
+      "observed_command": {
+        "cmd_linear_mps_median": 0.10000000149011612,
+        "cmd_yaw_radps_median": -0.027696313336491585,
+        "observed_command_magnitude_median": 0.188751
+      }
+    },
+    {
+      "segment_id": "ukf5_smooth_static_2026-04-20",
+      "source_segment_id": "ofnis_001091",
+      "log_id": "mmlog_decode_2026-04-20_02-33-07",
+      "log_path": "TestResults/mmlog_decode_2026-04-20_02-33-07/open_floor_main.csv",
+      "stage": "SEC_50_SMOOTH",
+      "family": "static_hold",
+      "split": "validation",
+      "segment_start_row_index": 0,
+      "segment_end_row_index": 253,
+      "parameter_fields": {
+        "parameter": "smooth_speed_mps",
+        "test_value_kind": "legacy_smooth_speed_bin_mps",
+        "test_value": null
+      },
+      "observed_command": {
+        "active_command_rows": 0
+      }
+    },
+    {
+      "segment_id": "ukf5_yaw_launch_2026-05-04",
+      "source_segment_id": "ofnis_001265",
+      "log_id": "mmlog_decode_2026-05-04_16-57-53",
+      "log_path": "TestResults/mmlog_decode_2026-05-04_16-57-53/open_floor_main.csv",
+      "stage": "yaw_launch",
+      "family": "launch",
+      "split": "validation",
+      "segment_start_row_index": 29050,
+      "segment_end_row_index": 29299,
+      "parameter_fields": {
+        "parameter": "drive_command_bin",
+        "test_value_kind": "logged_drive_command_bin",
+        "test_value": 0.3
+      },
+      "observed_command": {
+        "observed_command_pair_mode": [
+          0.3,
+          -0.3
+        ],
+        "observed_command_magnitude_median": 0.3
+      }
+    }
+  ]
+}

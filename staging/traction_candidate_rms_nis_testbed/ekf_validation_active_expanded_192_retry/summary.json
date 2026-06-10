@@ -1,0 +1,95 @@
+{
+  "aggregate_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\ekf_validation_active_expanded_192_retry\\nis_aggregates.csv",
+  "candidate_rms_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\ekf_validation_active_expanded_192_retry\\candidate_rms_nis.csv",
+  "candidates": {
+    "baseline/current_holdover": {
+      "accepted_count": 350542,
+      "nis_count": 643219,
+      "rejected_count": 292677,
+      "rejected_rate": 0.45501920807687585,
+      "rejected_rate_penalty": 0.9100384161537517,
+      "residual_rms": {
+        "forward_accel_mps2": 4225.269883795532,
+        "right_accel_mps2": 4222.112281141479,
+        "yaw_accel_radps2": 196.74709426943852,
+        "yaw_rate_radps": 121.00903200633795
+      },
+      "rms_nis": 3.529150145307383,
+      "segment_count": 580,
+      "sqrt_mean_nis": 1.2180534530823006
+    },
+    "candidate_1_algebraic_envelope": {
+      "accepted_count": 600066,
+      "nis_count": 643219,
+      "rejected_count": 43153,
+      "rejected_rate": 0.0670891251657678,
+      "rejected_rate_penalty": 0.1341782503315356,
+      "residual_rms": {
+        "forward_accel_mps2": 5.558400515764581,
+        "right_accel_mps2": 4.9469822965940295,
+        "yaw_accel_radps2": 157.22058262516694,
+        "yaw_rate_radps": 3.1878630491390827
+      },
+      "rms_nis": 4.523617874964399,
+      "segment_count": 580,
+      "sqrt_mean_nis": 1.6372732537896175
+    },
+    "candidate_2_stribeck": {
+      "accepted_count": 599738,
+      "nis_count": 643219,
+      "rejected_count": 43481,
+      "rejected_rate": 0.06759906035114012,
+      "rejected_rate_penalty": 0.13519812070228024,
+      "residual_rms": {
+        "forward_accel_mps2": 5.017917421842073,
+        "right_accel_mps2": 4.280361307981902,
+        "yaw_accel_radps2": 117.39745545207884,
+        "yaw_rate_radps": 3.3780876148311973
+      },
+      "rms_nis": 4.672230799589997,
+      "segment_count": 580,
+      "sqrt_mean_nis": 1.6712430648560992
+    },
+    "candidate_3_load_sensitive": {
+      "accepted_count": 569569,
+      "nis_count": 643219,
+      "rejected_count": 73650,
+      "rejected_rate": 0.11450221464229135,
+      "rejected_rate_penalty": 0.2290044292845827,
+      "residual_rms": {
+        "forward_accel_mps2": 4.994860957882036,
+        "right_accel_mps2": 4.212229666541221,
+        "yaw_accel_radps2": 142.81729854141958,
+        "yaw_rate_radps": 2.671171454206947
+      },
+      "rms_nis": 4.149815865725604,
+      "segment_count": 580,
+      "sqrt_mean_nis": 1.47386334417063
+    }
+  },
+  "diagnostics_csv": null,
+  "itemized_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\ekf_validation_active_expanded_192_retry\\itemized_rms_nis.csv",
+  "jobs_requested": 8,
+  "jobs_used": 8,
+  "nis_csv": null,
+  "processed_samples": 243177,
+  "processed_segments": 580,
+  "replay_mode": "ekf",
+  "report_md": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\ekf_validation_active_expanded_192_retry\\report.md",
+  "row_artifacts_enabled": false,
+  "schema_version": 1,
+  "skipped_corrupted_segments": 0,
+  "source_log_count": 8,
+  "state_names": [
+    "px_m",
+    "py_m",
+    "heading_rad",
+    "vf_mps",
+    "vr_mps",
+    "yaw_rate_radps",
+    "delta_af_mps2",
+    "delta_ar_mps2",
+    "delta_yaw_accel_radps2"
+  ],
+  "uses_logged_ukf_state": false
+}

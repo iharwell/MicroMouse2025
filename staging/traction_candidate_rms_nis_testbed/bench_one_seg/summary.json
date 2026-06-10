@@ -1,0 +1,40 @@
+{
+  "aggregate_csv": "staging\\traction_candidate_rms_nis_testbed\\bench_one_seg\\nis_aggregates.csv",
+  "candidate_rms_csv": "staging\\traction_candidate_rms_nis_testbed\\bench_one_seg\\candidate_rms_nis.csv",
+  "candidates": {
+    "baseline/current_holdover": {
+      "accepted_count": 1344,
+      "nis_count": 1344,
+      "rejected_count": 0,
+      "residual_rms": {
+        "forward_accel_nis": 0.5000625304235431,
+        "right_accel_nis": 0.2638999366413167,
+        "yaw_rate_nis": 0.023725104926997028
+      },
+      "rms_nis": 0.5435463521954861,
+      "segment_count": 1,
+      "sqrt_mean_nis": 0.47662431929605176
+    }
+  },
+  "diagnostics_csv": null,
+  "itemized_csv": "staging\\traction_candidate_rms_nis_testbed\\bench_one_seg\\itemized_rms_nis.csv",
+  "nis_csv": null,
+  "processed_samples": 448,
+  "processed_segments": 1,
+  "replay_mode": "residual",
+  "row_artifacts_enabled": false,
+  "schema_version": 1,
+  "skipped_corrupted_segments": 0,
+  "state_names": [
+    "px_m",
+    "py_m",
+    "heading_rad",
+    "vf_mps",
+    "vr_mps",
+    "yaw_rate_radps",
+    "delta_af_mps2",
+    "delta_ar_mps2",
+    "delta_yaw_accel_radps2"
+  ],
+  "uses_logged_ukf_state": false
+}

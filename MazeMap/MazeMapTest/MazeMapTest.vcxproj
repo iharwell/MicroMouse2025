@@ -312,6 +312,8 @@
     <ClCompile Include="EstimatorTorqueRefreshTest.cpp" />
     <ClCompile Include="EstimatorUnopposedControlPredictTest.cpp" />
     <ClCompile Include="EstimatorWallUpdateTest.cpp" />
+    <ClCompile Include="TractionTestEstimator.cpp" />
+    <ClCompile Include="TractionTestEstimatorTest.cpp" />
     <ClCompile Include="EstimatorControlMotionUpdateTestSupport.cpp" />
     <ClCompile Include="EstimatorYawMotionUpdateTestSupport.cpp" />
     <ClCompile Include="EstimatorWallMotionUpdateTestSupport.cpp" />
@@ -342,6 +344,7 @@
     <ClInclude Include="EstimatorBiasAndStationaryTestSupport.h" />
     <ClInclude Include="EstimatorModeAndDiagnosticsTestSupport.h" />
     <ClInclude Include="PlantModelDynamicsTestSupport.h" />
+    <ClInclude Include="TractionTestEstimator.h" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\MazeMap\MazeMap.vcxproj">

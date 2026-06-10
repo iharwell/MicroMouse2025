@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "description": "Corrected-policy rerun baseline candidate-only traction RMS/NIS testbed config. Standalone testbed only; not production configuration.",
+  "candidates": [
+    {
+      "id": "baseline/current_holdover",
+      "label": "Baseline/current holdover approximation",
+      "model": "current_holdover_approximation",
+      "enabled": true,
+      "parameters": {
+        "peak_friction_coefficient_at_80pct_fan": 1.65,
+        "longitudinal_slip_gain_n_per_mps": 16.0,
+        "lateral_slip_gain_n_per_mps": 16.0,
+        "combined_slip_envelope_exponent": 2.0,
+        "low_speed_blend_mps": 0.07
+      }
+    }
+  ],
+  "source_corrected_policy_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\parallel_corrected_policy_20260610\\baseline\\baseline_only.json",
+  "source_tuned_parameters": "baseline/current_holdover from previous corrected-policy baseline config",
+  "covariance_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\covariance_conservative.json",
+  "covariance_policy": "fixed_testbed_covariance_not_tuned"
+}

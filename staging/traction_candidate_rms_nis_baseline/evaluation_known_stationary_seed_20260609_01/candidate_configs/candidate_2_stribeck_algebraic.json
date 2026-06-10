@@ -1,0 +1,41 @@
+{
+  "candidate_id": "candidate_2_stribeck_algebraic",
+  "covariance_policy": "fixed_production_estimator_covariance",
+  "label": "Candidate 2 Stribeck algebraic variant",
+  "model": "stribeck_algebraic",
+  "parameters": {
+    "dynamic_to_static_grip_ratio": 0.82,
+    "low_speed_blend_mps": 0.06,
+    "peak_friction_coefficient_at_80pct_fan": 1.72,
+    "stribeck_velocity_mps": 0.16,
+    "viscous_slip_damping_n_per_mps": 2.0
+  },
+  "schema_version": 1,
+  "search": {
+    "dynamic_to_static_grip_ratio": {
+      "max": 0.98,
+      "min": 0.55,
+      "scale": "linear"
+    },
+    "low_speed_blend_mps": {
+      "max": 0.2,
+      "min": 0.02,
+      "scale": "linear"
+    },
+    "peak_friction_coefficient_at_80pct_fan": {
+      "max": 2.5,
+      "min": 1.2,
+      "scale": "linear"
+    },
+    "stribeck_velocity_mps": {
+      "max": 0.45,
+      "min": 0.03,
+      "scale": "log"
+    },
+    "viscous_slip_damping_n_per_mps": {
+      "max": 12.0,
+      "min": 0.0,
+      "scale": "linear"
+    }
+  }
+}

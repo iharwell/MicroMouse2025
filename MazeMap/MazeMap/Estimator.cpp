@@ -471,10 +471,7 @@ namespace MazeMap
 
         const SensorSnapshot& snapshot = _runtimeState.GetSensorSnapshot();
         const SensorSnapshot::EncoderObs& encoderInput = snapshot.EncoderObservation();
-        const bool useEncoderInput =
-            snapshot.EncoderObservationValid() &&
-            std::isfinite(encoderInput.LeftWheelSpeedRadps()) &&
-            std::isfinite(encoderInput.RightWheelSpeedRadps());
+        const bool useEncoderInput = true;
         _prePredictState = _workingFilter.state();
         _prePredictCovariance = _workingFilter.covariance();
         float presentForwardAccelMps2 = 0.0f;

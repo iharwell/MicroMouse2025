@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "active_ekf_manifest": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\parallel_replace_20260420_102209_20260610\\active_ekf_replace_20260420_102209_with_20260610_070622_manifest.json",
+  "one_log_ukf_manifest": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\parallel_replace_20260420_102209_20260610\\ukf_one_log_20260610_070622_active_manifest.json",
+  "candidate_configs": {
+    "baseline": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\parallel_replace_20260420_102209_20260610\\baseline\\baseline_only.json",
+    "candidate_1": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\parallel_replace_20260420_102209_20260610\\candidate_1\\candidate_1_only.json",
+    "candidate_2": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\parallel_replace_20260420_102209_20260610\\candidate_2\\candidate_2_only.json",
+    "candidate_3": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\parallel_replace_20260420_102209_20260610\\candidate_3\\candidate_3_only.json"
+  },
+  "covariance_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\covariance_conservative.json",
+  "covariance_policy": "unchanged existing conservative covariance; no covariance/noise tuning performed",
+  "bias_manifest": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\representative_corpus\\segment_manifest.json",
+  "bias_policy": "existing full representative bias manifest reused; not rebuilt",
+  "newest_log_selected": "mmlog_decode_2026-06-10_07-06-22",
+  "newest_log_generated_segments": 102,
+  "newest_log_active_noncorrupted_segments_added": 100,
+  "newest_log_active_noncorrupted_section_counts": {
+    "SEC_20_LAUNCH": 18,
+    "SEC_20_MIXED_LAUNCH": 40,
+    "SEC_20_YAW_LAUNCH": 42
+  },
+  "source_active_manifest_segments": 562,
+  "source_active_manifest_logs": 8,
+  "removed_log_id": "mmlog_decode_2026-04-20_10-22-09",
+  "removed_old_log_segments_from_active_manifest": 1,
+  "preexisting_newest_log_segments_removed_to_avoid_duplication": 0,
+  "active_ekf_manifest_segments": 661,
+  "active_ekf_manifest_logs": 8,
+  "one_log_ukf_manifest_segments": 100,
+  "one_log_ukf_manifest_logs": 1,
+  "sec40_yaw_count_before": 3,
+  "sec40_yaw_count_after": 2,
+  "sec40_yaw_count_changed": true,
+  "active_ekf_log_counts": {
+    "mmlog_decode_2026-04-10_18-33-52": 90,
+    "mmlog_decode_2026-04-15_02-09-58": 79,
+    "mmlog_decode_2026-04-20_04-54-09": 61,
+    "mmlog_decode_2026-04-22_12-10-34": 1,
+    "mmlog_decode_2026-05-04_16-57-53": 128,
+    "mmlog_decode_2026-06-08_23-37-25": 101,
+    "mmlog_decode_2026-06-09_23-36-21": 101,
+    "mmlog_decode_2026-06-10_07-06-22": 100
+  },
+  "active_ekf_section_counts": {
+    "SEC_20_LAUNCH": 282,
+    "SEC_20_MIXED_LAUNCH": 120,
+    "SEC_20_YAW_LAUNCH": 236,
+    "SEC_30_STRAIGHT": 19,
+    "SEC_40_YAW": 2,
+    "SEC_50_SMOOTH": 2
+  }
+}

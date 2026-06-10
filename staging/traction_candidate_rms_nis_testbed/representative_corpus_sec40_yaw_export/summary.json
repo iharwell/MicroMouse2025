@@ -1,0 +1,78 @@
+{
+  "ignored_state_column_prefixes": [
+    "ukf_state",
+    "logged_ukf_state",
+    "replay_state",
+    "replayed_state"
+  ],
+  "manifest_path": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\representative_corpus\\segment_manifest.json",
+  "output_jsonl": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\representative_corpus_sec40_yaw_export\\segment_streams.jsonl",
+  "segments": [
+    {
+      "corrupted": false,
+      "family": "in_place_turn",
+      "log_path": "TestResults/mmlog_decode_2026-04-20_04-54-09/open_floor_main.csv",
+      "row_count": 63761,
+      "segment_id": "ofnis_001154",
+      "stage": "SEC_40_YAW",
+      "stream_groups": [
+        "accel",
+        "drive_commands",
+        "dt_us",
+        "encoder",
+        "fan",
+        "gyro",
+        "is_active",
+        "is_stationary_context",
+        "metadata",
+        "row_index"
+      ]
+    },
+    {
+      "corrupted": false,
+      "family": "in_place_turn",
+      "log_path": "TestResults/mmlog_decode_2026-04-20_10-22-09/open_floor_main.csv",
+      "row_count": 84916,
+      "segment_id": "ofnis_001217",
+      "stage": "SEC_40_YAW",
+      "stream_groups": [
+        "accel",
+        "drive_commands",
+        "dt_us",
+        "encoder",
+        "fan",
+        "gyro",
+        "is_active",
+        "is_stationary_context",
+        "metadata",
+        "row_index"
+      ]
+    },
+    {
+      "corrupted": false,
+      "family": "in_place_turn",
+      "log_path": "TestResults/mmlog_decode_2026-04-22_12-10-34/open_floor_main.csv",
+      "row_count": 53963,
+      "segment_id": "ofnis_001245",
+      "stage": "SEC_40_YAW",
+      "stream_groups": [
+        "accel",
+        "drive_commands",
+        "dt_us",
+        "encoder",
+        "fan",
+        "gyro",
+        "is_active",
+        "is_stationary_context",
+        "metadata",
+        "row_index"
+      ]
+    }
+  ],
+  "segments_exported": 3,
+  "source_logs": [
+    "TestResults/mmlog_decode_2026-04-20_04-54-09/open_floor_main.csv",
+    "TestResults/mmlog_decode_2026-04-20_10-22-09/open_floor_main.csv",
+    "TestResults/mmlog_decode_2026-04-22_12-10-34/open_floor_main.csv"
+  ]
+}

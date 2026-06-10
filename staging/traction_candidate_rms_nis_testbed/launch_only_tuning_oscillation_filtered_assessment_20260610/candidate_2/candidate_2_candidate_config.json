@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "description": "Candidate-2-only host traction RMS/NIS testbed candidate defaults. Not production configuration.",
+  "candidates": [
+    {
+      "id": "baseline/current_holdover",
+      "label": "Baseline/current holdover approximation",
+      "model": "current_holdover_approximation",
+      "enabled": true,
+      "parameters": {
+        "peak_friction_coefficient_at_80pct_fan": 1.65,
+        "longitudinal_slip_gain_n_per_mps": 16.0,
+        "lateral_slip_gain_n_per_mps": 16.0,
+        "combined_slip_envelope_exponent": 2.0,
+        "low_speed_blend_mps": 0.07
+      }
+    },
+    {
+      "id": "candidate_2_stribeck",
+      "label": "Candidate 2 Stribeck",
+      "model": "stribeck_algebraic",
+      "enabled": true,
+      "parameters": {
+        "peak_friction_coefficient_at_80pct_fan": 1.72,
+        "longitudinal_slip_gain_n_per_mps": 18.0,
+        "lateral_slip_gain_n_per_mps": 18.0,
+        "combined_slip_envelope_exponent": 2.0,
+        "dynamic_to_static_grip_ratio": 0.82,
+        "stribeck_velocity_mps": 0.16,
+        "viscous_slip_damping_n_per_mps": 2.0,
+        "low_speed_blend_mps": 0.06
+      }
+    }
+  ]
+}

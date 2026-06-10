@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "description": "Standalone host-only traction RMS/NIS testbed candidates. These are not production hooks. Candidate 3 tuning input copy.",
+  "candidates": [
+    {
+      "id": "baseline/current_holdover",
+      "label": "Baseline/current holdover approximation",
+      "model": "current_holdover_approximation",
+      "enabled": true,
+      "parameters": {
+        "peak_friction_coefficient_at_80pct_fan": 1.65,
+        "longitudinal_slip_gain_n_per_mps": 16.0,
+        "lateral_slip_gain_n_per_mps": 16.0,
+        "combined_slip_envelope_exponent": 2.0,
+        "low_speed_blend_mps": 0.07
+      }
+    },
+    {
+      "id": "candidate_3_load_sensitive",
+      "label": "Candidate 3 load-sensitive",
+      "model": "load_sensitive_anisotropic",
+      "enabled": true,
+      "parameters": {
+        "peak_friction_coefficient_at_80pct_fan": 1.78,
+        "longitudinal_slip_gain_n_per_mps": 22.0,
+        "lateral_slip_gain_n_per_mps": 16.0,
+        "longitudinal_load_transfer_gain": 0.18,
+        "lateral_load_transfer_gain": 0.26,
+        "longitudinal_load_sensitivity": 0.18,
+        "lateral_load_sensitivity": 0.26,
+        "yaw_coupling_gain": 0.12,
+        "yaw_damping_speed_blend_mps": 0.02,
+        "low_speed_blend_mps": 0.05
+      }
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "candidate_id": "baseline_holdover",
+  "covariance_policy": "fixed_production_estimator_covariance",
+  "label": "Current holdover baseline",
+  "model": "current_plantmodel",
+  "parameters": {},
+  "schema_version": 1,
+  "search": {}
+}

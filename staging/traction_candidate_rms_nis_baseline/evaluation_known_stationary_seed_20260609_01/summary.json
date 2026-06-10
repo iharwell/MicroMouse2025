@@ -1,0 +1,80 @@
+{
+  "candidate_scores": [
+    {
+      "candidate_id": "baseline_holdover",
+      "held_out_score": Infinity,
+      "inflation_bucket_count": 0,
+      "label": "Current holdover baseline",
+      "missing": true,
+      "model": "current_plantmodel",
+      "raw_held_out_rms_nis": NaN,
+      "raw_train_rms_nis": NaN,
+      "raw_validation_rms_nis": NaN,
+      "sample_count": 0,
+      "segment_count": 0,
+      "selection_score": Infinity,
+      "selection_split": "validation",
+      "train_score": Infinity,
+      "validation_score": Infinity
+    },
+    {
+      "candidate_id": "candidate_1_algebraic_envelope",
+      "held_out_score": Infinity,
+      "inflation_bucket_count": 0,
+      "label": "Candidate 1 algebraic envelope",
+      "missing": true,
+      "model": "algebraic_envelope",
+      "raw_held_out_rms_nis": NaN,
+      "raw_train_rms_nis": NaN,
+      "raw_validation_rms_nis": NaN,
+      "sample_count": 0,
+      "segment_count": 0,
+      "selection_score": Infinity,
+      "selection_split": "validation",
+      "train_score": Infinity,
+      "validation_score": Infinity
+    },
+    {
+      "candidate_id": "candidate_2_stribeck_algebraic",
+      "held_out_score": Infinity,
+      "inflation_bucket_count": 0,
+      "label": "Candidate 2 Stribeck algebraic variant",
+      "missing": true,
+      "model": "stribeck_algebraic",
+      "raw_held_out_rms_nis": NaN,
+      "raw_train_rms_nis": NaN,
+      "raw_validation_rms_nis": NaN,
+      "sample_count": 0,
+      "segment_count": 0,
+      "selection_score": Infinity,
+      "selection_split": "validation",
+      "train_score": Infinity,
+      "validation_score": Infinity
+    },
+    {
+      "candidate_id": "candidate_3_load_sensitive_anisotropic",
+      "held_out_score": Infinity,
+      "inflation_bucket_count": 0,
+      "label": "Candidate 3 load-sensitive anisotropic refinement",
+      "missing": true,
+      "model": "load_sensitive_anisotropic",
+      "raw_held_out_rms_nis": NaN,
+      "raw_train_rms_nis": NaN,
+      "raw_validation_rms_nis": NaN,
+      "sample_count": 0,
+      "segment_count": 0,
+      "selection_score": Infinity,
+      "selection_split": "validation",
+      "train_score": Infinity,
+      "validation_score": Infinity
+    }
+  ],
+  "generated": "2026-06-09_06-35-01",
+  "itemized": [],
+  "selection_order": [
+    "baseline_holdover",
+    "candidate_1_algebraic_envelope",
+    "candidate_2_stribeck_algebraic",
+    "candidate_3_load_sensitive_anisotropic"
+  ]
+}

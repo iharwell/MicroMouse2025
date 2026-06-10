@@ -1,0 +1,4 @@
+candidate_id,trial_id,baseline_candidate_id,baseline_trial_id,split,source_log_count,bootstrap_iterations,observed_delta_vs_baseline,ci_low,ci_high,probability_candidate_better
+candidate_1_algebraic_envelope,candidate_1_algebraic_envelope:trial_074,baseline/current_holdover,baseline/current_holdover:fixed,held_out,7,100,-0.0549987129803,-0.805655631491,0.825787991223,0.65
+candidate_2_stribeck,candidate_2_stribeck:trial_028,baseline/current_holdover,baseline/current_holdover:fixed,held_out,7,100,0.254813843149,-0.908982790376,1.79504706701,0.49
+candidate_3_load_sensitive,candidate_3_load_sensitive:trial_081,baseline/current_holdover,baseline/current_holdover:fixed,held_out,7,100,0.546605168639,-0.5270846317,2.24360613552,0.22

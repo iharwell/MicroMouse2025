@@ -1,0 +1,5 @@
+rank,candidate_id,trial_id,selection_score,sample_count
+1,candidate_3_load_sensitive,candidate_3_load_sensitive:nominal,12.9724791508,1746
+2,candidate_2_stribeck,candidate_2_stribeck:nominal,24.1280981936,1746
+3,baseline/current_holdover,baseline/current_holdover:nominal,34.8140998516,1746
+4,candidate_1_algebraic_envelope,candidate_1_algebraic_envelope:nominal,34.8432665384,1746

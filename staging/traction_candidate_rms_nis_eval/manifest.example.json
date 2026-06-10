@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "description": "Example manifest shape for replay-exported traction candidate NIS artifacts. Replace artifacts with worker-produced CSV paths.",
+  "segments": [
+    {
+      "segment_id": "ofm_example:sec20:rep0",
+      "stage": "SEC_20_LAUNCH",
+      "split": "train",
+      "corrupted": false
+    },
+    {
+      "segment_id": "ofm_example:sec40:rep0",
+      "stage": "SEC_40_YAW",
+      "split": "validation",
+      "corrupted": false
+    },
+    {
+      "segment_id": "ofm_example:sec60:rep0",
+      "stage": "SEC_60_LOOP_CW",
+      "split": "held_out",
+      "corrupted": true
+    }
+  ],
+  "candidates": [
+    {
+      "id": "baseline_holdover",
+      "nis_artifacts": []
+    },
+    {
+      "id": "candidate_1_algebraic_envelope",
+      "nis_artifacts": []
+    },
+    {
+      "id": "candidate_2_stribeck_algebraic",
+      "nis_artifacts": []
+    },
+    {
+      "id": "candidate_3_load_sensitive_anisotropic",
+      "nis_artifacts": []
+    }
+  ]
+}

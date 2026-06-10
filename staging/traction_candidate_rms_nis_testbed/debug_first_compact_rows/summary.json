@@ -1,0 +1,63 @@
+{
+  "aggregate_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\debug_first_compact_rows\\nis_aggregates.csv",
+  "candidate_rms_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\debug_first_compact_rows\\candidate_rms_nis.csv",
+  "candidates": {
+    "baseline/current_holdover": {
+      "accepted_count": 0,
+      "nis_count": 0,
+      "rejected_count": 0,
+      "residual_rms": {},
+      "rms_nis": NaN,
+      "segment_count": 0,
+      "sqrt_mean_nis": NaN
+    },
+    "candidate_1_algebraic_envelope": {
+      "accepted_count": 0,
+      "nis_count": 0,
+      "rejected_count": 0,
+      "residual_rms": {},
+      "rms_nis": NaN,
+      "segment_count": 0,
+      "sqrt_mean_nis": NaN
+    },
+    "candidate_2_stribeck": {
+      "accepted_count": 0,
+      "nis_count": 0,
+      "rejected_count": 0,
+      "residual_rms": {},
+      "rms_nis": NaN,
+      "segment_count": 0,
+      "sqrt_mean_nis": NaN
+    },
+    "candidate_3_load_sensitive": {
+      "accepted_count": 0,
+      "nis_count": 0,
+      "rejected_count": 0,
+      "residual_rms": {},
+      "rms_nis": NaN,
+      "segment_count": 0,
+      "sqrt_mean_nis": NaN
+    }
+  },
+  "diagnostics_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\debug_first_compact_rows\\residual_diagnostics.csv",
+  "itemized_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\debug_first_compact_rows\\itemized_rms_nis.csv",
+  "nis_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\debug_first_compact_rows\\nis_samples.csv",
+  "processed_samples": 546,
+  "processed_segments": 1,
+  "replay_mode": "residual",
+  "row_artifacts_enabled": true,
+  "schema_version": 1,
+  "skipped_corrupted_segments": 0,
+  "state_names": [
+    "px_m",
+    "py_m",
+    "heading_rad",
+    "vf_mps",
+    "vr_mps",
+    "yaw_rate_radps",
+    "delta_af_mps2",
+    "delta_ar_mps2",
+    "delta_yaw_accel_radps2"
+  ],
+  "uses_logged_ukf_state": false
+}

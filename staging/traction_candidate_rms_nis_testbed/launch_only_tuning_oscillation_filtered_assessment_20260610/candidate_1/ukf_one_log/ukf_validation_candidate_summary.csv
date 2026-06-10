@@ -1,0 +1,2 @@
+candidate_id,status,segments,samples,sigma_points,finite_failures,continuity_failures,covariance_failures,innovation_failures,zero_crossing_events,zero_crossing_failures,max_abs_state,max_abs_prediction,max_state_sigma_span,max_measurement_sigma_span,max_covariance_trace,max_innovation_nis,issue_count
+candidate_1_algebraic_envelope,pass,100,125088,2376672,0,0,0,0,181585,0,34.5096057192,600.3027668,11.8410666667,33.4737603504,15.3872109202,923.874614258,0

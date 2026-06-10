@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "description": "Worker C candidate-2-only corrected-policy standalone traction RMS/NIS testbed config. Not production configuration.",
+  "source_tuned_parameters": "staging/traction_candidate_rms_nis_testbed/fair_tuning_representative_20260610_192/tuned_parameters.json",
+  "covariance_config": "staging/traction_candidate_rms_nis_testbed/covariance_conservative.json",
+  "covariance_policy": "fixed_testbed_covariance_not_tuned",
+  "candidates": [
+    {
+      "id": "candidate_2_stribeck",
+      "label": "Candidate 2 Stribeck",
+      "model": "stribeck_algebraic",
+      "enabled": true,
+      "parameters": {
+        "dynamic_to_static_grip_ratio": 0.9995849186952641,
+        "low_speed_blend_mps": 0.12789710042138364,
+        "peak_friction_coefficient_at_80pct_fan": 3.012204296274204,
+        "stribeck_velocity_mps": 0.6286168285085316,
+        "viscous_slip_damping_n_per_mps": 2.2705997827502804
+      },
+      "trial_id": "candidate_2_stribeck:trial_013"
+    }
+  ]
+}

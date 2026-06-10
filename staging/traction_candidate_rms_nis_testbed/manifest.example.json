@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "description": "Example manifest for standalone traction RMS NIS testbed artifacts. Replace nis_artifacts with testbed-produced CSV paths when the standalone data/model modules are ready.",
+  "segments": [
+    {
+      "segment_id": "example_open_floor:static:rep0",
+      "stage": "SEC_10_STATIC",
+      "split": "train",
+      "corrupted": false,
+      "parameter_fields": {
+        "parameter": "static_hold",
+        "test_value_kind": "none",
+        "test_value": ""
+      },
+      "observed_command": {
+        "active_command_rows": 0
+      }
+    },
+    {
+      "segment_id": "example_open_floor:launch:rep0",
+      "stage": "SEC_20_LAUNCH",
+      "split": "validation",
+      "corrupted": false,
+      "parameter_fields": {
+        "parameter": "launch_drive_command",
+        "test_value_kind": "drive_command_pair",
+        "test_value": "0.24,0.24"
+      },
+      "observed_command": {
+        "active_command_rows": 18,
+        "observed_command_pair_mode": "0.24,0.24",
+        "left_drive_command_median": 0.24,
+        "right_drive_command_median": 0.24,
+        "cmd_linear_mps_median": 0.31,
+        "cmd_yaw_radps_median": 0.0,
+        "observed_command_magnitude_median": 0.24
+      }
+    },
+    {
+      "segment_id": "example_open_floor:yaw_launch:rep0",
+      "stage": "yaw_launch",
+      "split": "held_out",
+      "corrupted": false,
+      "parameter_fields": {
+        "parameter": "launch_yaw_command",
+        "test_value_kind": "drive_command_pair",
+        "test_value": "-0.16,0.16"
+      },
+      "observed_command": {
+        "active_command_rows": 16,
+        "observed_command_pair_mode": "-0.16,0.16",
+        "left_drive_command_median": -0.16,
+        "right_drive_command_median": 0.16,
+        "cmd_linear_mps_median": 0.0,
+        "cmd_yaw_radps_median": 12.4,
+        "observed_command_magnitude_median": 0.16
+      }
+    },
+    {
+      "segment_id": "example_open_floor:terminal_fault:rep0",
+      "stage": "SEC_20_LAUNCH",
+      "split": "validation",
+      "corrupted": true,
+      "parameter_fields": {
+        "parameter": "launch_drive_command",
+        "test_value_kind": "drive_command_pair",
+        "test_value": "0.30,0.30"
+      },
+      "observed_command": {
+        "active_command_rows": 10,
+        "observed_command_pair_mode": "0.30,0.30",
+        "left_drive_command_median": 0.30,
+        "right_drive_command_median": 0.30,
+        "cmd_linear_mps_median": 0.38,
+        "cmd_yaw_radps_median": 0.0,
+        "observed_command_magnitude_median": 0.30
+      }
+    }
+  ],
+  "nis_artifacts": [],
+  "artifact_contract": {
+    "required_long_columns": [
+      "candidate_id",
+      "trial_id",
+      "segment_id",
+      "stage",
+      "log_field",
+      "measurement_dimension",
+      "nis"
+    ],
+    "forbidden_columns": [
+      "ukf_state*",
+      "logged_ukf_state*"
+    ],
+    "notes": [
+      "Rows for corrupted segments are ignored even if present.",
+      "Rows without split inherit the whole-segment split from this manifest or stable hash assignment.",
+      "Wide *_nis CSVs are accepted when segment and candidate columns are present."
+    ]
+  }
+}

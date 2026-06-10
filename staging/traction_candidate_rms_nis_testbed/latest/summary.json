@@ -1,0 +1,76 @@
+{
+  "ignored_state_column_prefixes": [
+    "ukf_state",
+    "logged_ukf_state",
+    "replay_state",
+    "replayed_state"
+  ],
+  "manifest_path": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_segments\\segment_manifest.json",
+  "output_jsonl": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\latest\\segment_streams.jsonl",
+  "segments": [
+    {
+      "corrupted": false,
+      "family": "static_hold",
+      "log_path": "TestResults/mmlog_decode_2026-04-10_18-08-20/open_floor_main.csv",
+      "row_count": 14859,
+      "segment_id": "ofnis_000001",
+      "stage": "SEC_10_STATIC",
+      "stream_groups": [
+        "accel",
+        "drive_commands",
+        "dt_us",
+        "encoder",
+        "fan",
+        "gyro",
+        "is_active",
+        "is_stationary_context",
+        "metadata",
+        "row_index"
+      ]
+    },
+    {
+      "corrupted": false,
+      "family": "launch",
+      "log_path": "TestResults/mmlog_decode_2026-04-10_18-08-20/open_floor_main.csv",
+      "row_count": 448,
+      "segment_id": "ofnis_000002",
+      "stage": "SEC_20_LAUNCH",
+      "stream_groups": [
+        "accel",
+        "drive_commands",
+        "dt_us",
+        "encoder",
+        "fan",
+        "gyro",
+        "is_active",
+        "is_stationary_context",
+        "metadata",
+        "row_index"
+      ]
+    },
+    {
+      "corrupted": false,
+      "family": "launch",
+      "log_path": "TestResults/mmlog_decode_2026-04-10_18-08-20/open_floor_main.csv",
+      "row_count": 667,
+      "segment_id": "ofnis_000003",
+      "stage": "SEC_20_LAUNCH",
+      "stream_groups": [
+        "accel",
+        "drive_commands",
+        "dt_us",
+        "encoder",
+        "fan",
+        "gyro",
+        "is_active",
+        "is_stationary_context",
+        "metadata",
+        "row_index"
+      ]
+    }
+  ],
+  "segments_exported": 3,
+  "source_logs": [
+    "TestResults/mmlog_decode_2026-04-10_18-08-20/open_floor_main.csv"
+  ]
+}

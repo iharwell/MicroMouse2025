@@ -1,0 +1,251 @@
+{
+  "schema_version": 1,
+  "tuning_dir": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\fair_tuning_representative_expanded_192_retry",
+  "ekf_dir": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\ekf_validation_active_expanded_192_retry",
+  "ukf_dir": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\ukf_validation_active_expanded_192_retry",
+  "active_manifest": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\representative_corpus_active_split_expanded_manifest.json",
+  "coverage": {
+    "active_manifest_segments": 580,
+    "source_log_count": 8,
+    "sec40_yaw_segments": 3,
+    "latest_mixed_launch_segments": 40,
+    "latest_log_included": true
+  },
+  "selected_trials": [
+    {
+      "candidate_id": "baseline/current_holdover",
+      "parameters": {
+        "combined_slip_envelope_exponent": 2.0,
+        "lateral_slip_gain_n_per_mps": 16.0,
+        "longitudinal_slip_gain_n_per_mps": 16.0,
+        "low_speed_blend_mps": 0.07,
+        "peak_friction_coefficient_at_80pct_fan": 1.65
+      },
+      "train_score": 4.8730662587827105,
+      "trial_id": "baseline/current_holdover:fixed",
+      "validation_score": 4.647387855598308
+    },
+    {
+      "candidate_id": "candidate_1_algebraic_envelope",
+      "parameters": {
+        "combined_slip_envelope_exponent": 2.3237727456412545,
+        "lateral_slip_gain_n_per_mps": 18.340643057676093,
+        "longitudinal_slip_gain_n_per_mps": 10.398425292704584,
+        "low_speed_blend_mps": 0.018100549431756083,
+        "peak_friction_coefficient_at_80pct_fan": 2.6123533679566027
+      },
+      "train_score": 3.545997631521411,
+      "trial_id": "candidate_1_algebraic_envelope:trial_039",
+      "validation_score": 3.398107440878998
+    },
+    {
+      "candidate_id": "candidate_2_stribeck",
+      "parameters": {
+        "dynamic_to_static_grip_ratio": 0.9962129841791834,
+        "low_speed_blend_mps": 0.07910722714553715,
+        "peak_friction_coefficient_at_80pct_fan": 1.2586739940417646,
+        "stribeck_velocity_mps": 0.05661644873708689,
+        "viscous_slip_damping_n_per_mps": 23.150568435615085
+      },
+      "train_score": 3.5632377310673853,
+      "trial_id": "candidate_2_stribeck:trial_163",
+      "validation_score": 3.5125727614507434
+    },
+    {
+      "candidate_id": "candidate_3_load_sensitive",
+      "parameters": {
+        "lateral_load_sensitivity": -0.3048196806534562,
+        "lateral_slip_gain_n_per_mps": 76.12769034441766,
+        "longitudinal_load_sensitivity": 0.12641988549386207,
+        "longitudinal_slip_gain_n_per_mps": 18.240754201111233,
+        "low_speed_blend_mps": 0.11174895899412565,
+        "peak_friction_coefficient_at_80pct_fan": 2.6348427497751974,
+        "yaw_coupling_gain": -0.30382776518825744
+      },
+      "train_score": 3.5332470793934965,
+      "trial_id": "candidate_3_load_sensitive:trial_156",
+      "validation_score": 3.4674129528244415
+    }
+  ],
+  "tuning": {
+    "trial_count": 580,
+    "source_log_count": 8,
+    "final_segments": 580,
+    "final_samples_per_candidate": 243177,
+    "stress_segments": 588,
+    "stress_samples_per_candidate": 1579609,
+    "covariance_policy": "fixed_testbed_covariance_not_tuned",
+    "uses_logged_ukf_state": false
+  },
+  "ekf": {
+    "processed_segments": 580,
+    "processed_samples": 243177,
+    "source_log_count": 8,
+    "skipped_corrupted_segments": 0,
+    "uses_logged_ukf_state": false,
+    "row_cap": 0,
+    "jobs_used": 8,
+    "candidate_summary": {
+      "baseline/current_holdover": {
+        "accepted_count": 350542,
+        "nis_count": 643219,
+        "rejected_count": 292677,
+        "rejected_rate": 0.45501920807687585,
+        "rejected_rate_penalty": 0.9100384161537517,
+        "residual_rms": {
+          "forward_accel_mps2": 4225.269883795532,
+          "right_accel_mps2": 4222.112281141479,
+          "yaw_accel_radps2": 196.74709426943852,
+          "yaw_rate_radps": 121.00903200633795
+        },
+        "rms_nis": 3.529150145307383,
+        "segment_count": 580,
+        "sqrt_mean_nis": 1.2180534530823006
+      },
+      "candidate_1_algebraic_envelope": {
+        "accepted_count": 600066,
+        "nis_count": 643219,
+        "rejected_count": 43153,
+        "rejected_rate": 0.0670891251657678,
+        "rejected_rate_penalty": 0.1341782503315356,
+        "residual_rms": {
+          "forward_accel_mps2": 5.558400515764581,
+          "right_accel_mps2": 4.9469822965940295,
+          "yaw_accel_radps2": 157.22058262516694,
+          "yaw_rate_radps": 3.1878630491390827
+        },
+        "rms_nis": 4.523617874964399,
+        "segment_count": 580,
+        "sqrt_mean_nis": 1.6372732537896175
+      },
+      "candidate_2_stribeck": {
+        "accepted_count": 599738,
+        "nis_count": 643219,
+        "rejected_count": 43481,
+        "rejected_rate": 0.06759906035114012,
+        "rejected_rate_penalty": 0.13519812070228024,
+        "residual_rms": {
+          "forward_accel_mps2": 5.017917421842073,
+          "right_accel_mps2": 4.280361307981902,
+          "yaw_accel_radps2": 117.39745545207884,
+          "yaw_rate_radps": 3.3780876148311973
+        },
+        "rms_nis": 4.672230799589997,
+        "segment_count": 580,
+        "sqrt_mean_nis": 1.6712430648560992
+      },
+      "candidate_3_load_sensitive": {
+        "accepted_count": 569569,
+        "nis_count": 643219,
+        "rejected_count": 73650,
+        "rejected_rate": 0.11450221464229135,
+        "rejected_rate_penalty": 0.2290044292845827,
+        "residual_rms": {
+          "forward_accel_mps2": 4.994860957882036,
+          "right_accel_mps2": 4.212229666541221,
+          "yaw_accel_radps2": 142.81729854141958,
+          "yaw_rate_radps": 2.671171454206947
+        },
+        "rms_nis": 4.149815865725604,
+        "segment_count": 580,
+        "sqrt_mean_nis": 1.47386334417063
+      }
+    }
+  },
+  "ukf": {
+    "processed_segments": 580,
+    "processed_samples": 9280,
+    "source_log_count": 8,
+    "max_rows_per_segment": 16,
+    "passed": true,
+    "uses_logged_ukf_state": false,
+    "candidates": {
+      "baseline/current_holdover": {
+        "continuity_failures": 0,
+        "covariance_failures": 0,
+        "finite_failures": 0,
+        "innovation_failures": 0,
+        "issue_count": 0,
+        "max_abs_prediction": 790.2009295687989,
+        "max_abs_state": 23.49580279163125,
+        "max_covariance_trace": 16.063097518122678,
+        "max_innovation_nis": 618.6304228365088,
+        "max_measurement_sigma_span": 29.76259414749898,
+        "max_state_sigma_span": 11.9134345056,
+        "samples": 9280,
+        "segments": 580,
+        "sigma_points": 176320,
+        "status": "pass",
+        "zero_crossing_events": 14931,
+        "zero_crossing_failures": 0
+      },
+      "candidate_1_algebraic_envelope": {
+        "continuity_failures": 0,
+        "covariance_failures": 0,
+        "finite_failures": 0,
+        "innovation_failures": 0,
+        "issue_count": 0,
+        "max_abs_prediction": 1059.366658354842,
+        "max_abs_state": 22.645043521996488,
+        "max_covariance_trace": 15.864593273988323,
+        "max_innovation_nis": 656.8648400264855,
+        "max_measurement_sigma_span": 45.30827190551759,
+        "max_state_sigma_span": 11.9134345056,
+        "samples": 9280,
+        "segments": 580,
+        "sigma_points": 176320,
+        "status": "pass",
+        "zero_crossing_events": 14931,
+        "zero_crossing_failures": 0
+      },
+      "candidate_2_stribeck": {
+        "continuity_failures": 0,
+        "covariance_failures": 0,
+        "finite_failures": 0,
+        "innovation_failures": 0,
+        "issue_count": 0,
+        "max_abs_prediction": 504.0942613848215,
+        "max_abs_state": 22.804654395480867,
+        "max_covariance_trace": 16.819220048304512,
+        "max_innovation_nis": 196.0401366054223,
+        "max_measurement_sigma_span": 31.545896917098702,
+        "max_state_sigma_span": 11.9134345056,
+        "samples": 9280,
+        "segments": 580,
+        "sigma_points": 176320,
+        "status": "pass",
+        "zero_crossing_events": 14931,
+        "zero_crossing_failures": 0
+      },
+      "candidate_3_load_sensitive": {
+        "continuity_failures": 0,
+        "covariance_failures": 0,
+        "finite_failures": 0,
+        "innovation_failures": 0,
+        "issue_count": 0,
+        "max_abs_prediction": 1038.2644656971904,
+        "max_abs_state": 22.69478700832409,
+        "max_covariance_trace": 15.957862510875131,
+        "max_innovation_nis": 357.38823454766924,
+        "max_measurement_sigma_span": 55.81428218241935,
+        "max_state_sigma_span": 11.9134345056,
+        "samples": 9280,
+        "segments": 580,
+        "sigma_points": 176320,
+        "status": "pass",
+        "zero_crossing_events": 14931,
+        "zero_crossing_failures": 0
+      }
+    }
+  },
+  "derived_outputs": {
+    "stage_channel_summary_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\ekf_validation_active_expanded_192_retry\\stage_channel_summary.csv",
+    "launch_command_bin_summary_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\ekf_validation_active_expanded_192_retry\\launch_command_bin_summary.csv",
+    "sec40_yaw_summary_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\ekf_validation_active_expanded_192_retry\\sec40_yaw_summary.csv",
+    "comparison_to_holdover_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\ekf_validation_active_expanded_192_retry\\comparison_to_holdover.csv"
+  },
+  "timeout_policy": {
+    "ekf_timeout_ms": 7200000,
+    "ukf_timeout_ms": 7200000
+  }
+}

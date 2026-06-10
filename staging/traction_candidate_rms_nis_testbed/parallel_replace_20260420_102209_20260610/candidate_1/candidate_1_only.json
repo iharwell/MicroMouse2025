@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "description": "Corrected-policy rerun candidate_1 candidate-only traction RMS/NIS testbed config. Standalone testbed only; not production configuration.",
+  "source_tuned_parameters": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\fair_tuning_representative_20260610_192\\tuned_parameters.json",
+  "covariance_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\covariance_conservative.json",
+  "covariance_policy": "fixed_testbed_covariance_not_tuned",
+  "candidates": [
+    {
+      "candidate_id": "candidate_1_algebraic_envelope",
+      "id": "candidate_1_algebraic_envelope",
+      "label": "candidate 1 algebraic envelope",
+      "model": "algebraic_envelope",
+      "parameters": {
+        "combined_slip_envelope_exponent": 5.48775626371971,
+        "lateral_slip_gain_n_per_mps": 64.33531273416324,
+        "longitudinal_slip_gain_n_per_mps": 47.59654610242687,
+        "low_speed_blend_mps": 0.033806341611434206,
+        "peak_friction_coefficient_at_80pct_fan": 3.0640870584205393
+      },
+      "trial_id": "candidate_1_algebraic_envelope:trial_050"
+    }
+  ],
+  "source_corrected_policy_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\parallel_corrected_policy_20260610\\candidate_1\\candidate_1_only.json"
+}

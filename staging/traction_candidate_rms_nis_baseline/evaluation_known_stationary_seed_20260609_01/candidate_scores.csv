@@ -1,0 +1,5 @@
+rank,candidate_id,label,model,selection_split,selection_score,train_score,validation_score,held_out_score,raw_train_rms_nis,raw_validation_rms_nis,raw_held_out_rms_nis,sample_count,segment_count,inflation_bucket_count,missing
+,baseline_holdover,Current holdover baseline,current_plantmodel,validation,inf,inf,inf,inf,,,,0,0,0,true
+,candidate_1_algebraic_envelope,Candidate 1 algebraic envelope,algebraic_envelope,validation,inf,inf,inf,inf,,,,0,0,0,true
+,candidate_2_stribeck_algebraic,Candidate 2 Stribeck algebraic variant,stribeck_algebraic,validation,inf,inf,inf,inf,,,,0,0,0,true
+,candidate_3_load_sensitive_anisotropic,Candidate 3 load-sensitive anisotropic refinement,load_sensitive_anisotropic,validation,inf,inf,inf,inf,,,,0,0,0,true

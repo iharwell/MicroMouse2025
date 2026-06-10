@@ -1,0 +1,58 @@
+{
+  "candidates": [
+    {
+      "id": "baseline/current_holdover",
+      "model": "current_holdover_approximation",
+      "parameters": {
+        "combined_slip_envelope_exponent": 2.0,
+        "lateral_slip_gain_n_per_mps": 16.0,
+        "longitudinal_slip_gain_n_per_mps": 16.0,
+        "low_speed_blend_mps": 0.07,
+        "peak_friction_coefficient_at_80pct_fan": 1.65
+      },
+      "trial_id": "baseline/current_holdover:fixed"
+    },
+    {
+      "id": "candidate_1_algebraic_envelope",
+      "model": "algebraic_envelope",
+      "parameters": {
+        "combined_slip_envelope_exponent": 3.064008589974941,
+        "lateral_slip_gain_n_per_mps": 4.159054848618558,
+        "longitudinal_slip_gain_n_per_mps": 30.493339491520544,
+        "low_speed_blend_mps": 0.1879957929955422,
+        "peak_friction_coefficient_at_80pct_fan": 2.1139666357181284
+      },
+      "trial_id": "candidate_1_algebraic_envelope:trial_074"
+    },
+    {
+      "id": "candidate_2_stribeck",
+      "model": "stribeck_algebraic",
+      "parameters": {
+        "dynamic_to_static_grip_ratio": 0.7262270893730295,
+        "low_speed_blend_mps": 0.15420194926321334,
+        "peak_friction_coefficient_at_80pct_fan": 1.642615566283238,
+        "stribeck_velocity_mps": 0.4296271838941653,
+        "viscous_slip_damping_n_per_mps": 8.258199326558428
+      },
+      "trial_id": "candidate_2_stribeck:trial_028"
+    },
+    {
+      "id": "candidate_3_load_sensitive",
+      "model": "load_sensitive_anisotropic",
+      "parameters": {
+        "lateral_load_sensitivity": 0.44268340752010316,
+        "lateral_slip_gain_n_per_mps": 26.411867628813347,
+        "longitudinal_load_sensitivity": -0.4725497479285707,
+        "longitudinal_slip_gain_n_per_mps": 28.11893676648643,
+        "low_speed_blend_mps": 0.1701274815292082,
+        "peak_friction_coefficient_at_80pct_fan": 1.6721767988326168,
+        "yaw_coupling_gain": 0.12244276735918291
+      },
+      "trial_id": "candidate_3_load_sensitive:trial_081"
+    }
+  ],
+  "covariance_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\covariance_conservative.json",
+  "covariance_policy": "fixed_testbed_covariance_not_tuned",
+  "description": "Standalone traction residual-tail tuned candidate parameters. Not production configuration.",
+  "schema_version": 1
+}

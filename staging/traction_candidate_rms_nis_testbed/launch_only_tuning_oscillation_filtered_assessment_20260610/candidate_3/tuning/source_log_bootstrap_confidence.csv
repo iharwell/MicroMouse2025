@@ -1,0 +1,2 @@
+candidate_id,trial_id,baseline_candidate_id,baseline_trial_id,split,source_log_count,bootstrap_iterations,observed_delta_vs_baseline,ci_low,ci_high,probability_candidate_better
+candidate_3_load_sensitive,candidate_3_load_sensitive:trial_133,baseline/current_holdover,baseline/current_holdover:fixed,held_out,1,500,-31550.0077542,-31550.0077542,-31550.0077542,1

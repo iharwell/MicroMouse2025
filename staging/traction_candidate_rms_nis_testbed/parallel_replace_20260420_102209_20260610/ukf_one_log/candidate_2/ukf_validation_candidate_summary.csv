@@ -1,0 +1,2 @@
+candidate_id,status,segments,samples,sigma_points,finite_failures,continuity_failures,covariance_failures,innovation_failures,zero_crossing_events,zero_crossing_failures,max_abs_state,max_abs_prediction,max_state_sigma_span,max_measurement_sigma_span,max_covariance_trace,max_innovation_nis,issue_count
+candidate_2_stribeck,pass,100,125088,2376672,0,0,0,0,181585,0,34.2012915305,1137.7364867,11.8410666667,50.8474587661,15.3855048774,1223.17234338,0

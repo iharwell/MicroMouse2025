@@ -1,0 +1,8 @@
+{
+  "candidate_id": "baseline_holdover",
+  "covariance_policy": "fixed_testbed_estimator_covariance_not_tuned",
+  "is_nominal": false,
+  "parameters": {},
+  "schema_version": 1,
+  "trial_id": "baseline_holdover:trial_018"
+}

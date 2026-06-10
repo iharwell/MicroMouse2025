@@ -1,0 +1,4 @@
+stage,parameter_field,parameter_value_kind,parameter_value,launch_command_signature,count,finite_count,nonfinite_count,rms_nis,sqrt_mean_nis,accepted_count,rejected_count,rejected_rate,accepted_only_rms_nis,physical_residual_rms,segment_count
+SEC_40_YAW,yaw_rate_radps,legacy_yaw_rate_bin_radps,9,"pair=-1,1;mag=0.657667;linear=0;yaw=0",12145,12145,0,3522.10384382,43.0564264407,11355,790,0.0650473445862,3642.38559085,42.3568255943,1
+SEC_40_YAW,yaw_rate_radps,legacy_yaw_rate_bin_radps,9,"pair=0.471501,-0.471581;mag=0.471568;linear=0;yaw=13.404176712",56270,56270,0,9.54245119431,1.936806751,56108,162,0.00287897636396,7.9040290298,1.31529183634,1
+SEC_40_YAW,yaw_rate_radps,legacy_yaw_rate_bin_radps,9,"pair=1,-1;mag=0.336708;linear=0;yaw=9",22020,22020,0,4391.95491999,51.1434176166,20855,1165,0.052906448683,4512.65606504,50.0052882901,1

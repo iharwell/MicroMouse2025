@@ -1,0 +1,5 @@
+file=open_floor_main.mmlog
+mode=open_floor
+stream_type=main
+control_period_us=1000
+fan_duty_cycle=0.800

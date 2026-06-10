@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "description": "Candidate 2 launch-only tuned EKF replay config. Standalone testbed only; not production configuration.",
+  "source_tuned_parameters": "staging/traction_candidate_rms_nis_testbed/launch_only_tuning_oscillation_filtered_assessment_20260610/candidate_2/tuning/tuned_parameters.json",
+  "covariance_config": "staging/traction_candidate_rms_nis_testbed/covariance_conservative.json",
+  "covariance_policy": "fixed_testbed_covariance_not_tuned",
+  "candidate_specific_covariance_or_noise": false,
+  "candidates": [
+    {
+      "id": "candidate_2_stribeck",
+      "label": "Candidate 2 Stribeck launch-only tuned",
+      "model": "stribeck_algebraic",
+      "enabled": true,
+      "parameters": {
+        "dynamic_to_static_grip_ratio": 0.6645852881712238,
+        "low_speed_blend_mps": 0.04829220755526861,
+        "peak_friction_coefficient_at_80pct_fan": 2.2451401539698783,
+        "stribeck_velocity_mps": 0.008064682997779522,
+        "viscous_slip_damping_n_per_mps": 7.438456088059534
+      },
+      "trial_id": "candidate_2_stribeck:trial_005"
+    }
+  ]
+}

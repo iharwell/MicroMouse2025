@@ -1,0 +1,13 @@
+phase,candidate_id,trial_id,split,stage,log_parameter,count,accepted_count,rms_nis,expected_rms_nis,guarded_rms_nis,under_expected_penalty,inflation_flag,rejected_count,rejected_rate
+sec40_yaw_train,baseline/current_holdover,baseline/current_holdover:fixed,train,SEC_40_YAW,forward_accel_residual_tail,2429,193,10.1360985645,1.73205080757,10.1360985645,0,false,2236,0.920543433512
+sec40_yaw_train,baseline/current_holdover,baseline/current_holdover:fixed,train,SEC_40_YAW,right_accel_residual_tail,2429,65,14.9450023775,1.73205080757,14.9450023775,0,false,2364,0.973240016468
+sec40_yaw_train,baseline/current_holdover,baseline/current_holdover:fixed,train,SEC_40_YAW,yaw_rate_residual_tail,2429,1,0.0282187708032,1.73205080757,1.73205080757,1.70383203677,true,2428,0.999588307946
+sec40_yaw_train,candidate_1_algebraic_envelope,candidate_1_algebraic_envelope:nominal,train,SEC_40_YAW,forward_accel_residual_tail,2429,742,10.2658501528,1.73205080757,10.2658501528,0,false,1687,0.694524495677
+sec40_yaw_train,candidate_1_algebraic_envelope,candidate_1_algebraic_envelope:nominal,train,SEC_40_YAW,right_accel_residual_tail,2429,614,11.6304552776,1.73205080757,11.6304552776,0,false,1815,0.747221078633
+sec40_yaw_train,candidate_1_algebraic_envelope,candidate_1_algebraic_envelope:nominal,train,SEC_40_YAW,yaw_rate_residual_tail,2429,36,11.5486885707,1.73205080757,11.5486885707,0,false,2393,0.985179086044
+sec40_yaw_train,candidate_2_stribeck,candidate_2_stribeck:nominal,train,SEC_40_YAW,forward_accel_residual_tail,2429,603,10.5562408195,1.73205080757,10.5562408195,0,false,1826,0.751749691231
+sec40_yaw_train,candidate_2_stribeck,candidate_2_stribeck:nominal,train,SEC_40_YAW,right_accel_residual_tail,2429,465,11.2902672206,1.73205080757,11.2902672206,0,false,1964,0.80856319473
+sec40_yaw_train,candidate_2_stribeck,candidate_2_stribeck:nominal,train,SEC_40_YAW,yaw_rate_residual_tail,2429,36,12.2441416216,1.73205080757,12.2441416216,0,false,2393,0.985179086044
+sec40_yaw_train,candidate_3_load_sensitive,candidate_3_load_sensitive:nominal,train,SEC_40_YAW,forward_accel_residual_tail,2429,628,10.5472271544,1.73205080757,10.5472271544,0,false,1801,0.741457389872
+sec40_yaw_train,candidate_3_load_sensitive,candidate_3_load_sensitive:nominal,train,SEC_40_YAW,right_accel_residual_tail,2429,750,11.6918507332,1.73205080757,11.6918507332,0,false,1679,0.691230959242
+sec40_yaw_train,candidate_3_load_sensitive,candidate_3_load_sensitive:nominal,train,SEC_40_YAW,yaw_rate_residual_tail,2429,16,10.161966858,1.73205080757,10.161966858,0,false,2413,0.993412927131

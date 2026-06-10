@@ -1,0 +1,246 @@
+{
+  "candidate_count": 4,
+  "config_path": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\config.example.json",
+  "covariance_path": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\covariance_conservative.json",
+  "covariance_policy": "fixed_testbed_covariance_not_tuned",
+  "final_samples_per_candidate": 13520,
+  "final_segments": 1690,
+  "final_selected_candidate_count": 4,
+  "limits": {
+    "final_max_rows_per_segment": 8,
+    "final_max_segments": 0,
+    "launch_weight": 1.5,
+    "train_subset_target": 56,
+    "trial_count_per_candidate": 8,
+    "tuning_max_rows_per_segment": 8,
+    "validation_subset_target": 42,
+    "validation_top_k_per_candidate": 3
+  },
+  "manifest_path": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_segments\\segment_manifest.json",
+  "production_or_hardware_hooks": false,
+  "replay_mode": "aggregate_only_residual",
+  "schema_version": 1,
+  "selected_trials": [
+    {
+      "candidate_id": "baseline/current_holdover",
+      "parameters": {
+        "combined_slip_envelope_exponent": 2.0,
+        "lateral_slip_gain_n_per_mps": 16.0,
+        "longitudinal_slip_gain_n_per_mps": 16.0,
+        "low_speed_blend_mps": 0.07,
+        "peak_friction_coefficient_at_80pct_fan": 1.65
+      },
+      "train_score": 1857.2911290959958,
+      "trial_id": "baseline/current_holdover:fixed",
+      "validation_score": 627.3390232888808
+    },
+    {
+      "candidate_id": "candidate_1_algebraic_envelope",
+      "parameters": {
+        "combined_slip_envelope_exponent": 2.8360687463835674,
+        "lateral_slip_gain_n_per_mps": 17.12797730408157,
+        "longitudinal_slip_gain_n_per_mps": 21.455186142927115,
+        "low_speed_blend_mps": 0.19158110716287946,
+        "peak_friction_coefficient_at_80pct_fan": 2.3573859807313937
+      },
+      "train_score": 1723.7799693984325,
+      "trial_id": "candidate_1_algebraic_envelope:trial_006",
+      "validation_score": 562.0554732246834
+    },
+    {
+      "candidate_id": "candidate_2_stribeck",
+      "parameters": {
+        "dynamic_to_static_grip_ratio": 0.8355663511625303,
+        "low_speed_blend_mps": 0.15059803545733166,
+        "peak_friction_coefficient_at_80pct_fan": 2.403463682838297,
+        "stribeck_velocity_mps": 0.03603875736698851,
+        "viscous_slip_damping_n_per_mps": 11.274738671609192
+      },
+      "train_score": 1787.7145108422262,
+      "trial_id": "candidate_2_stribeck:trial_008",
+      "validation_score": 592.4261582910451
+    },
+    {
+      "candidate_id": "candidate_3_load_sensitive",
+      "parameters": {
+        "lateral_load_sensitivity": 0.5709794495227526,
+        "lateral_slip_gain_n_per_mps": 4.356285894978246,
+        "longitudinal_load_sensitivity": -0.18477160123621,
+        "longitudinal_slip_gain_n_per_mps": 38.56632561981559,
+        "low_speed_blend_mps": 0.14987142162683417,
+        "peak_friction_coefficient_at_80pct_fan": 2.269551807725689,
+        "yaw_coupling_gain": -0.12653288620844602
+      },
+      "train_score": 1714.9452085137793,
+      "trial_id": "candidate_3_load_sensitive:trial_001",
+      "validation_score": 556.8608336740604
+    }
+  ],
+  "split_counts": [
+    {
+      "family": "static_hold",
+      "segments": 9,
+      "split": "held_out",
+      "stage": "SEC_10_STATIC",
+      "total_rows": 121123
+    },
+    {
+      "family": "launch",
+      "segments": 232,
+      "split": "held_out",
+      "stage": "SEC_20_LAUNCH",
+      "total_rows": 259811
+    },
+    {
+      "family": "straight",
+      "segments": 3,
+      "split": "held_out",
+      "stage": "SEC_30_STRAIGHT",
+      "total_rows": 99378
+    },
+    {
+      "family": "launch",
+      "segments": 12,
+      "split": "held_out",
+      "stage": "launch",
+      "total_rows": 9101
+    },
+    {
+      "family": "launch",
+      "segments": 10,
+      "split": "held_out",
+      "stage": "mixed_launch",
+      "total_rows": 11877
+    },
+    {
+      "family": "static_hold",
+      "segments": 1,
+      "split": "held_out",
+      "stage": "static",
+      "total_rows": 15501
+    },
+    {
+      "family": "launch",
+      "segments": 76,
+      "split": "held_out",
+      "stage": "yaw_launch",
+      "total_rows": 120623
+    },
+    {
+      "family": "static_hold",
+      "segments": 26,
+      "split": "train",
+      "stage": "SEC_10_STATIC",
+      "total_rows": 275250
+    },
+    {
+      "family": "launch",
+      "segments": 691,
+      "split": "train",
+      "stage": "SEC_20_LAUNCH",
+      "total_rows": 763362
+    },
+    {
+      "family": "recovery",
+      "segments": 2,
+      "split": "train",
+      "stage": "SEC_20_LAUNCH",
+      "total_rows": 1388
+    },
+    {
+      "family": "straight",
+      "segments": 12,
+      "split": "train",
+      "stage": "SEC_30_STRAIGHT",
+      "total_rows": 397512
+    },
+    {
+      "family": "static_hold",
+      "segments": 1,
+      "split": "train",
+      "stage": "SEC_50_SMOOTH",
+      "total_rows": 254
+    },
+    {
+      "family": "launch",
+      "segments": 48,
+      "split": "train",
+      "stage": "launch",
+      "total_rows": 35687
+    },
+    {
+      "family": "launch",
+      "segments": 20,
+      "split": "train",
+      "stage": "mixed_launch",
+      "total_rows": 23864
+    },
+    {
+      "family": "static_hold",
+      "segments": 4,
+      "split": "train",
+      "stage": "static",
+      "total_rows": 61674
+    },
+    {
+      "family": "launch",
+      "segments": 200,
+      "split": "train",
+      "stage": "yaw_launch",
+      "total_rows": 201466
+    },
+    {
+      "family": "static_hold",
+      "segments": 9,
+      "split": "validation",
+      "stage": "SEC_10_STATIC",
+      "total_rows": 106249
+    },
+    {
+      "family": "launch",
+      "segments": 232,
+      "split": "validation",
+      "stage": "SEC_20_LAUNCH",
+      "total_rows": 216887
+    },
+    {
+      "family": "straight",
+      "segments": 3,
+      "split": "validation",
+      "stage": "SEC_30_STRAIGHT",
+      "total_rows": 99378
+    },
+    {
+      "family": "launch",
+      "segments": 12,
+      "split": "validation",
+      "stage": "launch",
+      "total_rows": 9020
+    },
+    {
+      "family": "launch",
+      "segments": 10,
+      "split": "validation",
+      "stage": "mixed_launch",
+      "total_rows": 11956
+    },
+    {
+      "family": "static_hold",
+      "segments": 1,
+      "split": "validation",
+      "stage": "static",
+      "total_rows": 11166
+    },
+    {
+      "family": "launch",
+      "segments": 76,
+      "split": "validation",
+      "stage": "yaw_launch",
+      "total_rows": 67916
+    }
+  ],
+  "train_subset_segments": 56,
+  "trial_count": 28,
+  "uses_logged_ukf_state": false,
+  "validation_subset_segments": 42
+}

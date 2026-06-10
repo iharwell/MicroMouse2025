@@ -1,0 +1,62 @@
+{
+  "candidates": {
+    "baseline/current_holdover": {
+      "nis_count": 103230,
+      "rejected_count": 1704,
+      "residual_rms": {
+        "forward_accel_nis": 3.026032693836241,
+        "right_accel_nis": 1.5871830376373544,
+        "yaw_rate_nis": 0.3025543958630042
+      },
+      "rms_nis": 289.6224866182371
+    },
+    "candidate_1_algebraic_envelope": {
+      "nis_count": 103230,
+      "rejected_count": 1715,
+      "residual_rms": {
+        "forward_accel_nis": 3.0398939040128248,
+        "right_accel_nis": 1.605298258797122,
+        "yaw_rate_nis": 0.3033537037556894
+      },
+      "rms_nis": 291.9221863488549
+    },
+    "candidate_2_stribeck": {
+      "nis_count": 103230,
+      "rejected_count": 1966,
+      "residual_rms": {
+        "forward_accel_nis": 3.2868057053694466,
+        "right_accel_nis": 1.7165752185843068,
+        "yaw_rate_nis": 0.28971476676706875
+      },
+      "rms_nis": 270.202062463309
+    },
+    "candidate_3_load_sensitive": {
+      "nis_count": 103230,
+      "rejected_count": 2148,
+      "residual_rms": {
+        "forward_accel_nis": 3.40973501376111,
+        "right_accel_nis": 1.6922007498532723,
+        "yaw_rate_nis": 0.2792144777388273
+      },
+      "rms_nis": 259.79859552105006
+    }
+  },
+  "diagnostics_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\representative_subset_replay\\residual_diagnostics.csv",
+  "nis_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\representative_subset_replay\\nis_samples.csv",
+  "processed_samples": 34410,
+  "processed_segments": 4,
+  "replay_mode": "residual",
+  "schema_version": 1,
+  "skipped_corrupted_segments": 0,
+  "state_names": [
+    "px_m",
+    "py_m",
+    "heading_rad",
+    "vf_mps",
+    "vr_mps",
+    "yaw_rate_radps",
+    "delta_af_mps2",
+    "delta_ar_mps2",
+    "delta_yaw_accel_radps2"
+  ]
+}

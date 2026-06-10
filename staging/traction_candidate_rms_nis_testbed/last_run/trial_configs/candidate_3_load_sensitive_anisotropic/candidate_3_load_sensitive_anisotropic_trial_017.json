@@ -1,0 +1,16 @@
+{
+  "candidate_id": "candidate_3_load_sensitive_anisotropic",
+  "covariance_policy": "fixed_testbed_estimator_covariance_not_tuned",
+  "is_nominal": false,
+  "parameters": {
+    "lateral_load_sensitivity": 0.3760869565217392,
+    "lateral_slip_gain_n_per_mps": 27.523817840510404,
+    "longitudinal_load_sensitivity": 0.3065217391304348,
+    "longitudinal_slip_gain_n_per_mps": 27.523817840510404,
+    "low_speed_blend_mps": 0.14521739130434783,
+    "peak_friction_coefficient_at_80pct_fan": 2.1739130434782608,
+    "yaw_coupling_gain": 0.13695652173913042
+  },
+  "schema_version": 1,
+  "trial_id": "candidate_3_load_sensitive_anisotropic:trial_017"
+}

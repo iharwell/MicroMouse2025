@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "description": "Conservative host-only estimator/model covariance defaults for traction RMS/NIS replay.",
+  "vehicle": {
+    "mass_kg": 0.14,
+    "yaw_inertia_kg_m2": 0.00022,
+    "track_width_m": 0.084635,
+    "wheel_radius_m": 0.01261,
+    "contact_longitudinal_offset_m": 0.01475,
+    "fan_downforce_at_full_duty_n": 0.7,
+    "max_drive_force_per_bank_n": 1.05,
+    "forward_accel_limit_mps2": 16.5,
+    "reverse_accel_limit_mps2": 16.5,
+    "imu_right_offset_m": -0.03,
+    "imu_forward_offset_m": -0.03,
+    "default_fan_duty_cycle": 0.8
+  },
+  "covariance": {
+    "initial_state_std": [
+      0.02,
+      0.02,
+      0.05,
+      0.18,
+      0.18,
+      0.16,
+      0.8,
+      0.8,
+      12.0
+    ],
+    "process": {
+      "state_jacobian_steps": [
+        0.0001,
+        0.0001,
+        0.00001,
+        0.0001,
+        0.0001,
+        0.00001,
+        0.0001,
+        0.0001,
+        0.0001
+      ],
+      "residual_tau_s": [
+        0.075,
+        0.075,
+        0.075
+      ],
+      "residual_ss_sigma": [
+        0.18,
+        0.22,
+        4.0
+      ],
+      "encoder_wheel_rate_sigma_radps": 1.0,
+      "base_position_sigma_per_tick_m": 0.00002,
+      "base_heading_sigma_per_tick_rad": 0.00002,
+      "base_velocity_sigma_per_tick_mps": 0.0005,
+      "base_yaw_rate_sigma_per_tick_radps": 0.0008
+    },
+    "measurement": {
+      "yaw_rate_sigma_radps": 0.035,
+      "encoder_wheel_rate_sigma_radps": 1.0,
+      "accel_sigma_mps2": 1.2,
+      "yaw_rate_gate_nis": "inf",
+      "encoder_gate_nis": "inf",
+      "accel_gate_nis": 25.0,
+      "finite_difference_step": 0.00001
+    }
+  }
+}

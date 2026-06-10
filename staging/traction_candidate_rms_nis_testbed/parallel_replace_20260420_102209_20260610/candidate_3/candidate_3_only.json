@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "description": "Corrected-policy rerun candidate_3 candidate-only traction RMS/NIS testbed config. Standalone testbed only; not production configuration.",
+  "source_tuned_parameters": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\fair_tuning_representative_20260610_192\\tuned_parameters.json",
+  "covariance_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\covariance_conservative.json",
+  "covariance_policy": "fixed_testbed_covariance_not_tuned",
+  "candidates": [
+    {
+      "id": "candidate_3_load_sensitive",
+      "model": "load_sensitive_anisotropic",
+      "trial_id": "candidate_3_load_sensitive:trial_179",
+      "parameters": {
+        "lateral_load_sensitivity": 0.7547241284550943,
+        "lateral_slip_gain_n_per_mps": 11.471351288462293,
+        "longitudinal_load_sensitivity": -0.41855135792160336,
+        "longitudinal_slip_gain_n_per_mps": 23.643473997585122,
+        "low_speed_blend_mps": 0.15018235350665052,
+        "peak_friction_coefficient_at_80pct_fan": 3.0657480502788412,
+        "yaw_coupling_gain": -0.6714990116103381
+      }
+    }
+  ],
+  "source_corrected_policy_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\parallel_corrected_policy_20260610\\candidate_3\\candidate_3_only.json"
+}

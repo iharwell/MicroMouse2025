@@ -75,6 +75,9 @@
     <ClInclude Include="PlantModelDynamicsTestSupport.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="TractionTestEstimator.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="CellTest.cpp">
@@ -396,6 +399,12 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="EstimatorWallUpdateTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="TractionTestEstimator.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="TractionTestEstimatorTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="EstimatorControlMotionUpdateTestSupport.cpp">

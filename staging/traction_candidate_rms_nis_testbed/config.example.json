@@ -1,0 +1,228 @@
+{
+  "schema_version": 1,
+  "manifest_path": "../traction_candidate_rms_nis_segments/segment_manifest.json",
+  "split": {
+    "strategy": "stable_hash_by_whole_segment_id",
+    "seed": "traction_rms_nis_testbed_v1",
+    "train": 0.6,
+    "validation": 0.2,
+    "held_out": 0.2
+  },
+  "tuning": {
+    "seed": "traction_rms_nis_testbed_v1",
+    "trial_count_per_candidate": 24,
+    "include_nominal_trial": true
+  },
+  "scoring": {
+    "selection_split": "validation",
+    "inflation_floor_ratio": 0.75,
+    "under_expected_penalty_weight": 1.0,
+    "inflation_floor_penalty_weight": 1.0,
+    "rejected_rate_penalty_weight": 1.0,
+    "default_stage_weight": 1.0,
+    "stage_weights": {
+      "SEC_20_LAUNCH": 1.0,
+      "SEC_40_YAW": 1.0
+    },
+    "log_fields": {
+      "left_encoder_wheel_rate_nis": {
+        "dimension": 1,
+        "weight": 1.0
+      },
+      "right_encoder_wheel_rate_nis": {
+        "dimension": 1,
+        "weight": 1.0
+      },
+      "yaw_rate_nis": {
+        "dimension": 1,
+        "weight": 1.0
+      },
+      "forward_accel_nis": {
+        "dimension": 1,
+        "weight": 1.0
+      },
+      "right_accel_nis": {
+        "dimension": 1,
+        "weight": 1.0
+      }
+    }
+  },
+  "candidates": [
+    {
+      "id": "baseline/current_holdover",
+      "label": "Baseline/current holdover",
+      "model": "current_holdover_approximation",
+      "enabled": true,
+      "parameters": {},
+      "search": {}
+    },
+    {
+      "id": "candidate_1_algebraic_envelope",
+      "label": "Candidate 1 algebraic envelope",
+      "model": "algebraic_envelope",
+      "enabled": true,
+      "parameters": {
+        "peak_friction_coefficient_at_80pct_fan": 1.68,
+        "longitudinal_slip_gain_n_per_mps": 18.0,
+        "lateral_slip_gain_n_per_mps": 18.0,
+        "combined_slip_envelope_exponent": 2.0,
+        "low_speed_blend_mps": 0.08
+      },
+      "search": {
+        "peak_friction_coefficient_at_80pct_fan": {
+          "min": 1.2,
+          "max": 2.4,
+          "scale": "linear"
+        },
+        "longitudinal_slip_gain_n_per_mps": {
+          "min": 4.0,
+          "max": 48.0,
+          "scale": "log"
+        },
+        "lateral_slip_gain_n_per_mps": {
+          "min": 4.0,
+          "max": 56.0,
+          "scale": "log"
+        },
+        "combined_slip_envelope_exponent": {
+          "min": 1.2,
+          "max": 4.0,
+          "scale": "linear"
+        },
+        "low_speed_blend_mps": {
+          "min": 0.02,
+          "max": 0.2,
+          "scale": "linear"
+        }
+      }
+    },
+    {
+      "id": "candidate_2_stribeck",
+      "label": "Candidate 2 Stribeck",
+      "model": "stribeck_algebraic",
+      "enabled": true,
+      "parameters": {
+        "peak_friction_coefficient_at_80pct_fan": 1.72,
+        "longitudinal_slip_gain_n_per_mps": 18.0,
+        "lateral_slip_gain_n_per_mps": 18.0,
+        "combined_slip_envelope_exponent": 2.0,
+        "dynamic_to_static_grip_ratio": 0.82,
+        "stribeck_velocity_mps": 0.16,
+        "viscous_slip_damping_n_per_mps": 2.0,
+        "low_speed_blend_mps": 0.06
+      },
+      "search": {
+        "peak_friction_coefficient_at_80pct_fan": {
+          "min": 1.2,
+          "max": 2.5,
+          "scale": "linear"
+        },
+        "longitudinal_slip_gain_n_per_mps": {
+          "min": 4.0,
+          "max": 48.0,
+          "scale": "log"
+        },
+        "lateral_slip_gain_n_per_mps": {
+          "min": 4.0,
+          "max": 56.0,
+          "scale": "log"
+        },
+        "combined_slip_envelope_exponent": {
+          "min": 1.2,
+          "max": 4.0,
+          "scale": "linear"
+        },
+        "dynamic_to_static_grip_ratio": {
+          "min": 0.55,
+          "max": 0.98,
+          "scale": "linear"
+        },
+        "stribeck_velocity_mps": {
+          "min": 0.03,
+          "max": 0.45,
+          "scale": "log"
+        },
+        "viscous_slip_damping_n_per_mps": {
+          "min": 0.0,
+          "max": 12.0,
+          "scale": "linear"
+        },
+        "low_speed_blend_mps": {
+          "min": 0.02,
+          "max": 0.2,
+          "scale": "linear"
+        }
+      }
+    },
+    {
+      "id": "candidate_3_load_sensitive",
+      "label": "Candidate 3 load-sensitive",
+      "model": "load_sensitive_anisotropic",
+      "enabled": true,
+      "parameters": {
+        "peak_friction_coefficient_at_80pct_fan": 1.78,
+        "longitudinal_slip_gain_n_per_mps": 22.0,
+        "lateral_slip_gain_n_per_mps": 16.0,
+        "longitudinal_load_transfer_gain": 0.18,
+        "lateral_load_transfer_gain": 0.26,
+        "longitudinal_load_sensitivity": 0.18,
+        "lateral_load_sensitivity": 0.26,
+        "yaw_coupling_gain": 0.12,
+        "yaw_damping_speed_blend_mps": 0.02,
+        "low_speed_blend_mps": 0.05
+      },
+      "search": {
+        "peak_friction_coefficient_at_80pct_fan": {
+          "min": 1.2,
+          "max": 2.6,
+          "scale": "linear"
+        },
+        "longitudinal_slip_gain_n_per_mps": {
+          "min": 4.0,
+          "max": 64.0,
+          "scale": "log"
+        },
+        "lateral_slip_gain_n_per_mps": {
+          "min": 4.0,
+          "max": 64.0,
+          "scale": "log"
+        },
+        "longitudinal_load_transfer_gain": {
+          "min": 0.0,
+          "max": 0.55,
+          "scale": "linear"
+        },
+        "lateral_load_transfer_gain": {
+          "min": 0.0,
+          "max": 0.65,
+          "scale": "linear"
+        },
+        "longitudinal_load_sensitivity": {
+          "min": 0.0,
+          "max": 0.55,
+          "scale": "linear"
+        },
+        "lateral_load_sensitivity": {
+          "min": 0.0,
+          "max": 0.65,
+          "scale": "linear"
+        },
+        "yaw_coupling_gain": {
+          "min": 0.0,
+          "max": 0.35,
+          "scale": "linear"
+        },
+        "yaw_damping_speed_blend_mps": {
+          "min": 0.005,
+          "max": 0.08,
+          "scale": "log"
+        },
+        "low_speed_blend_mps": {
+          "min": 0.02,
+          "max": 0.2,
+          "scale": "linear"
+        }
+      }
+    }
+  ]
+}

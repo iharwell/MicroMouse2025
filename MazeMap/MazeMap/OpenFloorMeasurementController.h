@@ -282,8 +282,8 @@ namespace MazeMap::App::Internal
             const char* Name() const noexcept override { return "Yaw Launch"; }
             MeasurementLogId Id() const noexcept override { return kLogId; }
             std::uint16_t PrimitiveCount() const noexcept override { return 2U; }
-            std::uint8_t SpeedBinCount() const noexcept override { return 7U; }
-            std::uint16_t RepeatCount() const noexcept override { return 3U; }
+            std::uint8_t SpeedBinCount() const noexcept override { return 8U; }
+            std::uint16_t RepeatCount() const noexcept override { return 1U; }
             MazeMap::ManeuverCode PrimitiveCode(
                 std::uint16_t primitiveIndex,
                 std::uint8_t speedBinIndex) const noexcept override
@@ -296,7 +296,7 @@ namespace MazeMap::App::Internal
                 std::uint16_t primitiveIndex,
                 std::uint8_t speedBinIndex) const noexcept override
             {
-                return (0.5f + speedBinIndex * 0.05f) * ((primitiveIndex == 0U) ? 1.0f : -1.0f);
+                return (0.6f + speedBinIndex * 0.025f) * ((primitiveIndex == 0U) ? 1.0f : -1.0f);
             }
             CommandVector GetNextControls(
                 std::uint16_t primitiveIndex,
@@ -440,6 +440,17 @@ namespace MazeMap::App::Internal
 					float offset = _commandValues[speedBinIndex>>1];
 					CommandVector commandVal = CommandVector(std::max(low,low-offset), std::max(low,low+offset));
 
+					if (primitiveIndex == 0)
+					{
+						return commandVal;
+					}
+					return -commandVal;
+				}
+				else if (_counter < 450U)
+				{
+					_counter++;
+					float val = 0.3f + std::fabsf(_commandValues[speedBinIndex >> 1])/2.0f;
+					CommandVector commandVal = CommandVector(-val, -val);
 					if (primitiveIndex == 0)
 					{
 						return commandVal;

@@ -1,0 +1,6 @@
+master_time_us,control_tick_sequence,dt_us,phase_id,primitive_id,speed_bin,repeat_index,mode_flags,ukf_state_px_m,replay_state_px_m,cmd_linear_mps,cmd_angular_radps,left_drive_command,right_drive_command,left_feedforward_command,right_feedforward_command,left_encoder_count,right_encoder_count,left_encoder_omega_radps,right_encoder_omega_radps,left_encoder_velocity_mps,right_encoder_velocity_mps,gyro_raw_radps,gyro_bias_radps,gyro_radps,accel_body_x_mps2,accel_body_y_mps2,planar_accel_mps2,fan_duty_cycle
+1000,1,1000,1,0,0.0,1,8,10.0,20.0,0.0,0.0,0.0,0.0,0.0,0.0,10,12,0.0,0.0,0.0,0.0,0.10,0.01,0.09,0.1,0.2,0.3,0.8
+2000,2,1000,2,3,0.25,1,8,11.0,21.0,0.0,0.0,0.25,0.25,0.2,0.2,20,22,1.0,1.1,0.02,0.03,0.20,0.01,0.19,1.1,1.2,1.3,0.8
+3000,3,1000,1,0,0.0,1,8,12.0,22.0,0.0,0.0,0.0,0.0,0.0,0.0,25,27,0.0,0.0,0.0,0.0,0.15,0.01,0.14,0.2,0.3,0.4,0.8
+4000,4,1000,3,15,0.0,1,8,13.0,23.0,0.1,-0.1,0.1,-0.1,0.0,0.0,30,32,0.4,0.5,0.01,0.02,0.30,0.01,0.29,2.1,2.2,2.3,0.8
+5000,5,1000,3,15,0.0,1,8,14.0,24.0,0.0,0.0,0.0,0.0,0.0,0.0,31,33,0.0,0.0,0.0,0.0,0.25,0.01,0.24,0.4,0.5,0.6,0.8

@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "description": "Candidate 1 tuned from launch-family-only residual-tail tuning, replay-ready for oscillation-filtered EKF assessment. Standalone testbed only; not production configuration.",
+  "source_tuning_output": "staging\\traction_candidate_rms_nis_testbed\\launch_only_tuning_oscillation_filtered_assessment_20260610\\candidate_1\\tuning\\tuned_parameters.json",
+  "source_tuning_trial_id": "candidate_1_algebraic_envelope:trial_148",
+  "source_tuning_validation_score": 162.412718245,
+  "covariance_policy": "fixed_testbed_covariance_not_tuned",
+  "covariance_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\covariance_conservative.json",
+  "candidate_specific_covariance_or_noise": false,
+  "candidates": [
+    {
+      "id": "candidate_1_algebraic_envelope",
+      "label": "Candidate 1 algebraic envelope launch-only tuned",
+      "model": "algebraic_envelope",
+      "enabled": true,
+      "parameters": {
+        "combined_slip_envelope_exponent": 5.645826960231981,
+        "lateral_slip_gain_n_per_mps": 35.16069547272106,
+        "longitudinal_slip_gain_n_per_mps": 33.15800734323761,
+        "low_speed_blend_mps": 0.10996085046880083,
+        "peak_friction_coefficient_at_80pct_fan": 1.2936470429574267
+      }
+    }
+  ]
+}

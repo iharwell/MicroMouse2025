@@ -1,0 +1,34 @@
+Traceback (most recent call last):
+  File "C:\Users\thene\source\repos\MicroMouse2025\Tools\TractionRmsNisTestbed\traction_rms_nis_testbed.py", line 18, in <module>
+    raise SystemExit(main())
+                     ~~~~^^
+  File "C:\Users\thene\source\repos\MicroMouse2025\Tools\TractionRmsNisTestbed\traction_rms_nis_testbed\entrypoint.py", line 20, in main
+    return tuning_main(args[1:])
+  File "C:\Users\thene\source\repos\MicroMouse2025\Tools\TractionRmsNisTestbed\traction_rms_nis_testbed\tuning.py", line 2273, in main
+    final_result = evaluate_trials(
+        phase="full_selected",
+    ...<8 lines>...
+        sample_source=sample_source,
+    )
+  File "C:\Users\thene\source\repos\MicroMouse2025\Tools\TractionRmsNisTestbed\traction_rms_nis_testbed\tuning.py", line 1066, in evaluate_trials
+    evaluate_segment_samples(result, meta, samples, trials, plants, covariance)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\thene\source\repos\MicroMouse2025\Tools\TractionRmsNisTestbed\traction_rms_nis_testbed\tuning.py", line 1101, in evaluate_segment_samples
+    plant_result = plant.plant_result(state, sample)
+  File "C:\Users\thene\source\repos\MicroMouse2025\Tools\TractionRmsNisTestbed\traction_rms_nis_testbed\estimator_core.py", line 841, in plant_result
+    return self.current_holdover_result(state, sample)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "C:\Users\thene\source\repos\MicroMouse2025\Tools\TractionRmsNisTestbed\traction_rms_nis_testbed\estimator_core.py", line 933, in current_holdover_result
+    return self.make_plant_result(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        state,
+        ^^^^^^
+    ...<4 lines>...
+        ground_use,
+        ^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\thene\source\repos\MicroMouse2025\Tools\TractionRmsNisTestbed\traction_rms_nis_testbed\estimator_core.py", line 976, in make_plant_result
+    rel2 = contact.rel_forward_mps**2 + contact.rel_right_mps**2
+           ~~~~~~~~~~~~~~~~~~~~~~~^^~
+OverflowError: (34, 'Result too large')

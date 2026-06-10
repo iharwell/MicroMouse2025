@@ -1,0 +1,55 @@
+{
+  "aggregate_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\launch_only_tuning_oscillation_filtered_assessment_20260610\\candidate_1\\assessment_ekf\\nis_aggregates.csv",
+  "bias_segment_manifest": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\representative_corpus\\segment_manifest.json",
+  "bias_summary_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\launch_only_tuning_oscillation_filtered_assessment_20260610\\candidate_1\\assessment_ekf\\bias_summary.csv",
+  "candidate_rms_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\launch_only_tuning_oscillation_filtered_assessment_20260610\\candidate_1\\assessment_ekf\\candidate_rms_nis.csv",
+  "candidates": {
+    "candidate_1_algebraic_envelope": {
+      "accepted_count": 1821987,
+      "accepted_only_rms_nis": 122.68205251823939,
+      "accepted_only_sqrt_mean_nis": 3.5699938253080243,
+      "finite_count": 1877035,
+      "nis_count": 1877035,
+      "nonfinite_count": 0,
+      "rejected_count": 55048,
+      "rejected_rate": 0.02932710365017168,
+      "rejected_rate_penalty": 0.05865420730034336,
+      "residual_rms": {
+        "forward_accel_mps2": 5.11260949108364,
+        "left_encoder_wheel_rate_radps": 4.423305799347172,
+        "right_accel_mps2": 4.355941228138619,
+        "right_encoder_wheel_rate_radps": 4.732330195690525,
+        "yaw_accel_radps2": 86.48534574268186,
+        "yaw_rate_radps": 0.190231218014568
+      },
+      "rms_nis": 127.08275380160353,
+      "segment_count": 658,
+      "sqrt_mean_nis": 4.1475364975009965
+    }
+  },
+  "diagnostics_csv": null,
+  "itemized_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\launch_only_tuning_oscillation_filtered_assessment_20260610\\candidate_1\\assessment_ekf\\itemized_rms_nis.csv",
+  "jobs_requested": 8,
+  "jobs_used": 8,
+  "nis_csv": null,
+  "processed_samples": 375407,
+  "processed_segments": 658,
+  "replay_mode": "ekf",
+  "report_md": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\launch_only_tuning_oscillation_filtered_assessment_20260610\\candidate_1\\assessment_ekf\\report.md",
+  "row_artifacts_enabled": false,
+  "schema_version": 1,
+  "skipped_corrupted_segments": 0,
+  "source_log_count": 8,
+  "state_names": [
+    "px_m",
+    "py_m",
+    "heading_rad",
+    "vf_mps",
+    "vr_mps",
+    "yaw_rate_radps",
+    "delta_af_mps2",
+    "delta_ar_mps2",
+    "delta_yaw_accel_radps2"
+  ],
+  "uses_logged_ukf_state": false
+}

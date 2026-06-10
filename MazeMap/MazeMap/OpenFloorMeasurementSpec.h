@@ -101,7 +101,7 @@ namespace MazeMap
         -PI_F,
     } };
     inline constexpr std::array<float, 3U> kOpenFloorSmoothSpeedBinsMps = { { 0.4f, 0.45f, 0.45f } };
-    inline constexpr std::uint8_t kOpenFloorLaunchRepeatsPerMagnitude = 3U;
+    inline constexpr std::uint8_t kOpenFloorLaunchRepeatsPerMagnitude = 1U;
     inline constexpr std::uint8_t kOpenFloorStraightRepeatsPerSpeed = 3U;
     inline constexpr unsigned long kOpenFloorLaunchPulseMs = 250UL;
     // After each launch, straight, or yaw test segment, use Drive's hold primitive to accumulate
@@ -109,10 +109,10 @@ namespace MazeMap
     inline constexpr unsigned long kOpenFloorPostSegmentHoldMs = 250UL;
     // Longer brake hold between major sections so the next battery starts from a fully settled state.
     inline constexpr unsigned long kOpenFloorInterPhaseHoldMs = 500UL;
-    inline constexpr float kOpenFloorLaunchDriveMagnitudeStart = 0.25f;
+    inline constexpr float kOpenFloorLaunchDriveMagnitudeStart = 0.20f;
     inline constexpr float kOpenFloorLaunchDriveMagnitudeEnd = 0.35f;
-    inline constexpr float kOpenFloorLaunchDriveMagnitudeStep = 0.05f;
-    inline constexpr unsigned long kOpenFloorSelectorRemovalFaultDelayMs = 500UL;
+    inline constexpr float kOpenFloorLaunchDriveMagnitudeStep = 0.025f;
+    inline constexpr unsigned long kOpenFloorSelectorRemovalFaultDelayMs = 200UL;
     inline constexpr float kOpenFloorRecoveryAcceptanceRadiusM = 0.015f;
     inline constexpr float kOpenFloorRecoveryArrivalHeadingToleranceRad = 1.0f * DEG_TO_RAD_F;
 

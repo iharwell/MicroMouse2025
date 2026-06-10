@@ -1,0 +1,5 @@
+candidate_id,status,segments,samples,sigma_points,finite_failures,continuity_failures,covariance_failures,innovation_failures,zero_crossing_events,zero_crossing_failures,max_abs_state,max_abs_prediction,max_state_sigma_span,max_measurement_sigma_span,max_covariance_trace,max_innovation_nis,issue_count
+baseline/current_holdover,pass,5,80,1520,0,0,0,0,142,0,11.8410666667,319.273115727,11.8410666667,27.2654040159,15.3324220167,197.646586299,0
+candidate_1_algebraic_envelope,pass,5,80,1520,0,0,0,0,142,0,11.8410666667,129.422070262,11.8410666667,30.7147034166,15.3232328243,1.81977561448,0
+candidate_2_stribeck,pass,5,80,1520,0,0,0,0,142,0,11.8410666667,127.715811803,11.8410666667,27.7610107982,15.3236086883,1.78038476544,0
+candidate_3_load_sensitive,pass,5,80,1520,0,0,0,0,142,0,11.8410666667,126.211525905,11.8410666667,30.7648322483,15.3242319299,1.92791240552,0

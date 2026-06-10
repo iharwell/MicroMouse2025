@@ -1,0 +1,630 @@
+{
+  "itemized": [],
+  "non_corrupted_nis_sample_count": 0,
+  "production_or_hardware_hooks": false,
+  "rankings": [
+    {
+      "candidate_id": "baseline_holdover",
+      "sample_count": 0,
+      "selection_score": "inf"
+    },
+    {
+      "candidate_id": "candidate_1_algebraic_envelope",
+      "sample_count": 0,
+      "selection_score": "inf"
+    },
+    {
+      "candidate_id": "candidate_2_stribeck_algebraic",
+      "sample_count": 0,
+      "selection_score": "inf"
+    },
+    {
+      "candidate_id": "candidate_3_load_sensitive_anisotropic",
+      "sample_count": 0,
+      "selection_score": "inf"
+    }
+  ],
+  "trial_scores": [
+    {
+      "candidate_id": "baseline_holdover",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "baseline_holdover:nominal"
+    },
+    {
+      "candidate_id": "baseline_holdover",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "baseline_holdover:trial_001"
+    },
+    {
+      "candidate_id": "baseline_holdover",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "baseline_holdover:trial_002"
+    },
+    {
+      "candidate_id": "baseline_holdover",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "baseline_holdover:trial_003"
+    },
+    {
+      "candidate_id": "baseline_holdover",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "baseline_holdover:trial_004"
+    },
+    {
+      "candidate_id": "baseline_holdover",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "baseline_holdover:trial_005"
+    },
+    {
+      "candidate_id": "baseline_holdover",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "baseline_holdover:trial_006"
+    },
+    {
+      "candidate_id": "baseline_holdover",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "baseline_holdover:trial_007"
+    },
+    {
+      "candidate_id": "baseline_holdover",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "baseline_holdover:trial_008"
+    },
+    {
+      "candidate_id": "baseline_holdover",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "baseline_holdover:trial_009"
+    },
+    {
+      "candidate_id": "baseline_holdover",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "baseline_holdover:trial_010"
+    },
+    {
+      "candidate_id": "baseline_holdover",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "baseline_holdover:trial_011"
+    },
+    {
+      "candidate_id": "baseline_holdover",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "baseline_holdover:trial_012"
+    },
+    {
+      "candidate_id": "baseline_holdover",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "baseline_holdover:trial_013"
+    },
+    {
+      "candidate_id": "baseline_holdover",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "baseline_holdover:trial_014"
+    },
+    {
+      "candidate_id": "baseline_holdover",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "baseline_holdover:trial_015"
+    },
+    {
+      "candidate_id": "baseline_holdover",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "baseline_holdover:trial_016"
+    },
+    {
+      "candidate_id": "baseline_holdover",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "baseline_holdover:trial_017"
+    },
+    {
+      "candidate_id": "baseline_holdover",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "baseline_holdover:trial_018"
+    },
+    {
+      "candidate_id": "baseline_holdover",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "baseline_holdover:trial_019"
+    },
+    {
+      "candidate_id": "baseline_holdover",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "baseline_holdover:trial_020"
+    },
+    {
+      "candidate_id": "baseline_holdover",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "baseline_holdover:trial_021"
+    },
+    {
+      "candidate_id": "baseline_holdover",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "baseline_holdover:trial_022"
+    },
+    {
+      "candidate_id": "baseline_holdover",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "baseline_holdover:trial_023"
+    },
+    {
+      "candidate_id": "baseline_holdover",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "baseline_holdover:trial_024"
+    },
+    {
+      "candidate_id": "candidate_1_algebraic_envelope",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_1_algebraic_envelope:nominal"
+    },
+    {
+      "candidate_id": "candidate_1_algebraic_envelope",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_1_algebraic_envelope:trial_001"
+    },
+    {
+      "candidate_id": "candidate_1_algebraic_envelope",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_1_algebraic_envelope:trial_002"
+    },
+    {
+      "candidate_id": "candidate_1_algebraic_envelope",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_1_algebraic_envelope:trial_003"
+    },
+    {
+      "candidate_id": "candidate_1_algebraic_envelope",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_1_algebraic_envelope:trial_004"
+    },
+    {
+      "candidate_id": "candidate_1_algebraic_envelope",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_1_algebraic_envelope:trial_005"
+    },
+    {
+      "candidate_id": "candidate_1_algebraic_envelope",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_1_algebraic_envelope:trial_006"
+    },
+    {
+      "candidate_id": "candidate_1_algebraic_envelope",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_1_algebraic_envelope:trial_007"
+    },
+    {
+      "candidate_id": "candidate_1_algebraic_envelope",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_1_algebraic_envelope:trial_008"
+    },
+    {
+      "candidate_id": "candidate_1_algebraic_envelope",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_1_algebraic_envelope:trial_009"
+    },
+    {
+      "candidate_id": "candidate_1_algebraic_envelope",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_1_algebraic_envelope:trial_010"
+    },
+    {
+      "candidate_id": "candidate_1_algebraic_envelope",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_1_algebraic_envelope:trial_011"
+    },
+    {
+      "candidate_id": "candidate_1_algebraic_envelope",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_1_algebraic_envelope:trial_012"
+    },
+    {
+      "candidate_id": "candidate_1_algebraic_envelope",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_1_algebraic_envelope:trial_013"
+    },
+    {
+      "candidate_id": "candidate_1_algebraic_envelope",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_1_algebraic_envelope:trial_014"
+    },
+    {
+      "candidate_id": "candidate_1_algebraic_envelope",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_1_algebraic_envelope:trial_015"
+    },
+    {
+      "candidate_id": "candidate_1_algebraic_envelope",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_1_algebraic_envelope:trial_016"
+    },
+    {
+      "candidate_id": "candidate_1_algebraic_envelope",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_1_algebraic_envelope:trial_017"
+    },
+    {
+      "candidate_id": "candidate_1_algebraic_envelope",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_1_algebraic_envelope:trial_018"
+    },
+    {
+      "candidate_id": "candidate_1_algebraic_envelope",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_1_algebraic_envelope:trial_019"
+    },
+    {
+      "candidate_id": "candidate_1_algebraic_envelope",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_1_algebraic_envelope:trial_020"
+    },
+    {
+      "candidate_id": "candidate_1_algebraic_envelope",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_1_algebraic_envelope:trial_021"
+    },
+    {
+      "candidate_id": "candidate_1_algebraic_envelope",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_1_algebraic_envelope:trial_022"
+    },
+    {
+      "candidate_id": "candidate_1_algebraic_envelope",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_1_algebraic_envelope:trial_023"
+    },
+    {
+      "candidate_id": "candidate_1_algebraic_envelope",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_1_algebraic_envelope:trial_024"
+    },
+    {
+      "candidate_id": "candidate_2_stribeck_algebraic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_2_stribeck_algebraic:nominal"
+    },
+    {
+      "candidate_id": "candidate_2_stribeck_algebraic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_2_stribeck_algebraic:trial_001"
+    },
+    {
+      "candidate_id": "candidate_2_stribeck_algebraic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_2_stribeck_algebraic:trial_002"
+    },
+    {
+      "candidate_id": "candidate_2_stribeck_algebraic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_2_stribeck_algebraic:trial_003"
+    },
+    {
+      "candidate_id": "candidate_2_stribeck_algebraic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_2_stribeck_algebraic:trial_004"
+    },
+    {
+      "candidate_id": "candidate_2_stribeck_algebraic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_2_stribeck_algebraic:trial_005"
+    },
+    {
+      "candidate_id": "candidate_2_stribeck_algebraic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_2_stribeck_algebraic:trial_006"
+    },
+    {
+      "candidate_id": "candidate_2_stribeck_algebraic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_2_stribeck_algebraic:trial_007"
+    },
+    {
+      "candidate_id": "candidate_2_stribeck_algebraic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_2_stribeck_algebraic:trial_008"
+    },
+    {
+      "candidate_id": "candidate_2_stribeck_algebraic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_2_stribeck_algebraic:trial_009"
+    },
+    {
+      "candidate_id": "candidate_2_stribeck_algebraic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_2_stribeck_algebraic:trial_010"
+    },
+    {
+      "candidate_id": "candidate_2_stribeck_algebraic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_2_stribeck_algebraic:trial_011"
+    },
+    {
+      "candidate_id": "candidate_2_stribeck_algebraic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_2_stribeck_algebraic:trial_012"
+    },
+    {
+      "candidate_id": "candidate_2_stribeck_algebraic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_2_stribeck_algebraic:trial_013"
+    },
+    {
+      "candidate_id": "candidate_2_stribeck_algebraic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_2_stribeck_algebraic:trial_014"
+    },
+    {
+      "candidate_id": "candidate_2_stribeck_algebraic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_2_stribeck_algebraic:trial_015"
+    },
+    {
+      "candidate_id": "candidate_2_stribeck_algebraic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_2_stribeck_algebraic:trial_016"
+    },
+    {
+      "candidate_id": "candidate_2_stribeck_algebraic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_2_stribeck_algebraic:trial_017"
+    },
+    {
+      "candidate_id": "candidate_2_stribeck_algebraic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_2_stribeck_algebraic:trial_018"
+    },
+    {
+      "candidate_id": "candidate_2_stribeck_algebraic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_2_stribeck_algebraic:trial_019"
+    },
+    {
+      "candidate_id": "candidate_2_stribeck_algebraic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_2_stribeck_algebraic:trial_020"
+    },
+    {
+      "candidate_id": "candidate_2_stribeck_algebraic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_2_stribeck_algebraic:trial_021"
+    },
+    {
+      "candidate_id": "candidate_2_stribeck_algebraic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_2_stribeck_algebraic:trial_022"
+    },
+    {
+      "candidate_id": "candidate_2_stribeck_algebraic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_2_stribeck_algebraic:trial_023"
+    },
+    {
+      "candidate_id": "candidate_2_stribeck_algebraic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_2_stribeck_algebraic:trial_024"
+    },
+    {
+      "candidate_id": "candidate_3_load_sensitive_anisotropic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_3_load_sensitive_anisotropic:nominal"
+    },
+    {
+      "candidate_id": "candidate_3_load_sensitive_anisotropic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_3_load_sensitive_anisotropic:trial_001"
+    },
+    {
+      "candidate_id": "candidate_3_load_sensitive_anisotropic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_3_load_sensitive_anisotropic:trial_002"
+    },
+    {
+      "candidate_id": "candidate_3_load_sensitive_anisotropic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_3_load_sensitive_anisotropic:trial_003"
+    },
+    {
+      "candidate_id": "candidate_3_load_sensitive_anisotropic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_3_load_sensitive_anisotropic:trial_004"
+    },
+    {
+      "candidate_id": "candidate_3_load_sensitive_anisotropic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_3_load_sensitive_anisotropic:trial_005"
+    },
+    {
+      "candidate_id": "candidate_3_load_sensitive_anisotropic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_3_load_sensitive_anisotropic:trial_006"
+    },
+    {
+      "candidate_id": "candidate_3_load_sensitive_anisotropic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_3_load_sensitive_anisotropic:trial_007"
+    },
+    {
+      "candidate_id": "candidate_3_load_sensitive_anisotropic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_3_load_sensitive_anisotropic:trial_008"
+    },
+    {
+      "candidate_id": "candidate_3_load_sensitive_anisotropic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_3_load_sensitive_anisotropic:trial_009"
+    },
+    {
+      "candidate_id": "candidate_3_load_sensitive_anisotropic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_3_load_sensitive_anisotropic:trial_010"
+    },
+    {
+      "candidate_id": "candidate_3_load_sensitive_anisotropic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_3_load_sensitive_anisotropic:trial_011"
+    },
+    {
+      "candidate_id": "candidate_3_load_sensitive_anisotropic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_3_load_sensitive_anisotropic:trial_012"
+    },
+    {
+      "candidate_id": "candidate_3_load_sensitive_anisotropic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_3_load_sensitive_anisotropic:trial_013"
+    },
+    {
+      "candidate_id": "candidate_3_load_sensitive_anisotropic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_3_load_sensitive_anisotropic:trial_014"
+    },
+    {
+      "candidate_id": "candidate_3_load_sensitive_anisotropic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_3_load_sensitive_anisotropic:trial_015"
+    },
+    {
+      "candidate_id": "candidate_3_load_sensitive_anisotropic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_3_load_sensitive_anisotropic:trial_016"
+    },
+    {
+      "candidate_id": "candidate_3_load_sensitive_anisotropic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_3_load_sensitive_anisotropic:trial_017"
+    },
+    {
+      "candidate_id": "candidate_3_load_sensitive_anisotropic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_3_load_sensitive_anisotropic:trial_018"
+    },
+    {
+      "candidate_id": "candidate_3_load_sensitive_anisotropic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_3_load_sensitive_anisotropic:trial_019"
+    },
+    {
+      "candidate_id": "candidate_3_load_sensitive_anisotropic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_3_load_sensitive_anisotropic:trial_020"
+    },
+    {
+      "candidate_id": "candidate_3_load_sensitive_anisotropic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_3_load_sensitive_anisotropic:trial_021"
+    },
+    {
+      "candidate_id": "candidate_3_load_sensitive_anisotropic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_3_load_sensitive_anisotropic:trial_022"
+    },
+    {
+      "candidate_id": "candidate_3_load_sensitive_anisotropic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_3_load_sensitive_anisotropic:trial_023"
+    },
+    {
+      "candidate_id": "candidate_3_load_sensitive_anisotropic",
+      "sample_count": 0,
+      "selection_score": "inf",
+      "trial_id": "candidate_3_load_sensitive_anisotropic:trial_024"
+    }
+  ],
+  "uses_logged_ukf_state": false
+}

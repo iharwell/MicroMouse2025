@@ -1,0 +1,14 @@
+{
+  "candidate_id": "candidate_1_algebraic_envelope",
+  "covariance_policy": "fixed_testbed_estimator_covariance_not_tuned",
+  "is_nominal": false,
+  "parameters": {
+    "combined_slip_envelope_exponent": 3.6347826086956516,
+    "lateral_slip_gain_n_per_mps": 39.69109366745823,
+    "longitudinal_slip_gain_n_per_mps": 34.711906407682406,
+    "low_speed_blend_mps": 0.17652173913043478,
+    "peak_friction_coefficient_at_80pct_fan": 2.243478260869565
+  },
+  "schema_version": 1,
+  "trial_id": "candidate_1_algebraic_envelope:trial_021"
+}

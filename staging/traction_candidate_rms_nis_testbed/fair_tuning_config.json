@@ -1,0 +1,211 @@
+{
+  "schema_version": 1,
+  "description": "Fair corrected-testbed tuning run: whole source-log held-out first, active traction and yaw calibration metrics first, fixed covariance, and full-row residual tail as diagnostic only.",
+  "manifest_path": "../traction_candidate_rms_nis_segments/segment_manifest.json",
+  "split": {
+    "strategy": "source_log_heldout_then_whole_segment",
+    "seed": "traction_fair_tuning_v1",
+    "train": 0.6,
+    "validation": 0.2,
+    "held_out": 0.2
+  },
+  "tuning": {
+    "seed": "traction_fair_tuning_v1",
+    "trial_count_per_candidate": 128,
+    "include_nominal_trial": true,
+    "train_segments": 240,
+    "validation_segments": 160,
+    "validation_top_k_per_candidate": 12,
+    "launch_subset_fraction": 0.65,
+    "tuning_max_rows_per_segment": 0,
+    "final_max_rows_per_segment": 0
+  },
+  "scoring": {
+    "selection_split": "validation",
+    "launch_weight": 1.0,
+    "inflation_floor_ratio": 0.75,
+    "under_expected_penalty_weight": 1.0,
+    "inflation_floor_penalty_weight": 1.0,
+    "stress_max_rows_per_segment": 0,
+    "primary_metrics": {
+      "metric_scope": "active",
+      "row_weighted": false,
+      "weights": {
+        "launch_active_pulse": 1.0,
+        "yaw_launch": 1.0,
+        "yaw_calibration": 1.0,
+        "mixed_launch": 1.0,
+        "straight_active": 1.0,
+        "smooth_turn_active": 1.0
+      }
+    },
+    "bootstrap": {
+      "iterations": 500,
+      "split": "held_out"
+    },
+    "log_fields": {
+      "left_encoder_wheel_rate_residual_tail": {
+        "dimension": 1,
+        "weight": 1.0
+      },
+      "right_encoder_wheel_rate_residual_tail": {
+        "dimension": 1,
+        "weight": 1.0
+      },
+      "yaw_rate_residual_tail": {
+        "dimension": 1,
+        "weight": 1.0
+      },
+      "forward_accel_residual_tail": {
+        "dimension": 1,
+        "weight": 1.0
+      },
+      "right_accel_residual_tail": {
+        "dimension": 1,
+        "weight": 1.0
+      }
+    }
+  },
+  "candidates": [
+    {
+      "id": "baseline/current_holdover",
+      "label": "Baseline/current holdover",
+      "model": "current_holdover_approximation",
+      "enabled": true,
+      "parameters": {},
+      "search": {}
+    },
+    {
+      "id": "candidate_1_algebraic_envelope",
+      "label": "Candidate 1 algebraic envelope",
+      "model": "algebraic_envelope",
+      "enabled": true,
+      "parameters": {
+        "peak_friction_coefficient_at_80pct_fan": 1.68,
+        "longitudinal_slip_gain_n_per_mps": 18.0,
+        "lateral_slip_gain_n_per_mps": 18.0,
+        "combined_slip_envelope_exponent": 2.0,
+        "low_speed_blend_mps": 0.08
+      },
+      "search": {
+        "peak_friction_coefficient_at_80pct_fan": {
+          "min": 1.1,
+          "max": 3.1,
+          "scale": "linear"
+        },
+        "longitudinal_slip_gain_n_per_mps": {
+          "min": 3.0,
+          "max": 96.0,
+          "scale": "log"
+        },
+        "lateral_slip_gain_n_per_mps": {
+          "min": 3.0,
+          "max": 96.0,
+          "scale": "log"
+        },
+        "combined_slip_envelope_exponent": {
+          "min": 1.05,
+          "max": 5.5,
+          "scale": "linear"
+        },
+        "low_speed_blend_mps": {
+          "min": 0.01,
+          "max": 0.35,
+          "scale": "linear"
+        }
+      }
+    },
+    {
+      "id": "candidate_2_stribeck",
+      "label": "Candidate 2 Stribeck",
+      "model": "stribeck_algebraic",
+      "enabled": true,
+      "parameters": {
+        "peak_friction_coefficient_at_80pct_fan": 1.72,
+        "dynamic_to_static_grip_ratio": 0.82,
+        "stribeck_velocity_mps": 0.16,
+        "viscous_slip_damping_n_per_mps": 2.0,
+        "low_speed_blend_mps": 0.06
+      },
+      "search": {
+        "peak_friction_coefficient_at_80pct_fan": {
+          "min": 1.1,
+          "max": 3.2,
+          "scale": "linear"
+        },
+        "dynamic_to_static_grip_ratio": {
+          "min": 0.45,
+          "max": 1.0,
+          "scale": "linear"
+        },
+        "stribeck_velocity_mps": {
+          "min": 0.01,
+          "max": 0.8,
+          "scale": "log"
+        },
+        "viscous_slip_damping_n_per_mps": {
+          "min": 0.0,
+          "max": 24.0,
+          "scale": "linear"
+        },
+        "low_speed_blend_mps": {
+          "min": 0.01,
+          "max": 0.35,
+          "scale": "linear"
+        }
+      }
+    },
+    {
+      "id": "candidate_3_load_sensitive",
+      "label": "Candidate 3 load-sensitive",
+      "model": "load_sensitive_anisotropic",
+      "enabled": true,
+      "parameters": {
+        "peak_friction_coefficient_at_80pct_fan": 1.78,
+        "longitudinal_slip_gain_n_per_mps": 22.0,
+        "lateral_slip_gain_n_per_mps": 16.0,
+        "longitudinal_load_sensitivity": 0.18,
+        "lateral_load_sensitivity": 0.26,
+        "yaw_coupling_gain": 0.12,
+        "low_speed_blend_mps": 0.05
+      },
+      "search": {
+        "peak_friction_coefficient_at_80pct_fan": {
+          "min": 1.1,
+          "max": 3.2,
+          "scale": "linear"
+        },
+        "longitudinal_slip_gain_n_per_mps": {
+          "min": 2.0,
+          "max": 128.0,
+          "scale": "log"
+        },
+        "lateral_slip_gain_n_per_mps": {
+          "min": 1.5,
+          "max": 128.0,
+          "scale": "log"
+        },
+        "longitudinal_load_sensitivity": {
+          "min": -0.6,
+          "max": 0.8,
+          "scale": "linear"
+        },
+        "lateral_load_sensitivity": {
+          "min": -0.5,
+          "max": 1.1,
+          "scale": "linear"
+        },
+        "yaw_coupling_gain": {
+          "min": -0.7,
+          "max": 0.7,
+          "scale": "linear"
+        },
+        "low_speed_blend_mps": {
+          "min": 0.01,
+          "max": 0.35,
+          "scale": "linear"
+        }
+      }
+    }
+  ]
+}

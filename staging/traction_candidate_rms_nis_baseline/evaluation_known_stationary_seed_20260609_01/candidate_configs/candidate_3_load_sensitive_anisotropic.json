@@ -1,0 +1,53 @@
+{
+  "candidate_id": "candidate_3_load_sensitive_anisotropic",
+  "covariance_policy": "fixed_production_estimator_covariance",
+  "label": "Candidate 3 load-sensitive anisotropic refinement",
+  "model": "load_sensitive_anisotropic",
+  "parameters": {
+    "lateral_load_sensitivity": 0.26,
+    "lateral_slip_gain_n_per_mps": 16.0,
+    "longitudinal_load_sensitivity": 0.18,
+    "longitudinal_slip_gain_n_per_mps": 22.0,
+    "low_speed_blend_mps": 0.05,
+    "peak_friction_coefficient_at_80pct_fan": 1.78,
+    "yaw_coupling_gain": 0.12
+  },
+  "schema_version": 1,
+  "search": {
+    "lateral_load_sensitivity": {
+      "max": 0.65,
+      "min": -0.25,
+      "scale": "linear"
+    },
+    "lateral_slip_gain_n_per_mps": {
+      "max": 64.0,
+      "min": 4.0,
+      "scale": "log"
+    },
+    "longitudinal_load_sensitivity": {
+      "max": 0.55,
+      "min": -0.25,
+      "scale": "linear"
+    },
+    "longitudinal_slip_gain_n_per_mps": {
+      "max": 64.0,
+      "min": 4.0,
+      "scale": "log"
+    },
+    "low_speed_blend_mps": {
+      "max": 0.2,
+      "min": 0.02,
+      "scale": "linear"
+    },
+    "peak_friction_coefficient_at_80pct_fan": {
+      "max": 2.6,
+      "min": 1.2,
+      "scale": "linear"
+    },
+    "yaw_coupling_gain": {
+      "max": 0.35,
+      "min": -0.35,
+      "scale": "linear"
+    }
+  }
+}

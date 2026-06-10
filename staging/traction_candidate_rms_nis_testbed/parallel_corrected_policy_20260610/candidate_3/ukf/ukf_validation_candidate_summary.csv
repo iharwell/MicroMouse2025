@@ -1,0 +1,2 @@
+candidate_id,status,segments,samples,sigma_points,finite_failures,continuity_failures,covariance_failures,innovation_failures,zero_crossing_events,zero_crossing_failures,max_abs_state,max_abs_prediction,max_state_sigma_span,max_measurement_sigma_span,max_covariance_trace,max_innovation_nis,issue_count
+candidate_3_load_sensitive,pass,562,261616,4970704,0,0,0,0,370229,0,41.1812877549,1218.00630446,11.9156584971,55.7746988413,16.1754199024,2322.26377387,0

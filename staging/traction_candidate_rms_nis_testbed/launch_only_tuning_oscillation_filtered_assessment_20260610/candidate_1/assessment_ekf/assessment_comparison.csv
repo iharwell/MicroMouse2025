@@ -1,0 +1,4 @@
+"artifact","manifest","candidate_id","segments","rms_nis","sqrt_mean_nis","rejected_rate","notes"
+"current_launch_only_tuned_candidate_1","oscillation_filtered_assessment_manifest","candidate_1_algebraic_envelope","658","127.082753802","4.1475364975","0.0293271036502","same assessment run"
+"same_manifest_baseline_current_holdover","oscillation_filtered_assessment_manifest","baseline/current_holdover","658","128.714639553","4.86496493002","0.0385293827766","same assessment run"
+"historical_previous_candidate_1","parallel_corrected_policy_20260610","candidate_1_algebraic_envelope","562","709.549965264","10.1059881819","0.0509135526879","different earlier 562-segment manifest"

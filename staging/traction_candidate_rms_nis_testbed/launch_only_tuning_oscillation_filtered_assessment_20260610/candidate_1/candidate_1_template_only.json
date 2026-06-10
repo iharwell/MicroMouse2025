@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "description": "Candidate 1 only standalone traction RMS/NIS testbed candidate defaults. Not production configuration.",
+  "candidates": [
+    {
+      "id": "candidate_1_algebraic_envelope",
+      "label": "Candidate 1 algebraic envelope",
+      "model": "algebraic_envelope",
+      "enabled": true,
+      "parameters": {
+        "peak_friction_coefficient_at_80pct_fan": 1.68,
+        "longitudinal_slip_gain_n_per_mps": 18.0,
+        "lateral_slip_gain_n_per_mps": 18.0,
+        "combined_slip_envelope_exponent": 2.0,
+        "low_speed_blend_mps": 0.08
+      }
+    }
+  ]
+}

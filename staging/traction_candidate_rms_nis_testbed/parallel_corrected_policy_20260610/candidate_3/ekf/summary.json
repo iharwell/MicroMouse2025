@@ -1,0 +1,55 @@
+{
+  "aggregate_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\parallel_corrected_policy_20260610\\candidate_3\\ekf\\nis_aggregates.csv",
+  "bias_segment_manifest": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\representative_corpus\\segment_manifest.json",
+  "bias_summary_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\parallel_corrected_policy_20260610\\candidate_3\\ekf\\bias_summary.csv",
+  "candidate_rms_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\parallel_corrected_policy_20260610\\candidate_3\\ekf\\candidate_rms_nis.csv",
+  "candidates": {
+    "candidate_3_load_sensitive": {
+      "accepted_count": 1250271,
+      "accepted_only_rms_nis": 690.9523116707086,
+      "accepted_only_sqrt_mean_nis": 9.191716636165506,
+      "finite_count": 1308080,
+      "nis_count": 1308080,
+      "nonfinite_count": 0,
+      "rejected_count": 57809,
+      "rejected_rate": 0.04419378019692985,
+      "rejected_rate_penalty": 0.0883875603938597,
+      "residual_rms": {
+        "forward_accel_mps2": 7.413048041993571,
+        "left_encoder_wheel_rate_radps": 12.795161863720729,
+        "right_accel_mps2": 8.52095259059538,
+        "right_encoder_wheel_rate_radps": 13.255919210420327,
+        "yaw_accel_radps2": 151.2732082438544,
+        "yaw_rate_radps": 0.3802477367677839
+      },
+      "rms_nis": 683.4471769879367,
+      "segment_count": 562,
+      "sqrt_mean_nis": 9.751100812016112
+    }
+  },
+  "diagnostics_csv": null,
+  "itemized_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\parallel_corrected_policy_20260610\\candidate_3\\ekf\\itemized_rms_nis.csv",
+  "jobs_requested": 8,
+  "jobs_used": 8,
+  "nis_csv": null,
+  "processed_samples": 261616,
+  "processed_segments": 562,
+  "replay_mode": "ekf",
+  "report_md": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\parallel_corrected_policy_20260610\\candidate_3\\ekf\\report.md",
+  "row_artifacts_enabled": false,
+  "schema_version": 1,
+  "skipped_corrupted_segments": 0,
+  "source_log_count": 8,
+  "state_names": [
+    "px_m",
+    "py_m",
+    "heading_rad",
+    "vf_mps",
+    "vr_mps",
+    "yaw_rate_radps",
+    "delta_af_mps2",
+    "delta_ar_mps2",
+    "delta_yaw_accel_radps2"
+  ],
+  "uses_logged_ukf_state": false
+}

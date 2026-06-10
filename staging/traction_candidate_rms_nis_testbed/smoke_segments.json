@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "description": "Smoke manifest for the standalone host-only traction RMS/NIS testbed.",
+  "segments": [
+    {
+      "segment_id": "smoke_segment_001",
+      "split": "train",
+      "stage": "smoke",
+      "log_id": "smoke",
+      "log_path": "staging/traction_candidate_rms_nis_testbed/smoke_sensor_log.csv",
+      "segment_start_row_index": 0,
+      "segment_end_row_index": 4,
+      "corrupted": false
+    }
+  ]
+}

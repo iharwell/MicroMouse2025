@@ -1,0 +1,14 @@
+{
+  "candidate_id": "candidate_1_algebraic_envelope",
+  "covariance_policy": "fixed_testbed_estimator_covariance_not_tuned",
+  "is_nominal": true,
+  "parameters": {
+    "combined_slip_envelope_exponent": 2.0,
+    "lateral_slip_gain_n_per_mps": 18.0,
+    "longitudinal_slip_gain_n_per_mps": 18.0,
+    "low_speed_blend_mps": 0.08,
+    "peak_friction_coefficient_at_80pct_fan": 1.68
+  },
+  "schema_version": 1,
+  "trial_id": "candidate_1_algebraic_envelope:nominal"
+}

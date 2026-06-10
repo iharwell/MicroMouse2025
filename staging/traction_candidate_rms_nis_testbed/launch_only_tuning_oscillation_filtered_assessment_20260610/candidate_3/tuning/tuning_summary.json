@@ -1,0 +1,175 @@
+{
+  "active_metric_weights": {
+    "launch_active_pulse": 1.0,
+    "mixed_launch": 1.0,
+    "yaw_launch": 1.0
+  },
+  "bootstrap_rows": [
+    {
+      "baseline_candidate_id": "baseline/current_holdover",
+      "baseline_trial_id": "baseline/current_holdover:fixed",
+      "bootstrap_iterations": 500,
+      "candidate_id": "candidate_3_load_sensitive",
+      "ci_high": -31550.007754154365,
+      "ci_low": -31550.007754154365,
+      "observed_delta_vs_baseline": -31550.007754154365,
+      "probability_candidate_better": 1.0,
+      "source_log_count": 1,
+      "split": "held_out",
+      "trial_id": "candidate_3_load_sensitive:trial_133"
+    }
+  ],
+  "boundary_policy": "primary_active_rows_before_explicit_corruption_boundaries_are_valid",
+  "candidate_count": 2,
+  "candidate_specific_covariance_or_noise": false,
+  "config_path": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\launch_only_tuning_oscillation_filtered_assessment_20260610\\candidate_3\\candidate_3_launch_only_tuning_config.json",
+  "covariance_path": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\covariance_conservative.json",
+  "covariance_policy": "fixed_testbed_covariance_not_tuned",
+  "final_samples_per_candidate": 265667,
+  "final_segments": 638,
+  "final_selected_candidate_count": 2,
+  "fixed_noise_schedule_path": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\covariance_conservative.json",
+  "limits": {
+    "final_max_rows_per_segment": 0,
+    "final_max_segments": 0,
+    "launch_weight": 1.0,
+    "stress_max_rows_per_segment": 0,
+    "train_subset_target": 240,
+    "trial_count_per_candidate": 192,
+    "tuning_max_rows_per_segment": 0,
+    "validation_subset_target": 160,
+    "validation_top_k_per_candidate": 12
+  },
+  "manifest_path": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\launch_only_tuning_oscillation_filtered_assessment_20260610\\launch_only_tuning_manifest.json",
+  "primary_metric_policy": "metric_balanced_active_traction_yaw_and_encoder_all_finite_nis_first",
+  "primary_metric_scope": "active_traction_rows",
+  "primary_metric_scope_config": "active",
+  "primary_row_weighted_selection": false,
+  "production_or_hardware_hooks": false,
+  "replay_mode": "aggregate_only_residual_tail",
+  "sample_source_cache": {
+    "cache_hits": 358,
+    "cache_misses": 638,
+    "cached_samples": 265667,
+    "cached_segments": 638,
+    "loaded_samples": 595922,
+    "source_log_files_read": 26,
+    "source_log_indexed_rows": 1239478,
+    "source_log_indexes_built": 7,
+    "source_log_scan_batches": 4,
+    "streamed_uncached_segments": 638
+  },
+  "schema_version": 1,
+  "selected_trials": [
+    {
+      "candidate_id": "baseline/current_holdover",
+      "parameters": {
+        "combined_slip_envelope_exponent": 2.0,
+        "lateral_slip_gain_n_per_mps": 16.0,
+        "longitudinal_slip_gain_n_per_mps": 16.0,
+        "low_speed_blend_mps": 0.07,
+        "peak_friction_coefficient_at_80pct_fan": 1.65
+      },
+      "train_score": 1156756.5434749185,
+      "trial_id": "baseline/current_holdover:fixed",
+      "validation_score": 1080387.558609372
+    },
+    {
+      "candidate_id": "candidate_3_load_sensitive",
+      "parameters": {
+        "lateral_load_sensitivity": 0.327290064992592,
+        "lateral_slip_gain_n_per_mps": 24.695725146213764,
+        "longitudinal_load_sensitivity": 0.2980636468680996,
+        "longitudinal_slip_gain_n_per_mps": 25.560975712043764,
+        "low_speed_blend_mps": 0.026906575566924003,
+        "peak_friction_coefficient_at_80pct_fan": 2.8951939005588283,
+        "yaw_coupling_gain": 0.07967341087798074
+      },
+      "train_score": 112.9485637798743,
+      "trial_id": "candidate_3_load_sensitive:trial_133",
+      "validation_score": 172.53645349530473
+    }
+  ],
+  "source_log_count": 7,
+  "split_counts": [
+    {
+      "family": "launch",
+      "segments": 18,
+      "split": "held_out",
+      "stage": "launch",
+      "total_rows": 4500
+    },
+    {
+      "family": "launch",
+      "segments": 110,
+      "split": "held_out",
+      "stage": "yaw_launch",
+      "total_rows": 27500
+    },
+    {
+      "family": "launch",
+      "segments": 162,
+      "split": "train",
+      "stage": "SEC_20_LAUNCH",
+      "total_rows": 40231
+    },
+    {
+      "family": "launch",
+      "segments": 42,
+      "split": "train",
+      "stage": "launch",
+      "total_rows": 15590
+    },
+    {
+      "family": "launch",
+      "segments": 90,
+      "split": "train",
+      "stage": "mixed_launch",
+      "total_rows": 58691
+    },
+    {
+      "family": "launch",
+      "segments": 98,
+      "split": "train",
+      "stage": "yaw_launch",
+      "total_rows": 116139
+    },
+    {
+      "family": "launch",
+      "segments": 48,
+      "split": "validation",
+      "stage": "SEC_20_LAUNCH",
+      "total_rows": 11936
+    },
+    {
+      "family": "launch",
+      "segments": 12,
+      "split": "validation",
+      "stage": "launch",
+      "total_rows": 6110
+    },
+    {
+      "family": "launch",
+      "segments": 30,
+      "split": "validation",
+      "stage": "mixed_launch",
+      "total_rows": 18572
+    },
+    {
+      "family": "launch",
+      "segments": 28,
+      "split": "validation",
+      "stage": "yaw_launch",
+      "total_rows": 30986
+    }
+  ],
+  "stress_metric_policy": "full_row_weighted_residual_tail_diagnostic_only",
+  "stress_samples_per_candidate": 330255,
+  "stress_segments": 638,
+  "train_subset_boundary_ended_segments": 0,
+  "train_subset_segments": 240,
+  "trial_count": 194,
+  "uses_logged_ukf_state": false,
+  "validation_subset_boundary_ended_segments": 0,
+  "validation_subset_segments": 118
+}

@@ -1,0 +1,211 @@
+{
+  "schema_version": 1,
+  "run_dir": "staging\\traction_candidate_rms_nis_testbed\\launch_only_tuning_oscillation_filtered_assessment_20260610",
+  "base_manifest": "staging\\traction_candidate_rms_nis_testbed\\parallel_replace_20260420_102209_20260610\\active_ekf_replace_20260420_102209_with_20260610_070622_manifest.json",
+  "launch_only_tuning_manifest": "staging\\traction_candidate_rms_nis_testbed\\launch_only_tuning_oscillation_filtered_assessment_20260610\\launch_only_tuning_manifest.json",
+  "oscillation_filtered_assessment_manifest": "staging\\traction_candidate_rms_nis_testbed\\launch_only_tuning_oscillation_filtered_assessment_20260610\\oscillation_filtered_assessment_manifest.json",
+  "bias_source_manifest": "staging\\traction_candidate_rms_nis_testbed\\representative_corpus\\segment_manifest.json",
+  "fixed_covariance_config": "staging\\traction_candidate_rms_nis_testbed\\covariance_conservative.json",
+  "candidate_config_template": "staging\\traction_candidate_rms_nis_testbed\\launch_only_tuning_oscillation_filtered_assessment_20260610\\candidate_config_template.json",
+  "launch_only_tuning_config": "staging\\traction_candidate_rms_nis_testbed\\launch_only_tuning_oscillation_filtered_assessment_20260610\\launch_only_tuning_config.json",
+  "oscillation_filtered_assessment_config": "staging\\traction_candidate_rms_nis_testbed\\launch_only_tuning_oscillation_filtered_assessment_20260610\\oscillation_filtered_assessment_config.json",
+  "source_segment_count": 661,
+  "launch_only_segment_count": 638,
+  "assessment_segment_count": 658,
+  "excluded_segment_count": 3,
+  "excluded_segments": [
+    {
+      "segment_id": "ofnis_001718",
+      "log_id": "mmlog_decode_2026-06-08_23-37-25",
+      "section_name": "SEC_50_SMOOTH",
+      "stage": "smooth",
+      "segment_row_count": 4244,
+      "segment_duration_s": 4.243,
+      "observed_command_pair_mode": "1/-1",
+      "observed_command_magnitude_median": 1.0,
+      "cmd_linear_mps_median": 0.4000000059604645,
+      "cmd_yaw_radps_median": 0.0,
+      "baseline_max_encoder_physical_residual_rms": 12.3804242442,
+      "baseline_max_encoder_rms_nis": 205.88704861,
+      "baseline_yaw_rate_rms_nis": 1522.12821146,
+      "rationale": "SEC_50_SMOOTH segment with near-continuous alternating full opposed drive commands while logged commanded yaw median is zero; prior EKF artifacts show severe yaw/accel residual response."
+    },
+    {
+      "segment_id": "ofnis_001154",
+      "log_id": "mmlog_decode_2026-04-20_04-54-09",
+      "section_name": "SEC_40_YAW",
+      "stage": "SEC_40_YAW",
+      "segment_row_count": 2429,
+      "segment_duration_s": 2.428,
+      "observed_command_pair_mode": "-1/1",
+      "observed_command_magnitude_median": 0.657667,
+      "cmd_linear_mps_median": 0.0,
+      "cmd_yaw_radps_median": 0.0,
+      "baseline_max_encoder_physical_residual_rms": 68.5998997812,
+      "baseline_max_encoder_rms_nis": 5783.8969497,
+      "baseline_yaw_rate_rms_nis": 877.235402164,
+      "rationale": "Pure SEC_40_YAW segment with saturated opposed drive mode while logged commanded yaw median is zero; prior EKF artifacts show huge encoder residual/NIS and yaw-rate NIS."
+    },
+    {
+      "segment_id": "ofnis_001066",
+      "log_id": "mmlog_decode_2026-04-15_02-09-58",
+      "section_name": "SEC_50_SMOOTH",
+      "stage": "SEC_50_SMOOTH",
+      "segment_row_count": 220,
+      "segment_duration_s": 0.219,
+      "observed_command_pair_mode": "0/0",
+      "observed_command_magnitude_median": 0.2000185,
+      "cmd_linear_mps_median": 0.4000000059604645,
+      "cmd_yaw_radps_median": -12.962420463562012,
+      "baseline_max_encoder_physical_residual_rms": 48.5744765033,
+      "baseline_max_encoder_rms_nis": 2818.71920488,
+      "baseline_yaw_rate_rms_nis": 1078.03913549,
+      "rationale": "Short SEC_50_SMOOTH segment with large commanded yaw but zero/zero command-pair mode and huge encoder/yaw NIS in prior EKF artifacts."
+    }
+  ],
+  "newest_launch_coverage": [
+    {
+      "log_id": "mmlog_decode_2026-06-09_23-36-21",
+      "launch_segments": 100,
+      "stages": "launch:18; mixed_launch:40; yaw_launch:42",
+      "sections": "SEC_20_LAUNCH:18; SEC_20_MIXED_LAUNCH:40; SEC_20_YAW_LAUNCH:42",
+      "command_magnitude_min": 0.25,
+      "command_magnitude_max": 0.8,
+      "distinct_command_magnitudes": "0.25;0.3;0.35;0.4;0.5;0.55;0.6;0.65;0.7;0.75;0.8",
+      "distinct_command_pair_modes": "-0.25/-0.25;-0.3/-0.3;-0.3/-0.4;-0.3/-0.5;-0.3/-0.6;-0.35/-0.35;-0.4/-0.3;-0.5/-0.3;-0.5/0.5;-0.55/0.55;-0.6/0.6;-0.65/0.65;-0.7/0.7;-0.75/0.75;-0.8/0.8;0.25/0.25;0.3/0.3;0.3/0.4;0.3/0.5;0.3/0.6;0.35/0.35;0.4/0.3;0.5/-0.5;0.5/0.3;0.55/-0.55;0.6/-0.6;0.65/-0.65;0.7/-0.7;0.75/-0.75;0.8/-0.8"
+    },
+    {
+      "log_id": "mmlog_decode_2026-06-10_07-06-22",
+      "launch_segments": 100,
+      "stages": "launch:18; mixed_launch:40; yaw_launch:42",
+      "sections": "SEC_20_LAUNCH:18; SEC_20_MIXED_LAUNCH:40; SEC_20_YAW_LAUNCH:42",
+      "command_magnitude_min": 0.25,
+      "command_magnitude_max": 0.8,
+      "distinct_command_magnitudes": "0.25;0.3;0.35;0.4;0.5;0.55;0.6;0.65;0.7;0.75;0.8",
+      "distinct_command_pair_modes": "-0.25/-0.25;-0.3/-0.3;-0.3/-0.4;-0.3/-0.5;-0.3/-0.6;-0.35/-0.35;-0.4/-0.3;-0.5/-0.3;-0.5/0.5;-0.55/0.55;-0.6/0.6;-0.65/0.65;-0.7/0.7;-0.75/0.75;-0.8/0.8;0.25/0.25;0.3/0.3;0.3/0.4;0.3/0.5;0.3/0.6;0.35/0.35;0.4/0.3;0.5/-0.5;0.5/0.3;0.55/-0.55;0.6/-0.6;0.65/-0.65;0.7/-0.7;0.75/-0.75;0.8/-0.8"
+    }
+  ],
+  "launch_counts_by_section_stage": [
+    {
+      "section_name": "SEC_20_LAUNCH",
+      "stage": "launch",
+      "count": 72
+    },
+    {
+      "section_name": "SEC_20_LAUNCH",
+      "stage": "SEC_20_LAUNCH",
+      "count": 210
+    },
+    {
+      "section_name": "SEC_20_MIXED_LAUNCH",
+      "stage": "mixed_launch",
+      "count": 120
+    },
+    {
+      "section_name": "SEC_20_YAW_LAUNCH",
+      "stage": "yaw_launch",
+      "count": 236
+    }
+  ],
+  "assessment_counts_by_section_stage": [
+    {
+      "section_name": "SEC_20_LAUNCH",
+      "stage": "launch",
+      "count": 72
+    },
+    {
+      "section_name": "SEC_20_LAUNCH",
+      "stage": "SEC_20_LAUNCH",
+      "count": 210
+    },
+    {
+      "section_name": "SEC_20_MIXED_LAUNCH",
+      "stage": "mixed_launch",
+      "count": 120
+    },
+    {
+      "section_name": "SEC_20_YAW_LAUNCH",
+      "stage": "yaw_launch",
+      "count": 236
+    },
+    {
+      "section_name": "SEC_30_STRAIGHT",
+      "stage": "SEC_30_STRAIGHT",
+      "count": 18
+    },
+    {
+      "section_name": "SEC_30_STRAIGHT",
+      "stage": "straight",
+      "count": 1
+    },
+    {
+      "section_name": "SEC_40_YAW",
+      "stage": "SEC_40_YAW",
+      "count": 1
+    }
+  ],
+  "launch_counts_by_log": [
+    {
+      "log_id": "mmlog_decode_2026-04-10_18-33-52",
+      "count": 90
+    },
+    {
+      "log_id": "mmlog_decode_2026-04-15_02-09-58",
+      "count": 60
+    },
+    {
+      "log_id": "mmlog_decode_2026-04-20_04-54-09",
+      "count": 60
+    },
+    {
+      "log_id": "mmlog_decode_2026-05-04_16-57-53",
+      "count": 128
+    },
+    {
+      "log_id": "mmlog_decode_2026-06-08_23-37-25",
+      "count": 100
+    },
+    {
+      "log_id": "mmlog_decode_2026-06-09_23-36-21",
+      "count": 100
+    },
+    {
+      "log_id": "mmlog_decode_2026-06-10_07-06-22",
+      "count": 100
+    }
+  ],
+  "assessment_counts_by_log": [
+    {
+      "log_id": "mmlog_decode_2026-04-10_18-33-52",
+      "count": 90
+    },
+    {
+      "log_id": "mmlog_decode_2026-04-15_02-09-58",
+      "count": 78
+    },
+    {
+      "log_id": "mmlog_decode_2026-04-20_04-54-09",
+      "count": 60
+    },
+    {
+      "log_id": "mmlog_decode_2026-04-22_12-10-34",
+      "count": 1
+    },
+    {
+      "log_id": "mmlog_decode_2026-05-04_16-57-53",
+      "count": 128
+    },
+    {
+      "log_id": "mmlog_decode_2026-06-08_23-37-25",
+      "count": 100
+    },
+    {
+      "log_id": "mmlog_decode_2026-06-09_23-36-21",
+      "count": 101
+    },
+    {
+      "log_id": "mmlog_decode_2026-06-10_07-06-22",
+      "count": 100
+    }
+  ]
+}

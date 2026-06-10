@@ -1,0 +1,182 @@
+{
+  "schema_version": 1,
+  "manifest_path": "manifest.example.json",
+  "split": {
+    "strategy": "stable_hash_by_segment_id",
+    "seed": "traction_candidate_rms_nis_eval_v1",
+    "train": 0.6,
+    "validation": 0.2,
+    "held_out": 0.2
+  },
+  "scoring": {
+    "selection_split": "validation",
+    "inflation_floor_ratio": 0.75,
+    "log_parameters": {
+      "yaw_rate_nis": {
+        "dimension": 1,
+        "weight": 1.0
+      },
+      "forward_accel_nis": {
+        "dimension": 1,
+        "weight": 1.0
+      },
+      "right_accel_nis": {
+        "dimension": 1,
+        "weight": 1.0
+      }
+    }
+  },
+  "replay": {
+    "candidate_hook_available": false,
+    "required_runner": "tooling/run_open_floor_ukf_replay.ps1",
+    "intended_release_executable": "Tools/OpenFloorUkfReplay/x64/Release/OpenFloorUkfReplay.exe",
+    "intended_options": [
+      "--plant-candidate-config",
+      "{candidate_config}",
+      "--nis-csv",
+      "{nis_csv}"
+    ]
+  },
+  "candidates": [
+    {
+      "id": "baseline_holdover",
+      "label": "Current holdover baseline",
+      "model": "current_plantmodel",
+      "enabled": true,
+      "parameters": {},
+      "search": {}
+    },
+    {
+      "id": "candidate_1_algebraic_envelope",
+      "label": "Candidate 1 algebraic envelope",
+      "model": "algebraic_envelope",
+      "enabled": true,
+      "parameters": {
+        "peak_friction_coefficient_at_80pct_fan": 1.68,
+        "longitudinal_slip_gain_n_per_mps": 18.0,
+        "lateral_slip_gain_n_per_mps": 18.0,
+        "combined_slip_envelope_exponent": 2.0,
+        "low_speed_blend_mps": 0.08
+      },
+      "search": {
+        "peak_friction_coefficient_at_80pct_fan": {
+          "min": 1.2,
+          "max": 2.4,
+          "scale": "linear"
+        },
+        "longitudinal_slip_gain_n_per_mps": {
+          "min": 4.0,
+          "max": 48.0,
+          "scale": "log"
+        },
+        "lateral_slip_gain_n_per_mps": {
+          "min": 4.0,
+          "max": 56.0,
+          "scale": "log"
+        },
+        "combined_slip_envelope_exponent": {
+          "min": 1.2,
+          "max": 4.0,
+          "scale": "linear"
+        },
+        "low_speed_blend_mps": {
+          "min": 0.02,
+          "max": 0.20,
+          "scale": "linear"
+        }
+      }
+    },
+    {
+      "id": "candidate_2_stribeck_algebraic",
+      "label": "Candidate 2 Stribeck algebraic variant",
+      "model": "stribeck_algebraic",
+      "enabled": true,
+      "parameters": {
+        "peak_friction_coefficient_at_80pct_fan": 1.72,
+        "dynamic_to_static_grip_ratio": 0.82,
+        "stribeck_velocity_mps": 0.16,
+        "viscous_slip_damping_n_per_mps": 2.0,
+        "low_speed_blend_mps": 0.06
+      },
+      "search": {
+        "peak_friction_coefficient_at_80pct_fan": {
+          "min": 1.2,
+          "max": 2.5,
+          "scale": "linear"
+        },
+        "dynamic_to_static_grip_ratio": {
+          "min": 0.55,
+          "max": 0.98,
+          "scale": "linear"
+        },
+        "stribeck_velocity_mps": {
+          "min": 0.03,
+          "max": 0.45,
+          "scale": "log"
+        },
+        "viscous_slip_damping_n_per_mps": {
+          "min": 0.0,
+          "max": 12.0,
+          "scale": "linear"
+        },
+        "low_speed_blend_mps": {
+          "min": 0.02,
+          "max": 0.20,
+          "scale": "linear"
+        }
+      }
+    },
+    {
+      "id": "candidate_3_load_sensitive_anisotropic",
+      "label": "Candidate 3 load-sensitive anisotropic refinement",
+      "model": "load_sensitive_anisotropic",
+      "enabled": true,
+      "parameters": {
+        "peak_friction_coefficient_at_80pct_fan": 1.78,
+        "longitudinal_slip_gain_n_per_mps": 22.0,
+        "lateral_slip_gain_n_per_mps": 16.0,
+        "longitudinal_load_sensitivity": 0.18,
+        "lateral_load_sensitivity": 0.26,
+        "yaw_coupling_gain": 0.12,
+        "low_speed_blend_mps": 0.05
+      },
+      "search": {
+        "peak_friction_coefficient_at_80pct_fan": {
+          "min": 1.2,
+          "max": 2.6,
+          "scale": "linear"
+        },
+        "longitudinal_slip_gain_n_per_mps": {
+          "min": 4.0,
+          "max": 64.0,
+          "scale": "log"
+        },
+        "lateral_slip_gain_n_per_mps": {
+          "min": 4.0,
+          "max": 64.0,
+          "scale": "log"
+        },
+        "longitudinal_load_sensitivity": {
+          "min": -0.25,
+          "max": 0.55,
+          "scale": "linear"
+        },
+        "lateral_load_sensitivity": {
+          "min": -0.25,
+          "max": 0.65,
+          "scale": "linear"
+        },
+        "yaw_coupling_gain": {
+          "min": -0.35,
+          "max": 0.35,
+          "scale": "linear"
+        },
+        "low_speed_blend_mps": {
+          "min": 0.02,
+          "max": 0.20,
+          "scale": "linear"
+        }
+      }
+    }
+  ]
+}
