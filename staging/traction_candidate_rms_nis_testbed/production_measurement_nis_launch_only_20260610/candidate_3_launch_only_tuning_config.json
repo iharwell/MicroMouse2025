@@ -1,0 +1,125 @@
+{
+  "schema_version": 1,
+  "description": "Launch-only traction candidate tuning template generated from the 2026-06-10 replacement manifest. Uses fixed covariance/noise, production measurement residual-tail score keys, and the unchanged representative-corpus bias manifest. Candidate-3-only process-local target selection.",
+  "manifest_path": "..\\launch_only_tuning_oscillation_filtered_assessment_20260610\\launch_only_tuning_manifest.json",
+  "split": {
+    "strategy": "source_log_heldout_then_whole_segment",
+    "seed": "traction_fair_tuning_v1",
+    "train": 0.6,
+    "validation": 0.2,
+    "held_out": 0.2
+  },
+  "tuning": {
+    "seed": "launch_only_tuning_oscillation_filtered_assessment_20260610",
+    "trial_count_per_candidate": 192,
+    "include_nominal_trial": true,
+    "train_segments": 240,
+    "validation_segments": 160,
+    "validation_top_k_per_candidate": 12,
+    "launch_subset_fraction": 1.0,
+    "tuning_max_rows_per_segment": 0,
+    "final_max_rows_per_segment": 0
+  },
+  "scoring": {
+    "selection_split": "validation",
+    "launch_weight": 1.0,
+    "inflation_floor_ratio": 0.75,
+    "under_expected_penalty_weight": 1.0,
+    "inflation_floor_penalty_weight": 1.0,
+    "stress_max_rows_per_segment": 0,
+    "primary_metrics": {
+      "metric_scope": "active",
+      "row_weighted": false,
+      "weights": {
+        "launch_active_pulse": 1.0,
+        "yaw_launch": 1.0,
+        "yaw_calibration": 0.0,
+        "mixed_launch": 1.0,
+        "straight_active": 0.0,
+        "smooth_turn_active": 0.0
+      }
+    },
+    "bootstrap": {
+      "iterations": 500,
+      "split": "held_out"
+    },
+    "log_fields": {
+      "yaw_rate_residual_tail": {
+        "dimension": 1,
+        "weight": 1.0
+      },
+      "forward_accel_residual_tail": {
+        "dimension": 1,
+        "weight": 1.0
+      },
+      "right_accel_residual_tail": {
+        "dimension": 1,
+        "weight": 1.0
+      }
+    }
+  },
+  "candidates": [
+    {
+      "id": "baseline/current_holdover",
+      "label": "Baseline/current holdover",
+      "model": "current_holdover_approximation",
+      "enabled": true,
+      "parameters": {},
+      "search": {}
+    },
+    {
+      "id": "candidate_3_load_sensitive",
+      "label": "Candidate 3 load-sensitive refined",
+      "model": "load_sensitive_anisotropic",
+      "enabled": true,
+      "parameters": {
+        "peak_friction_coefficient_at_80pct_fan": 2.8877814093733036,
+        "longitudinal_slip_gain_n_per_mps": 15.052454404267207,
+        "lateral_slip_gain_n_per_mps": 87.4803281356859,
+        "longitudinal_load_sensitivity": 0.27105040516827994,
+        "lateral_load_sensitivity": 0.2684740122442779,
+        "yaw_coupling_gain": 0.2403158545759395,
+        "low_speed_blend_mps": 0.040922999764289245
+      },
+      "search": {
+        "peak_friction_coefficient_at_80pct_fan": {
+          "min": 2.0,
+          "max": 4.2,
+          "scale": "linear"
+        },
+        "longitudinal_slip_gain_n_per_mps": {
+          "min": 5.0,
+          "max": 48.0,
+          "scale": "log"
+        },
+        "lateral_slip_gain_n_per_mps": {
+          "min": 24.0,
+          "max": 260.0,
+          "scale": "log"
+        },
+        "longitudinal_load_sensitivity": {
+          "min": -0.15,
+          "max": 0.75,
+          "scale": "linear"
+        },
+        "lateral_load_sensitivity": {
+          "min": -0.2,
+          "max": 0.85,
+          "scale": "linear"
+        },
+        "yaw_coupling_gain": {
+          "min": -0.2,
+          "max": 0.65,
+          "scale": "linear"
+        },
+        "low_speed_blend_mps": {
+          "min": 0.003,
+          "max": 0.13,
+          "scale": "linear"
+        }
+      }
+    }
+  ],
+  "bias_source_manifest": "staging\\traction_candidate_rms_nis_testbed\\representative_corpus\\segment_manifest.json",
+  "fixed_covariance_config": "staging\\traction_candidate_rms_nis_testbed\\covariance_conservative.json"
+}

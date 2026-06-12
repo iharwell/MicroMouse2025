@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "description": "Round 2026-06-11 production-encoder-covariance in_shear tuned-only EKF replay config. Standalone testbed only; not production configuration.",
+  "covariance_policy": "fixed_testbed_covariance_not_tuned",
+  "covariance_config": "..\\..\\covariance_conservative.json",
+  "candidate_specific_covariance_or_noise": false,
+  "source_tuning_output": "tune\\tuned_parameters.json",
+  "candidates": [
+    {
+      "id": "in_shear",
+      "label": "InShear tuned trial 120",
+      "model": "in_shear",
+      "enabled": true,
+      "parameters": {
+        "combined_slip_envelope_exponent": 4.621170901317498,
+        "inward_lateral_grip_gain": -0.19085731821960336,
+        "inward_lateral_stiffness_gain": 0.46083919054768296,
+        "inward_shear_blend_speed_mps": 0.11927884329967024,
+        "lateral_slip_gain_n_per_mps": 29.14860684584759,
+        "longitudinal_slip_gain_n_per_mps": 26.979203748661323,
+        "low_speed_blend_mps": 0.030364148614410075,
+        "peak_friction_coefficient_at_80pct_fan": 1.339762366593536
+      }
+    }
+  ]
+}

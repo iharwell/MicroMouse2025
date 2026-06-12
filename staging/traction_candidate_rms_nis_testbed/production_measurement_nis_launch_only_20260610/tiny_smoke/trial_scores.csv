@@ -1,0 +1,9 @@
+phase,candidate_id,trial_id,selection_score,sample_count
+train_screen,baseline/current_holdover,baseline/current_holdover:fixed,18.3712837132,6
+train_screen,candidate_1_algebraic_envelope,candidate_1_algebraic_envelope:nominal,23.429934285,6
+train_screen,candidate_2_stribeck,candidate_2_stribeck:nominal,52.2549156518,6
+train_screen,candidate_3_load_sensitive,candidate_3_load_sensitive:nominal,102.162138829,6
+validation_select,baseline/current_holdover,baseline/current_holdover:fixed,18.6829077019,6
+validation_select,candidate_1_algebraic_envelope,candidate_1_algebraic_envelope:nominal,23.8471405433,6
+validation_select,candidate_2_stribeck,candidate_2_stribeck:nominal,53.1079147861,6
+validation_select,candidate_3_load_sensitive,candidate_3_load_sensitive:nominal,103.528509633,6

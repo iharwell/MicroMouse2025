@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "description": "SkewShear launch-only tuned candidate config for oscillation-filtered EKF assessment. Standalone testbed only; not production configuration.",
+  "source_tuned_parameters": "staging/traction_candidate_rms_nis_testbed/round_20260611/skew_shear/tune/tuned_parameters.json",
+  "covariance_config": "staging/traction_candidate_rms_nis_testbed/covariance_conservative.json",
+  "covariance_policy": "fixed_testbed_covariance_not_tuned",
+  "candidate_specific_covariance_or_noise": false,
+  "source_trial_id": "skew_shear:trial_149",
+  "candidates": [
+    {
+      "id": "skew_shear",
+      "label": "SkewShear launch-only tuned",
+      "model": "skew_shear",
+      "enabled": true,
+      "parameters": {
+        "combined_slip_envelope_exponent": 3.654993034228337,
+        "lateral_slip_gain_n_per_mps": 31.878740086671762,
+        "longitudinal_slip_gain_n_per_mps": 30.52300901065213,
+        "low_speed_blend_mps": 0.03919833770571529,
+        "peak_friction_coefficient_at_80pct_fan": 1.646637369062744,
+        "shear_activation_speed_mps": 0.08940113584144384,
+        "shear_coupling_gain": -0.40587242805014045,
+        "shear_drive_force_blend_n": 0.0864716755001415
+      }
+    }
+  ]
+}

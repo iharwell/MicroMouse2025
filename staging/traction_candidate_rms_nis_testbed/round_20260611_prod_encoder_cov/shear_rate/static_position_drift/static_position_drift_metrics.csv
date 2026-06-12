@@ -1,0 +1,5 @@
+estimator,case_id,candidate_id,segment_id,samples,duration_s,final_x_m,final_y_m,final_radial_m,max_radial_m,yaw_drift_rad,yaw_drift_deg,final_vf_mps,final_vr_mps,final_yaw_rate_radps,pass_threshold_m,passes_5mm,finite,sigma_nonfinite_count,factorization_failure_count
+simplex_ukf,full_static_replay,shear_rate,ofnis_001617,30523,30.522,-0.0504707881876,-0.0694956892507,0.085889180254,0.085889180254,-0.0179771345043,-1.03001393483,0.000144117009179,-0.000815574912301,-0.00319226966041,0.005,False,True,0,0
+simplex_ukf,prediction_only_encoder_only,shear_rate,ofnis_001617,30523,30.522,-0.0216530871408,-0.0138636595718,0.0257110334186,0.0257110334186,0.0198231039959,1.13578019581,-0.000492238087576,-0.000730011593758,0.000693171214332,0.005,False,True,0,0
+ekf,full_static_replay,shear_rate,ofnis_001617,30523,30.522,0.00135578372001,-0.209149086451,0.209153480757,0.209153480757,-0.0185446256067,-1.06252877991,-0.00386567508093,-0.000184479619026,-0.00378594544449,0.005,False,True,,
+ekf,prediction_only_encoder_only,shear_rate,ofnis_001617,30523,30.522,0,0,0,0,0,0,0,0,0,0.005,True,True,,

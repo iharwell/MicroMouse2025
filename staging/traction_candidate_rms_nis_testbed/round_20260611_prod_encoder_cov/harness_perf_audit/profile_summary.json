@@ -1,0 +1,84 @@
+{
+  "candidate_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611_prod_encoder_cov\\shear_rate\\shear_rate_refined_tuned_only.json",
+  "covariance_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\covariance_conservative.json",
+  "measurements": [
+    {
+      "max_s": 0.24044260010123253,
+      "mean_s": 0.22732927999459207,
+      "mean_us_per_unit": 94.72053333108002,
+      "median_s": 0.22280490002594888,
+      "median_us_per_unit": 92.83537501081204,
+      "min_s": 0.21646549995057285,
+      "name": "direct_propagate",
+      "repeats": 5,
+      "units": 2400
+    },
+    {
+      "max_s": 0.3172984999837354,
+      "mean_s": 0.27412811999674885,
+      "mean_us_per_unit": 57.11002499932268,
+      "median_s": 0.2946465000277385,
+      "median_us_per_unit": 61.384687505778864,
+      "min_s": 0.22595660004299134,
+      "name": "plant_result_only",
+      "repeats": 5,
+      "units": 4800
+    },
+    {
+      "max_s": 0.2737474999157712,
+      "mean_s": 0.1987765199970454,
+      "mean_us_per_unit": 6211.766249907669,
+      "median_s": 0.1994780000532046,
+      "median_us_per_unit": 6233.687501662644,
+      "min_s": 0.15966719994321465,
+      "name": "simplex_predict_update",
+      "repeats": 5,
+      "units": 32
+    },
+    {
+      "max_s": 0.17326690000481904,
+      "mean_s": 0.1621995799941942,
+      "mean_us_per_unit": 5068.736874818569,
+      "median_s": 0.1639905000338331,
+      "median_us_per_unit": 5124.703126057284,
+      "min_s": 0.14194190001580864,
+      "name": "row_format_after_simplex",
+      "repeats": 5,
+      "units": 32
+    },
+    {
+      "max_s": 0.00112620007712394,
+      "mean_s": 0.0008450200082734227,
+      "mean_us_per_unit": 26.40687525854446,
+      "median_s": 0.000785500044003129,
+      "median_us_per_unit": 24.54687637509778,
+      "min_s": 0.0007447999669238925,
+      "name": "csv_write_32_rows",
+      "repeats": 5,
+      "units": 32
+    },
+    {
+      "max_s": 2.3415841999230906,
+      "mean_s": 2.0458387600025163,
+      "mean_us_per_unit": 15983.115312519658,
+      "median_s": 1.9927201999817044,
+      "median_us_per_unit": 15568.126562357065,
+      "min_s": 1.7578927000286058,
+      "name": "csv_sample_load",
+      "repeats": 5,
+      "units": 128
+    }
+  ],
+  "profile_files": {
+    "csv_sample_load": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611_prod_encoder_cov\\harness_perf_audit\\csv_sample_load.pstats",
+    "direct_propagate": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611_prod_encoder_cov\\harness_perf_audit\\direct_propagate.pstats",
+    "row_format_after_simplex": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611_prod_encoder_cov\\harness_perf_audit\\row_format_after_simplex.pstats",
+    "simplex_predict_update": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611_prod_encoder_cov\\harness_perf_audit\\simplex_predict_update.pstats"
+  },
+  "profile_rows": 128,
+  "propagate_loops": 600,
+  "sample_count_loaded_for_fixture": 128,
+  "schema_version": 1,
+  "segment_manifest": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\parallel_replace_20260420_102209_20260610\\ukf_one_log_20260610_070622_active_manifest.json",
+  "time_repeats": 5
+}

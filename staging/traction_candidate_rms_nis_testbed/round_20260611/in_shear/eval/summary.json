@@ -1,0 +1,53 @@
+{
+  "aggregate_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611\\in_shear\\eval\\nis_aggregates.csv",
+  "bias_segment_manifest": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\representative_corpus\\segment_manifest.json",
+  "bias_summary_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611\\in_shear\\eval\\bias_summary.csv",
+  "candidate_rms_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611\\in_shear\\eval\\candidate_rms_nis.csv",
+  "candidates": {
+    "in_shear": {
+      "accepted_count": 1068246,
+      "accepted_only_rms_nis": 53.09930561525193,
+      "accepted_only_sqrt_mean_nis": 2.449780373629813,
+      "finite_count": 1126221,
+      "nis_count": 1126221,
+      "nonfinite_count": 0,
+      "rejected_count": 57975,
+      "rejected_rate": 0.0514774631266865,
+      "rejected_rate_penalty": 0.102954926253373,
+      "residual_rms": {
+        "forward_accel_mps2": 5.848376810836129,
+        "right_accel_mps2": 3.9352812522311673,
+        "yaw_accel_radps2": 90.9203146189339,
+        "yaw_rate_radps": 0.1692715995466671
+      },
+      "rms_nis": 69.76685742578931,
+      "segment_count": 658,
+      "sqrt_mean_nis": 3.6252504143013518
+    }
+  },
+  "diagnostics_csv": null,
+  "itemized_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611\\in_shear\\eval\\itemized_rms_nis.csv",
+  "jobs_requested": 8,
+  "jobs_used": 8,
+  "nis_csv": null,
+  "processed_samples": 375407,
+  "processed_segments": 658,
+  "replay_mode": "ekf",
+  "report_md": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611\\in_shear\\eval\\report.md",
+  "row_artifacts_enabled": false,
+  "schema_version": 1,
+  "skipped_corrupted_segments": 0,
+  "source_log_count": 8,
+  "state_names": [
+    "px_m",
+    "py_m",
+    "heading_rad",
+    "vf_mps",
+    "vr_mps",
+    "yaw_rate_radps",
+    "delta_af_mps2",
+    "delta_ar_mps2",
+    "delta_yaw_accel_radps2"
+  ],
+  "uses_logged_ukf_state": false
+}

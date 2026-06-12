@@ -61,6 +61,54 @@
         "yaw_damping_speed_blend_mps": 0.02,
         "low_speed_blend_mps": 0.05
       }
+    },
+    {
+      "id": "skew_shear",
+      "label": "SkewShear",
+      "model": "skew_shear",
+      "enabled": true,
+      "parameters": {
+        "peak_friction_coefficient_at_80pct_fan": 1.68,
+        "longitudinal_slip_gain_n_per_mps": 24.0,
+        "lateral_slip_gain_n_per_mps": 72.0,
+        "combined_slip_envelope_exponent": 3.0,
+        "low_speed_blend_mps": 0.09,
+        "shear_coupling_gain": 0.18,
+        "shear_activation_speed_mps": 0.06,
+        "shear_drive_force_blend_n": 0.04
+      }
+    },
+    {
+      "id": "shear_rate",
+      "label": "ShearRate",
+      "model": "shear_rate",
+      "enabled": true,
+      "parameters": {
+        "peak_friction_coefficient_at_80pct_fan": 1.68,
+        "longitudinal_slip_gain_n_per_mps": 24.0,
+        "lateral_slip_gain_n_per_mps": 72.0,
+        "combined_slip_envelope_exponent": 3.0,
+        "low_speed_blend_mps": 0.09,
+        "shear_rate_peak_force_n": 0.035,
+        "shear_rate_activation_mps2": 35.0,
+        "shear_rate_breakaway_speed_mps": 0.10
+      }
+    },
+    {
+      "id": "in_shear",
+      "label": "InShear",
+      "model": "in_shear",
+      "enabled": true,
+      "parameters": {
+        "peak_friction_coefficient_at_80pct_fan": 1.68,
+        "longitudinal_slip_gain_n_per_mps": 24.0,
+        "lateral_slip_gain_n_per_mps": 72.0,
+        "combined_slip_envelope_exponent": 3.0,
+        "low_speed_blend_mps": 0.09,
+        "inward_lateral_stiffness_gain": 0.25,
+        "inward_lateral_grip_gain": 0.18,
+        "inward_shear_blend_speed_mps": 0.04
+      }
     }
   ]
 }

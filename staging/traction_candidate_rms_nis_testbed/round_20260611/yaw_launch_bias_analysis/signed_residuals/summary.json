@@ -1,0 +1,20 @@
+{
+  "bias_segment_manifest": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\representative_corpus\\segment_manifest.json",
+  "candidate_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611\\yaw_launch_bias_analysis\\combined_yaw_launch_candidate_config.json",
+  "compact_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611\\yaw_launch_bias_analysis\\signed_residuals\\signed_residual_compact.csv",
+  "covariance_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\covariance_conservative.json",
+  "high_command_threshold_abs_yaw_command": 0.65,
+  "processed_samples": 174625,
+  "processed_segments": 236,
+  "production_equivalent_streams": [
+    "yaw_rate",
+    "forward_accel",
+    "right_accel"
+  ],
+  "replay_mode": "residual plant replay, no EKF/logged UKF state",
+  "schema_version": 1,
+  "segment_manifest": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611\\yaw_launch_bias_analysis\\yaw_launch_only_manifest.json",
+  "sign_convention": "residual = measurement - prediction; positive means model under-predicted the measured stream, negative means model over-predicted it",
+  "source_log_count": 4,
+  "summary_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611\\yaw_launch_bias_analysis\\signed_residuals\\signed_residual_summary.csv"
+}

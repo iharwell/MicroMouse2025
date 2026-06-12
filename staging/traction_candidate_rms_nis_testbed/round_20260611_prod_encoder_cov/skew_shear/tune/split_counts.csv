@@ -1,0 +1,11 @@
+split,stage,family,segments,total_rows
+held_out,launch,launch,18,4500
+held_out,yaw_launch,launch,110,27500
+train,SEC_20_LAUNCH,launch,162,40231
+train,launch,launch,42,15590
+train,mixed_launch,launch,90,58691
+train,yaw_launch,launch,98,116139
+validation,SEC_20_LAUNCH,launch,48,11936
+validation,launch,launch,12,6110
+validation,mixed_launch,launch,30,18572
+validation,yaw_launch,launch,28,30986

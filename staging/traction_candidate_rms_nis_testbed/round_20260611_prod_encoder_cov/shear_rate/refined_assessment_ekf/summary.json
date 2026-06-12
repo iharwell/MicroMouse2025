@@ -1,0 +1,53 @@
+{
+  "aggregate_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611_prod_encoder_cov\\shear_rate\\refined_assessment_ekf\\nis_aggregates.csv",
+  "bias_segment_manifest": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\representative_corpus\\segment_manifest.json",
+  "bias_summary_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611_prod_encoder_cov\\shear_rate\\refined_assessment_ekf\\bias_summary.csv",
+  "candidate_rms_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611_prod_encoder_cov\\shear_rate\\refined_assessment_ekf\\candidate_rms_nis.csv",
+  "candidates": {
+    "shear_rate": {
+      "accepted_count": 1085448,
+      "accepted_only_rms_nis": 48.79537468908361,
+      "accepted_only_sqrt_mean_nis": 2.3950001853435525,
+      "finite_count": 1126221,
+      "nis_count": 1126221,
+      "nonfinite_count": 0,
+      "rejected_count": 40773,
+      "rejected_rate": 0.036203373938152456,
+      "rejected_rate_penalty": 0.07240674787630491,
+      "residual_rms": {
+        "forward_accel_mps2": 4.8741859698442775,
+        "right_accel_mps2": 3.1686068474626,
+        "yaw_accel_radps2": 74.97295536213296,
+        "yaw_rate_radps": 0.15450777083219286
+      },
+      "rms_nis": 63.70799559330159,
+      "segment_count": 658,
+      "sqrt_mean_nis": 3.3485329988541834
+    }
+  },
+  "diagnostics_csv": null,
+  "itemized_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611_prod_encoder_cov\\shear_rate\\refined_assessment_ekf\\itemized_rms_nis.csv",
+  "jobs_requested": 2,
+  "jobs_used": 2,
+  "nis_csv": null,
+  "processed_samples": 375407,
+  "processed_segments": 658,
+  "replay_mode": "ekf",
+  "report_md": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611_prod_encoder_cov\\shear_rate\\refined_assessment_ekf\\report.md",
+  "row_artifacts_enabled": false,
+  "schema_version": 1,
+  "skipped_corrupted_segments": 0,
+  "source_log_count": 8,
+  "state_names": [
+    "px_m",
+    "py_m",
+    "heading_rad",
+    "vf_mps",
+    "vr_mps",
+    "yaw_rate_radps",
+    "delta_af_mps2",
+    "delta_ar_mps2",
+    "delta_yaw_accel_radps2"
+  ],
+  "uses_logged_ukf_state": false
+}

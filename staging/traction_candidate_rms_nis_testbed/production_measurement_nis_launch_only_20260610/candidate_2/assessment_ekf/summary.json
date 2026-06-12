@@ -1,0 +1,53 @@
+{
+  "aggregate_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\production_measurement_nis_launch_only_20260610\\candidate_2\\assessment_ekf\\nis_aggregates.csv",
+  "bias_segment_manifest": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\representative_corpus\\segment_manifest.json",
+  "bias_summary_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\production_measurement_nis_launch_only_20260610\\candidate_2\\assessment_ekf\\bias_summary.csv",
+  "candidate_rms_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\production_measurement_nis_launch_only_20260610\\candidate_2\\assessment_ekf\\candidate_rms_nis.csv",
+  "candidates": {
+    "candidate_2_stribeck": {
+      "accepted_count": 1068933,
+      "accepted_only_rms_nis": 52.265689816338636,
+      "accepted_only_sqrt_mean_nis": 2.449199096708041,
+      "finite_count": 1126221,
+      "nis_count": 1126221,
+      "nonfinite_count": 0,
+      "rejected_count": 57288,
+      "rejected_rate": 0.050867458518354745,
+      "rejected_rate_penalty": 0.10173491703670949,
+      "residual_rms": {
+        "forward_accel_mps2": 5.893701559361325,
+        "right_accel_mps2": 4.016853983204721,
+        "yaw_accel_radps2": 90.51714269730827,
+        "yaw_rate_radps": 0.16860660568946645
+      },
+      "rms_nis": 68.58739289450484,
+      "segment_count": 658,
+      "sqrt_mean_nis": 3.603516494382091
+    }
+  },
+  "diagnostics_csv": null,
+  "itemized_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\production_measurement_nis_launch_only_20260610\\candidate_2\\assessment_ekf\\itemized_rms_nis.csv",
+  "jobs_requested": 8,
+  "jobs_used": 8,
+  "nis_csv": null,
+  "processed_samples": 375407,
+  "processed_segments": 658,
+  "replay_mode": "ekf",
+  "report_md": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\production_measurement_nis_launch_only_20260610\\candidate_2\\assessment_ekf\\report.md",
+  "row_artifacts_enabled": false,
+  "schema_version": 1,
+  "skipped_corrupted_segments": 0,
+  "source_log_count": 8,
+  "state_names": [
+    "px_m",
+    "py_m",
+    "heading_rad",
+    "vf_mps",
+    "vr_mps",
+    "yaw_rate_radps",
+    "delta_af_mps2",
+    "delta_ar_mps2",
+    "delta_yaw_accel_radps2"
+  ],
+  "uses_logged_ukf_state": false
+}

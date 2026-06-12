@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Candidate-2-only launch-family traction tuning config. Baseline retained only for objective comparison; covariance/noise remains fixed.",
+  "description": "Candidate-2-only launch-family traction tuning config. Baseline retained only for objective comparison; covariance/noise remains fixed and score keys are production measurement residual tails only.",
   "manifest_path": "..\\launch_only_tuning_manifest.json",
   "split": {
     "strategy": "source_log_heldout_then_whole_segment",
@@ -44,14 +44,6 @@
       "split": "held_out"
     },
     "log_fields": {
-      "left_encoder_wheel_rate_residual_tail": {
-        "dimension": 1,
-        "weight": 1.0
-      },
-      "right_encoder_wheel_rate_residual_tail": {
-        "dimension": 1,
-        "weight": 1.0
-      },
       "yaw_rate_residual_tail": {
         "dimension": 1,
         "weight": 1.0

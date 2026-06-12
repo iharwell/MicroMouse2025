@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
+from .estimator_core import PRODUCTION_MEASUREMENT_NIS_LOG_PARAMETERS
+
 
 SPLITS = ("train", "validation", "held_out")
 REPORT_SPLITS = (*SPLITS, "all")
@@ -29,6 +31,7 @@ FORBIDDEN_TUNING_NAME_TOKENS = (
     "sigma",
 )
 COMMAND_BIN_WIDTH = 0.02
+PRODUCTION_MEASUREMENT_NIS_LOG_FIELDS = frozenset(PRODUCTION_MEASUREMENT_NIS_LOG_PARAMETERS)
 
 
 class TestbedConfigError(RuntimeError):
@@ -301,6 +304,14 @@ def load_records(
     return records, segments
 
 
+def production_scored_records(records: Iterable[NisRecord]) -> list[NisRecord]:
+    return [
+        record
+        for record in records
+        if record.log_field in PRODUCTION_MEASUREMENT_NIS_LOG_FIELDS
+    ]
+
+
 def load_json(path: Path) -> dict[str, Any]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -438,8 +449,6 @@ def is_ungated_measurement_log_field(log_field: str) -> bool:
         field.startswith("yaw_rate")
         or field.startswith("gyro")
         or field.startswith("measured_yaw_rate")
-        or "encoder" in field
-        or "wheel_rate" in field
     )
 
 
@@ -556,11 +565,12 @@ def evaluate_records(
     records: list[NisRecord],
 ) -> tuple[list[ItemizedScore], list[TrialScore], list[CandidateScore]]:
     specs = scoring_specs(config)
+    scored_records = production_scored_records(records)
     segment_stats: dict[
         tuple[str, str, str, str, str, str, str, str, str, str, str],
         SegmentScoreStats,
     ] = {}
-    for record in records:
+    for record in scored_records:
         parameter_field, parameter_value_kind, parameter_value = parameter_bucket(record)
         command_signature = record.command_bucket
         partition = score_partition(record.stage, record.parameter_fields)
@@ -666,7 +676,7 @@ def evaluate_records(
                 parameter_value=parameter_value,
                 launch_command_signature=command_signature,
                 launch_cmd_linear_mps_median_mean=mean_observed_command_value_for_key(
-                    records,
+                    scored_records,
                     candidate_id,
                     trial_id,
                     split,
@@ -683,7 +693,7 @@ def evaluate_records(
         raise TestbedConfigError(f"Invalid scoring.selection_split: {selection_split}")
     trial_scores: list[TrialScore] = []
     trial_keys = {(trial.candidate_id, trial.trial_id) for trial in trials}
-    trial_keys.update((record.candidate_id, record.trial_id) for record in records)
+    trial_keys.update((record.candidate_id, record.trial_id) for record in scored_records)
     for candidate_id, trial_id in sorted(trial_keys):
         active_keys = [
             (key, stats)
@@ -786,6 +796,7 @@ def write_outputs(
     trial_scores: list[TrialScore],
     rankings: list[CandidateScore],
 ) -> None:
+    scored_records = production_scored_records(records)
     output_dir.mkdir(parents=True, exist_ok=True)
     write_trial_plan(output_dir, trials)
     write_integration_todos(output_dir)
@@ -796,12 +807,14 @@ def write_outputs(
     payload = {
         "uses_logged_ukf_state": False,
         "production_or_hardware_hooks": False,
-        "non_corrupted_nis_sample_count": len(records),
-        "finite_nis_sample_count": sum(1 for record in records if math.isfinite(record.nis)),
-        "accepted_nis_sample_count": sum(1 for record in records if record.accepted),
-        "rejected_nis_sample_count": sum(1 for record in records if not record.accepted),
+        "non_corrupted_nis_sample_count": len(scored_records),
+        "ignored_non_production_nis_sample_count": len(records) - len(scored_records),
+        "production_measurement_nis_fields": list(PRODUCTION_MEASUREMENT_NIS_LOG_PARAMETERS),
+        "finite_nis_sample_count": sum(1 for record in scored_records if math.isfinite(record.nis)),
+        "accepted_nis_sample_count": sum(1 for record in scored_records if record.accepted),
+        "rejected_nis_sample_count": sum(1 for record in scored_records if not record.accepted),
         "selection_scoring": (
-            "active traction only; main RMS uses all finite NIS; stationary/bias validation is itemized but excluded from ranking"
+            "active traction only; main RMS uses production measurement NIS fields only; stationary/bias validation is itemized but excluded from ranking"
         ),
         "itemized": [item.__dict__ for item in itemized],
         "trial_scores": [score.__dict__ for score in trial_scores],
@@ -882,15 +895,17 @@ def write_segment_splits_csv(output_dir: Path, segments: dict[str, SegmentInfo])
 
 
 def write_report(output_dir: Path, records: list[NisRecord], rankings: list[CandidateScore]) -> None:
+    scored_records = production_scored_records(records)
     lines = [
         "# Traction ANIS Testbed Report",
         "",
-        f"- Generated samples scored: `{len(records)}`",
+        f"- Generated production-measurement samples scored: `{len(scored_records)}`",
+        f"- Non-production NIS rows ignored: `{len(records) - len(scored_records)}`",
         "- Split policy: whole-segment assignment only; missing splits are stable-hashed by `segment_id`.",
         "- Logged UKF state policy: `ukf_state*` and `logged_ukf_state*` CSV columns are rejected.",
-        "- Scoring policy: all finite estimator NIS is aggregated per segment, then per stage/command/channel bucket with explicit stage and channel weights.",
+        "- Scoring policy: main production-equivalent RMS uses only `yaw_rate_nis`, `forward_accel_nis`, and `right_accel_nis`.",
         "- Accepted-only RMS is diagnostic; rejected finite accelerometer rows remain in the main NIS average.",
-        "- Yaw/gyro and encoder NIS rows are ungated and accepted when finite, including rows whose input artifact says rejected.",
+        "- Encoder NIS rows are invalid as production-equivalent evidence and are excluded from the main score.",
         "- Stationary/bias validation buckets are itemized but excluded from active traction ranking.",
         "- Production/hardware hooks: none.",
         "",
@@ -955,11 +970,21 @@ def item_score(item: ItemizedScore, under_expected_weight: float, inflation_weig
 def scoring_specs(config: dict[str, Any]) -> dict[str, dict[str, float]]:
     scoring = dict(config.get("scoring", {}))
     floor = float(scoring.get("inflation_floor_ratio", 0.75))
-    raw_fields = scoring.get("log_fields", scoring.get("log_parameters", {}))
+    raw_fields = scoring.get("log_fields", scoring.get("log_parameters", {})) or {
+        name: {"dimension": 1, "weight": 1.0}
+        for name in PRODUCTION_MEASUREMENT_NIS_LOG_PARAMETERS
+    }
     result: dict[str, dict[str, float]] = {}
     for name, raw in dict(raw_fields).items():
+        log_field = canonical_log_field(str(name))
+        if log_field not in PRODUCTION_MEASUREMENT_NIS_LOG_FIELDS:
+            allowed = ", ".join(PRODUCTION_MEASUREMENT_NIS_LOG_PARAMETERS)
+            raise TestbedConfigError(
+                "Production-equivalent scoring log_fields may only contain "
+                f"{allowed}; got {log_field}"
+            )
         dimension = int(dict(raw).get("dimension", 1))
-        result[canonical_log_field(str(name))] = {
+        result[log_field] = {
             "expected": expected_rms_for_dimension(dimension),
             "floor_ratio": floor,
             "weight": float(dict(raw).get("weight", 1.0)),

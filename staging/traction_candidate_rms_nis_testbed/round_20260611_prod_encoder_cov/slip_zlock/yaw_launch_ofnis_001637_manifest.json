@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "description": "Narrow yaw-launch boundary manifest for TESTBED-ONLY slip_zlock release assessment.",
+  "segments": [
+    {
+      "log_id": "mmlog_decode_2026-06-08_23-37-25",
+      "log_path": "TestResults/mmlog_decode_2026-06-08_23-37-25/open_floor_main.csv",
+      "segment_id": "ofnis_001637",
+      "segment_start_row_index": 45533,
+      "segment_end_row_index": 46532,
+      "segment_duration_s": 0.999,
+      "stage": "yaw_launch",
+      "family": "launch",
+      "split": "held_out",
+      "end_reason": "active_command_window",
+      "start_criterion": "last row of preceding reliable stationary run; rows=381; row_index=45153..45533",
+      "parameter_fields": {
+        "parameter": "drive_command_bin",
+        "test_value_kind": "logged_drive_command_bin",
+        "test_value": -0.5,
+        "speed_bin": -0.5
+      },
+      "observed_command": {
+        "active_command_rows": 1000,
+        "observed_command_pair_mode": [-0.5, 0.5],
+        "observed_command_magnitude_median": 0.5
+      }
+    }
+  ]
+}

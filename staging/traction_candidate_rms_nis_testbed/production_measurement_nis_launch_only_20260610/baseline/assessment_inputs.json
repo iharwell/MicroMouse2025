@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "description": "Inputs for the corrected production-equivalent holdover baseline EKF assessment.",
+  "candidate_config": "baseline_candidate_config.json",
+  "segment_manifest": "..\\..\\launch_only_tuning_oscillation_filtered_assessment_20260610\\oscillation_filtered_assessment_manifest.json",
+  "fixed_covariance_config": "..\\..\\covariance_conservative.json",
+  "bias_source_manifest": "..\\..\\representative_corpus\\segment_manifest.json",
+  "replay_mode": "ekf",
+  "max_rows_per_segment": 0,
+  "jobs": 8,
+  "uses_logged_ukf_state": false,
+  "production_measurement_nis_fields": [
+    "yaw_rate_nis",
+    "forward_accel_nis",
+    "right_accel_nis"
+  ],
+  "encoder_policy": "Encoder rates are prediction inputs only for production-equivalent scoring. Encoder NIS is not generated or counted in the main score."
+}

@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "description": "SlipEnvelope candidate-only launch tuning after production-equivalent correlated encoder process covariance fix. Standalone testbed only; fixed covariance/noise and production measurement residual-tail score keys.",
+  "manifest_path": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\launch_only_tuning_oscillation_filtered_assessment_20260610\\launch_only_tuning_manifest.json",
+  "assessment_manifest_path": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\launch_only_tuning_oscillation_filtered_assessment_20260610\\oscillation_filtered_assessment_manifest.json",
+  "split": {
+    "strategy": "source_log_heldout_then_whole_segment",
+    "seed": "traction_fair_tuning_v1",
+    "train": 0.6,
+    "validation": 0.2,
+    "held_out": 0.2
+  },
+  "tuning": {
+    "seed": "round_20260611_prod_encoder_cov_slip_envelope",
+    "trial_count_per_candidate": 192,
+    "include_nominal_trial": true,
+    "train_segments": 240,
+    "validation_segments": 160,
+    "validation_top_k_per_candidate": 12,
+    "launch_subset_fraction": 1.0,
+    "tuning_max_rows_per_segment": 0,
+    "final_max_rows_per_segment": 0
+  },
+  "scoring": {
+    "selection_split": "validation",
+    "launch_weight": 1.0,
+    "inflation_floor_ratio": 0.75,
+    "under_expected_penalty_weight": 1.0,
+    "inflation_floor_penalty_weight": 1.0,
+    "stress_max_rows_per_segment": 0,
+    "primary_metrics": {
+      "metric_scope": "active",
+      "row_weighted": false,
+      "weights": {
+        "launch_active_pulse": 1.0,
+        "yaw_launch": 1.0,
+        "yaw_calibration": 0.0,
+        "mixed_launch": 1.0,
+        "straight_active": 0.0,
+        "smooth_turn_active": 0.0
+      }
+    },
+    "bootstrap": {
+      "iterations": 500,
+      "split": "held_out"
+    },
+    "log_fields": {
+      "yaw_rate_residual_tail": {
+        "dimension": 1,
+        "weight": 1.0
+      },
+      "forward_accel_residual_tail": {
+        "dimension": 1,
+        "weight": 1.0
+      },
+      "right_accel_residual_tail": {
+        "dimension": 1,
+        "weight": 1.0
+      }
+    }
+  },
+  "candidates": [
+    {
+      "id": "candidate_1_algebraic_envelope",
+      "label": "SlipEnvelope algebraic envelope refined",
+      "model": "algebraic_envelope",
+      "enabled": true,
+      "parameters": {
+        "peak_friction_coefficient_at_80pct_fan": 1.3625872629399782,
+        "longitudinal_slip_gain_n_per_mps": 37.6557580061233,
+        "lateral_slip_gain_n_per_mps": 77.6395662049545,
+        "combined_slip_envelope_exponent": 4.216717639670732,
+        "low_speed_blend_mps": 0.14653387648696253
+      },
+      "search": {
+        "peak_friction_coefficient_at_80pct_fan": {
+          "min": 1.1,
+          "max": 2.1,
+          "scale": "linear"
+        },
+        "longitudinal_slip_gain_n_per_mps": {
+          "min": 14.0,
+          "max": 96.0,
+          "scale": "log"
+        },
+        "lateral_slip_gain_n_per_mps": {
+          "min": 24.0,
+          "max": 220.0,
+          "scale": "log"
+        },
+        "combined_slip_envelope_exponent": {
+          "min": 2.4,
+          "max": 6.8,
+          "scale": "linear"
+        },
+        "low_speed_blend_mps": {
+          "min": 0.045,
+          "max": 0.28,
+          "scale": "linear"
+        }
+      }
+    }
+  ],
+  "bias_source_manifest": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\representative_corpus\\segment_manifest.json",
+  "fixed_covariance_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\covariance_conservative.json"
+}

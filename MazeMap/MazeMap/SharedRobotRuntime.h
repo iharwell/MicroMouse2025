@@ -613,7 +613,7 @@ namespace MazeMap::App::Internal
         //
         // Behavior:
         // Exposes the canonical low-level drive helper rather than a duplicate actuation owner.
-        DriveBase& DriveBase() noexcept;
+        MazeMap::DriveBase& DriveBase() noexcept;
 
         // `Estimator()`:
         // Returns the production estimator owner.

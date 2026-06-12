@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "round": "20260611",
+  "alias": "stribeck_fade",
+  "display_name": "StribeckFade",
+  "source_candidate_id": "candidate_2_stribeck",
+  "source_model": "stribeck_algebraic",
+  "source_dir": "../../production_measurement_nis_launch_only_20260610/candidate_2",
+  "carried_forward_only": true,
+  "rerun_performed": false,
+  "scoring_confirmation": {
+    "scoring": "production_measurement_nis_only",
+    "confirmed_from": "../../production_measurement_nis_launch_only_20260610/candidate_2/assessment_ekf/nis_aggregates.csv log_parameter values",
+    "nis_channels": [
+      "forward_accel_nis",
+      "right_accel_nis",
+      "yaw_rate_nis"
+    ],
+    "encoder_nis_included": false
+  },
+  "overall": {
+    "rms_nis": 68.58739289450484,
+    "sqrt_mean_nis": 3.603516494382091,
+    "accepted_only_rms_nis": 52.265689816338636,
+    "accepted_only_sqrt_mean_nis": 2.449199096708041,
+    "nis_count": 1126221,
+    "finite_count": 1126221,
+    "accepted_count": 1068933,
+    "rejected_count": 57288,
+    "rejected_rate": 0.050867458518354745,
+    "segment_count": 658,
+    "processed_segments": 658,
+    "processed_samples": 375407,
+    "source_log_count": 8
+  },
+  "residual_rms": {
+    "forward_accel_mps2": 5.893701559361325,
+    "right_accel_mps2": 4.016853983204721,
+    "yaw_accel_radps2": 90.51714269730827,
+    "yaw_rate_radps": 0.16860660568946645
+  },
+  "selected_parameters": {
+    "dynamic_to_static_grip_ratio": 0.6174796417814197,
+    "low_speed_blend_mps": 0.04939885104105502,
+    "peak_friction_coefficient_at_80pct_fan": 2.099007388472021,
+    "stribeck_velocity_mps": 0.05769070134608078,
+    "viscous_slip_damping_n_per_mps": 19.968971904309836
+  },
+  "copied_files": [
+    "assessment_summary.json",
+    "assessment_report.md",
+    "candidate_rms_nis.csv",
+    "bias_summary.csv",
+    "tuned_parameters.json",
+    "launch_stage_channel_summary.csv",
+    "ukf_one_log_summary.json",
+    "ukf_one_log_candidate_summary.csv",
+    "ukf_one_log_report.md"
+  ],
+  "generated_files": [
+    "README.md",
+    "summary.json",
+    "stage_channel_summary.csv"
+  ],
+  "source_files": {
+    "assessment_summary": "../../production_measurement_nis_launch_only_20260610/candidate_2/assessment_ekf/summary.json",
+    "candidate_rms_nis": "../../production_measurement_nis_launch_only_20260610/candidate_2/assessment_ekf/candidate_rms_nis.csv",
+    "nis_aggregates": "../../production_measurement_nis_launch_only_20260610/candidate_2/assessment_ekf/nis_aggregates.csv",
+    "parameter_source": "../../production_measurement_nis_launch_only_20260610/candidate_2/tuning/tuned_parameters.json"
+  },
+  "ukf_one_log": {
+    "source_dir": "../../production_measurement_nis_launch_only_20260610/candidate_2/ukf_one_log",
+    "status": "pass",
+    "passed": true,
+    "segments": 100,
+    "samples": 125088,
+    "sigma_points": 2376672,
+    "issue_count": 0,
+    "max_innovation_nis": 894.2872090241275,
+    "max_abs_state": 34.50693375845042,
+    "max_abs_prediction": 724.529710937782,
+    "zero_crossing_failures": 0
+  }
+}

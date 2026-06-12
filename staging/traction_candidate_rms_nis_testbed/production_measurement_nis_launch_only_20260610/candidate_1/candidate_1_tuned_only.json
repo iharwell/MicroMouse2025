@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "description": "Candidate 1 tuned-only standalone host testbed config generated from launch-only residual-tail tuning. Not production configuration.",
+  "source_tuning_output": "tuning/tuned_parameters.json",
+  "source_tuning_trial_id": "candidate_1_algebraic_envelope:trial_148",
+  "source_tuning_validation_score": 251.41015873344173,
+  "covariance_policy": "fixed_testbed_covariance_not_tuned",
+  "candidate_specific_covariance_or_noise": false,
+  "candidates": [
+    {
+      "id": "candidate_1_algebraic_envelope",
+      "label": "Candidate 1 algebraic envelope launch-only tuned",
+      "model": "algebraic_envelope",
+      "enabled": true,
+      "parameters": {
+        "peak_friction_coefficient_at_80pct_fan": 1.2936470429574267,
+        "longitudinal_slip_gain_n_per_mps": 33.15800734323761,
+        "lateral_slip_gain_n_per_mps": 35.16069547272106,
+        "combined_slip_envelope_exponent": 5.645826960231981,
+        "low_speed_blend_mps": 0.10996085046880083
+      }
+    }
+  ]
+}

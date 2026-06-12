@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "round": "20260611",
+  "alias": "slip_envelope",
+  "display_name": "SlipEnvelope",
+  "source_candidate_id": "candidate_1_algebraic_envelope",
+  "source_model": "algebraic_envelope",
+  "source_dir": "../../production_measurement_nis_launch_only_20260610/candidate_1",
+  "carried_forward_only": true,
+  "rerun_performed": false,
+  "scoring_confirmation": {
+    "scoring": "production_measurement_nis_only",
+    "confirmed_from": "../../production_measurement_nis_launch_only_20260610/candidate_1/assessment_ekf/nis_aggregates.csv log_parameter values",
+    "nis_channels": [
+      "forward_accel_nis",
+      "right_accel_nis",
+      "yaw_rate_nis"
+    ],
+    "encoder_nis_included": false
+  },
+  "overall": {
+    "rms_nis": 70.89037127094245,
+    "sqrt_mean_nis": 3.6115737679205475,
+    "accepted_only_rms_nis": 53.52521378109838,
+    "accepted_only_sqrt_mean_nis": 2.4739364834217277,
+    "nis_count": 1126221,
+    "finite_count": 1126221,
+    "accepted_count": 1073568,
+    "rejected_count": 52653,
+    "rejected_rate": 0.04675192524380206,
+    "segment_count": 658,
+    "processed_segments": 658,
+    "processed_samples": 375407,
+    "source_log_count": 8
+  },
+  "residual_rms": {
+    "forward_accel_mps2": 5.44718956317752,
+    "right_accel_mps2": 3.6693596020405406,
+    "yaw_accel_radps2": 86.60357458405657,
+    "yaw_rate_radps": 0.16909795726205656
+  },
+  "selected_parameters": {
+    "combined_slip_envelope_exponent": 5.645826960231981,
+    "lateral_slip_gain_n_per_mps": 35.16069547272106,
+    "longitudinal_slip_gain_n_per_mps": 33.15800734323761,
+    "low_speed_blend_mps": 0.10996085046880083,
+    "peak_friction_coefficient_at_80pct_fan": 1.2936470429574267
+  },
+  "copied_files": [
+    "assessment_summary.json",
+    "assessment_report.md",
+    "candidate_rms_nis.csv",
+    "bias_summary.csv",
+    "tuned_parameters.json"
+  ],
+  "generated_files": [
+    "README.md",
+    "summary.json",
+    "stage_channel_summary.csv"
+  ],
+  "source_files": {
+    "assessment_summary": "../../production_measurement_nis_launch_only_20260610/candidate_1/assessment_ekf/summary.json",
+    "candidate_rms_nis": "../../production_measurement_nis_launch_only_20260610/candidate_1/assessment_ekf/candidate_rms_nis.csv",
+    "nis_aggregates": "../../production_measurement_nis_launch_only_20260610/candidate_1/assessment_ekf/nis_aggregates.csv",
+    "parameter_source": "../../production_measurement_nis_launch_only_20260610/candidate_1/tuning/tuned_parameters.json"
+  }
+}

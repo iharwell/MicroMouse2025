@@ -1,0 +1,24 @@
+{
+  "candidate_specific_covariance_or_noise": false,
+  "candidates": [
+    {
+      "id": "shear_rate",
+      "model": "shear_rate",
+      "parameters": {
+        "combined_slip_envelope_exponent": 4.807943014810556,
+        "lateral_slip_gain_n_per_mps": 26.9238096700164,
+        "longitudinal_slip_gain_n_per_mps": 31.374286994767758,
+        "low_speed_blend_mps": 0.020607118281606045,
+        "peak_friction_coefficient_at_80pct_fan": 1.2633328405562383,
+        "shear_rate_activation_mps2": 76.76282705556541,
+        "shear_rate_breakaway_speed_mps": 0.20269532077400454,
+        "shear_rate_peak_force_n": 0.10695012318168573
+      },
+      "trial_id": "shear_rate:trial_045"
+    }
+  ],
+  "covariance_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\covariance_conservative.json",
+  "covariance_policy": "fixed_testbed_covariance_not_tuned",
+  "description": "Standalone traction residual-tail tuned candidate parameters. Not production configuration.",
+  "schema_version": 1
+}

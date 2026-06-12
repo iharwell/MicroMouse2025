@@ -1,0 +1,7 @@
+{
+  "candidate_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611_prod_encoder_cov\\shear_rate\\shear_rate_refined_tuned_only.json",
+  "covariance_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\covariance_conservative.json",
+  "jobs": "not applicable; single-process script with no parallelism option",
+  "static_manifest": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611\\static_stability_analysis\\selected_static_segment_manifest.json",
+  "timeout_policy": "runner command timeout set above 90 minutes"
+}

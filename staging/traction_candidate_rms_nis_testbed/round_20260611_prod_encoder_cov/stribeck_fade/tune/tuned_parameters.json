@@ -1,0 +1,21 @@
+{
+  "candidate_specific_covariance_or_noise": false,
+  "candidates": [
+    {
+      "id": "candidate_2_stribeck",
+      "model": "stribeck_algebraic",
+      "parameters": {
+        "dynamic_to_static_grip_ratio": 0.5693935769304257,
+        "low_speed_blend_mps": 0.04894609070864059,
+        "peak_friction_coefficient_at_80pct_fan": 2.2465453903263963,
+        "stribeck_velocity_mps": 0.02574338212170059,
+        "viscous_slip_damping_n_per_mps": 16.25051035965962
+      },
+      "trial_id": "candidate_2_stribeck:trial_042"
+    }
+  ],
+  "covariance_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\covariance_conservative.json",
+  "covariance_policy": "fixed_testbed_covariance_not_tuned",
+  "description": "Standalone traction residual-tail tuned candidate parameters. Not production configuration.",
+  "schema_version": 1
+}

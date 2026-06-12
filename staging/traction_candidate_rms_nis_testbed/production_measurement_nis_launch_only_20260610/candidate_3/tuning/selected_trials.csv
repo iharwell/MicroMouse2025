@@ -1,0 +1,2 @@
+candidate_id,trial_id,train_score,validation_score,is_nominal,is_fixed,parameter_json
+candidate_3_load_sensitive,candidate_3_load_sensitive:trial_133,176.508643987,271.046627531,false,false,"{""lateral_load_sensitivity"": 0.327290064992592, ""lateral_slip_gain_n_per_mps"": 24.695725146213764, ""longitudinal_load_sensitivity"": 0.2980636468680996, ""longitudinal_slip_gain_n_per_mps"": 25.560975712043764, ""low_speed_blend_mps"": 0.026906575566924003, ""peak_friction_coefficient_at_80pct_fan"": 2.8951939005588283, ""yaw_coupling_gain"": 0.07967341087798074}"

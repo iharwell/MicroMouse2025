@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "description": "InShear candidate-only launch tuning config. Standalone testbed only; fixed covariance/noise and production measurement residual-tail score keys.",
+  "manifest_path": "..\\launch_only_tuning_oscillation_filtered_assessment_20260610\\launch_only_tuning_manifest.json",
+  "assessment_manifest_path": "..\\launch_only_tuning_oscillation_filtered_assessment_20260610\\oscillation_filtered_assessment_manifest.json",
+  "split": {
+    "strategy": "source_log_heldout_then_whole_segment",
+    "seed": "traction_fair_tuning_v1",
+    "train": 0.6,
+    "validation": 0.2,
+    "held_out": 0.2
+  },
+  "tuning": {
+    "seed": "round_20260611_in_shear",
+    "trial_count_per_candidate": 192,
+    "include_nominal_trial": true,
+    "train_segments": 240,
+    "validation_segments": 160,
+    "validation_top_k_per_candidate": 12,
+    "launch_subset_fraction": 1.0,
+    "tuning_max_rows_per_segment": 0,
+    "final_max_rows_per_segment": 0
+  },
+  "scoring": {
+    "selection_split": "validation",
+    "launch_weight": 1.0,
+    "inflation_floor_ratio": 0.75,
+    "under_expected_penalty_weight": 1.0,
+    "inflation_floor_penalty_weight": 1.0,
+    "stress_max_rows_per_segment": 0,
+    "primary_metrics": {
+      "metric_scope": "active",
+      "row_weighted": false,
+      "weights": {
+        "launch_active_pulse": 1.0,
+        "yaw_launch": 1.0,
+        "yaw_calibration": 0.0,
+        "mixed_launch": 1.0,
+        "straight_active": 0.0,
+        "smooth_turn_active": 0.0
+      }
+    },
+    "bootstrap": {
+      "iterations": 500,
+      "split": "held_out"
+    },
+    "log_fields": {
+      "yaw_rate_residual_tail": {
+        "dimension": 1,
+        "weight": 1.0
+      },
+      "forward_accel_residual_tail": {
+        "dimension": 1,
+        "weight": 1.0
+      },
+      "right_accel_residual_tail": {
+        "dimension": 1,
+        "weight": 1.0
+      }
+    }
+  },
+  "candidates": [
+    {
+      "id": "in_shear",
+      "label": "InShear",
+      "model": "in_shear",
+      "enabled": true,
+      "parameters": {
+        "peak_friction_coefficient_at_80pct_fan": 1.68,
+        "longitudinal_slip_gain_n_per_mps": 24.0,
+        "lateral_slip_gain_n_per_mps": 72.0,
+        "combined_slip_envelope_exponent": 3.0,
+        "low_speed_blend_mps": 0.09,
+        "inward_lateral_stiffness_gain": 0.25,
+        "inward_lateral_grip_gain": 0.18,
+        "inward_shear_blend_speed_mps": 0.04
+      },
+      "search": {
+        "peak_friction_coefficient_at_80pct_fan": {
+          "min": 1.1,
+          "max": 3.2,
+          "scale": "linear"
+        },
+        "longitudinal_slip_gain_n_per_mps": {
+          "min": 8.0,
+          "max": 96.0,
+          "scale": "log"
+        },
+        "lateral_slip_gain_n_per_mps": {
+          "min": 18.0,
+          "max": 240.0,
+          "scale": "log"
+        },
+        "combined_slip_envelope_exponent": {
+          "min": 2.0,
+          "max": 6.5,
+          "scale": "linear"
+        },
+        "low_speed_blend_mps": {
+          "min": 0.02,
+          "max": 0.22,
+          "scale": "linear"
+        },
+        "inward_lateral_stiffness_gain": {
+          "min": -0.40,
+          "max": 0.90,
+          "scale": "linear"
+        },
+        "inward_lateral_grip_gain": {
+          "min": -0.35,
+          "max": 0.70,
+          "scale": "linear"
+        },
+        "inward_shear_blend_speed_mps": {
+          "min": 0.01,
+          "max": 0.16,
+          "scale": "linear"
+        }
+      }
+    }
+  ],
+  "bias_source_manifest": "..\\representative_corpus\\segment_manifest.json",
+  "fixed_covariance_config": "..\\covariance_conservative.json"
+}

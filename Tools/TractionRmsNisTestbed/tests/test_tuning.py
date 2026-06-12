@@ -321,6 +321,38 @@ class TractionRmsNisTuningTest(unittest.TestCase):
         )
         self.assertEqual(["candidate_1_algebraic_envelope"], [trial.candidate_id for trial in selected])
 
+    def test_round_20260611_candidate_only_configs_parse(self) -> None:
+        round_dir = STAGING / "round_20260611"
+        candidate_config = tuning.load_json(STAGING / "candidates.json")
+        expected_ids = ("skew_shear", "shear_rate", "in_shear")
+
+        for candidate_id in expected_ids:
+            with self.subTest(candidate_id=candidate_id):
+                config = tuning.load_json(round_dir / f"{candidate_id}.json")
+                candidates = tuning.load_candidate_specs(config, candidate_config)
+
+                self.assertEqual([candidate_id], [candidate.candidate_id for candidate in candidates])
+                self.assertNotIn("baseline/current_holdover", [candidate.candidate_id for candidate in candidates])
+                self.assertEqual(
+                    {
+                        "yaw_rate_residual_tail",
+                        "forward_accel_residual_tail",
+                        "right_accel_residual_tail",
+                    },
+                    set(config["scoring"]["log_fields"]),
+                )
+                self.assertTrue(
+                    tuning.resolve_path(config["manifest_path"], round_dir).exists()
+                )
+                self.assertTrue(
+                    tuning.resolve_path(config["assessment_manifest_path"], round_dir).exists()
+                )
+                self.assertTrue(
+                    tuning.resolve_existing_config_path(config["bias_source_manifest"], round_dir).exists()
+                )
+                trials = tuning.generate_trials(candidates, 2, f"unit-{candidate_id}", True)
+                self.assertEqual({candidate_id}, {trial.candidate_id for trial in trials})
+
     def test_bucket_stats_rms_uses_all_finite_rows(self) -> None:
         stats = tuning.BucketStats()
 
@@ -364,7 +396,17 @@ class TractionRmsNisTuningTest(unittest.TestCase):
         )
 
         self.assertEqual(result.sample_count, 1)
-        self.assertEqual(len(result.report), 5)
+        self.assertEqual(
+            {
+                key[4]
+                for key in result.report
+            },
+            {
+                "yaw_rate_residual_tail",
+                "forward_accel_residual_tail",
+                "right_accel_residual_tail",
+            },
+        )
         for stats in result.report.values():
             self.assertEqual(stats.count, 1)
             self.assertEqual(stats.finite_count, 0)

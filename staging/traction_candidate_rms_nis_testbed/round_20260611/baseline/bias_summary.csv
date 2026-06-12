@@ -1,0 +1,9 @@
+log_id,log_path,bias_segment_count,accel_bias_forward_mps2,accel_bias_right_mps2,accel_bias_sample_count,gyro_bias_radps,gyro_bias_sample_count,gyro_bias_source
+mmlog_decode_2026-04-10_18-33-52,C:\Users\thene\source\repos\MicroMouse2025\TestResults\mmlog_decode_2026-04-10_18-33-52\open_floor_main.csv,1,0.000125446646269,0.000202351209172,14867,-0.000395368535923,14867,raw_minus_used_gyro:14867
+mmlog_decode_2026-04-15_02-09-58,C:\Users\thene\source\repos\MicroMouse2025\TestResults\mmlog_decode_2026-04-15_02-09-58\open_floor_main.csv,1,0.000497059436587,0.000214392338955,15002,-0.00410870296875,15002,raw_minus_used_gyro:15002
+mmlog_decode_2026-04-20_04-54-09,C:\Users\thene\source\repos\MicroMouse2025\TestResults\mmlog_decode_2026-04-20_04-54-09\open_floor_main.csv,1,5.92975351643e-05,4.70948233451e-05,15001,-0.000566158190854,15001,raw_minus_used_gyro:15001
+mmlog_decode_2026-04-22_12-10-34,C:\Users\thene\source\repos\MicroMouse2025\TestResults\mmlog_decode_2026-04-22_12-10-34\open_floor_main.csv,1,0.000433350274461,0.000107397410123,15003,0.00018491067079,15003,raw_minus_used_gyro:15003
+mmlog_decode_2026-05-04_16-57-53,C:\Users\thene\source\repos\MicroMouse2025\TestResults\mmlog_decode_2026-05-04_16-57-53\open_floor_main.csv,1,-0.00012193388363,-0.000144944020747,15503,-0.000784219518704,15503,raw_minus_used_gyro:15503
+mmlog_decode_2026-06-08_23-37-25,C:\Users\thene\source\repos\MicroMouse2025\TestResults\mmlog_decode_2026-06-08_23-37-25\open_floor_main.csv,1,0.00449226607876,-0.00368270466858,30523,0.00183259604109,30523,raw_minus_used_gyro:30523
+mmlog_decode_2026-06-09_23-36-21,C:\Users\thene\source\repos\MicroMouse2025\TestResults\mmlog_decode_2026-06-09_23-36-21\open_floor_main.csv,1,0.0213121572404,0.00971927100946,30502,0.00211115008305,30502,raw_minus_used_gyro:30502
+mmlog_decode_2026-06-10_07-06-22,C:\Users\thene\source\repos\MicroMouse2025\TestResults\mmlog_decode_2026-06-10_07-06-22\open_floor_main.csv,0,0,0,0,0,0,unavailable

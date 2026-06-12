@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "round": "20260611",
+  "purpose": "Carried-forward corrected production-measurement results for reference models. No tuning or replay rerun performed in round_20260611.",
+  "source_round": "../production_measurement_nis_launch_only_20260610",
+  "scoring_confirmation": {
+    "scoring": "production_measurement_nis_only",
+    "nis_channels": [
+      "yaw_rate_nis",
+      "forward_accel_nis",
+      "right_accel_nis"
+    ],
+    "encoder_nis_included": false
+  },
+  "entries": [
+    {
+      "alias": "slip_envelope",
+      "display_name": "SlipEnvelope",
+      "source_candidate_id": "candidate_1_algebraic_envelope",
+      "source_dir": "../production_measurement_nis_launch_only_20260610/candidate_1",
+      "summary_file": "slip_envelope/summary.json",
+      "rms_nis": 70.89037127094245,
+      "sqrt_mean_nis": 3.6115737679205475,
+      "accepted_only_rms_nis": 53.52521378109838,
+      "rejected_rate": 0.04675192524380206,
+      "nis_channels": [
+        "forward_accel_nis",
+        "right_accel_nis",
+        "yaw_rate_nis"
+      ],
+      "encoder_nis_included": false
+    },
+    {
+      "alias": "stribeck_fade",
+      "display_name": "StribeckFade",
+      "source_candidate_id": "candidate_2_stribeck",
+      "source_dir": "../production_measurement_nis_launch_only_20260610/candidate_2",
+      "summary_file": "stribeck_fade/summary.json",
+      "rms_nis": 68.58739289450484,
+      "sqrt_mean_nis": 3.603516494382091,
+      "accepted_only_rms_nis": 52.265689816338636,
+      "rejected_rate": 0.050867458518354745,
+      "nis_channels": [
+        "forward_accel_nis",
+        "right_accel_nis",
+        "yaw_rate_nis"
+      ],
+      "encoder_nis_included": false
+    },
+    {
+      "alias": "baseline",
+      "display_name": "HoldoverBaseline",
+      "source_candidate_id": "baseline/current_holdover",
+      "source_dir": "../production_measurement_nis_launch_only_20260610/baseline",
+      "summary_file": "baseline/summary.json",
+      "rms_nis": 94.86815948411707,
+      "sqrt_mean_nis": 6.049732514869043,
+      "accepted_only_rms_nis": 65.91163825371856,
+      "rejected_rate": 0.17511571885091826,
+      "nis_channels": [
+        "forward_accel_nis",
+        "right_accel_nis",
+        "yaw_rate_nis"
+      ],
+      "encoder_nis_included": false
+    }
+  ]
+}

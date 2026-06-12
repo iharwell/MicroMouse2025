@@ -24,9 +24,10 @@ from .estimator_core import (
     CandidateConfig as EstimatorCandidateConfig,
     CandidatePlant,
     N,
-    ReplayColumnBinding,
+    PRODUCTION_MEASUREMENT_RESIDUAL_TAIL_LOG_PARAMETERS,
     ReplaySample,
     SegmentSpec,
+    SourceLogSampleCache,
     VehicleConfig,
     finite,
     finite_or,
@@ -36,7 +37,7 @@ from .estimator_core import (
     load_covariance,
     replace_sample_accel_bias,
     residual_tail_updates,
-    sample_from_bound_row,
+    segment_sample_key,
 )
 from .scoring import (
     COMMAND_BIN_WIDTH,
@@ -62,6 +63,9 @@ TARGET_CANDIDATES = (
     "candidate_1_algebraic_envelope",
     "candidate_2_stribeck",
     "candidate_3_load_sensitive",
+    "skew_shear",
+    "shear_rate",
+    "in_shear",
 )
 FALSE_TEXT_VALUES = ("0", "false", "no")
 FORBIDDEN_TUNING_NAME_TOKENS = (
@@ -82,6 +86,9 @@ DEFAULT_ACTIVE_METRIC_WEIGHTS = {
     "straight_active": 1.0,
     "smooth_turn_active": 1.0,
 }
+PRODUCTION_MEASUREMENT_RESIDUAL_TAIL_LOG_FIELDS = frozenset(
+    PRODUCTION_MEASUREMENT_RESIDUAL_TAIL_LOG_PARAMETERS
+)
 
 
 class TuningError(RuntimeError):
@@ -253,13 +260,6 @@ class EvaluationResult:
         self.source_log_detail.setdefault(source_key, BucketStats()).add(nis, accepted)
 
 
-@dataclass(frozen=True)
-class SourceLogIndex:
-    fieldnames: list[str]
-    columns: ReplayColumnBinding
-    row_offsets: list[int]
-
-
 class EvaluationSampleSource:
     """Batch-load and cache replay samples for repeated tuning phases."""
 
@@ -274,11 +274,11 @@ class EvaluationSampleSource:
         self._bias_segments = list(bias_segments) if bias_segments is not None else None
         self._accel_bias_by_log: dict[Path, AccelBiasEstimate] = {}
         self._cache: dict[tuple[str, str, int], list[ReplaySample]] = {}
-        self._log_indexes: dict[Path, SourceLogIndex] = {}
+        self._source_log_cache = SourceLogSampleCache()
         self.source_log_scan_count = 0
-        self.source_log_file_count = 0
-        self.source_log_index_build_count = 0
-        self.source_log_indexed_rows = 0
+        self._reported_source_log_file_count = 0
+        self._reported_source_log_index_build_count = 0
+        self._reported_source_log_indexed_rows = 0
         self.streamed_segment_count = 0
         self.cached_segment_count = 0
         self.cache_hit_count = 0
@@ -353,7 +353,8 @@ class EvaluationSampleSource:
         specs_by_segment = {
             meta.segment_id: segment_spec_from_meta(meta) for meta in segment_metas
         }
-        targets_by_log: dict[Path, dict[int, list[SegmentMeta]]] = {}
+        metas_by_log: dict[Path, list[SegmentMeta]] = {}
+        targets_by_log: dict[Path, dict[tuple[Path, str, int, int], list[int]]] = {}
         expected_counts: dict[str, int] = {}
         for meta in segment_metas:
             row_indices = target_row_indices(meta, max_rows_per_segment, metric_scope)
@@ -361,41 +362,28 @@ class EvaluationSampleSource:
             if not row_indices:
                 continue
             spec = specs_by_segment[meta.segment_id]
-            log_targets = targets_by_log.setdefault(spec.log_path, {})
-            for row_index in row_indices:
-                log_targets.setdefault(row_index, []).append(meta)
+            key = segment_sample_key(spec)
+            metas_by_log.setdefault(spec.log_path, []).append(meta)
+            targets_by_log.setdefault(spec.log_path, {})[key] = row_indices
 
-        previous_time_by_segment: dict[str, int] = {}
-        for log_path, row_targets in sorted(targets_by_log.items(), key=lambda item: str(item[0])):
-            if not log_path.exists():
-                raise TuningError(f"Input CSV not found: {log_path}")
-            self.source_log_file_count += 1
-            index = self._source_log_index(log_path)
+        for log_path, segment_targets in sorted(targets_by_log.items(), key=lambda item: str(item[0])):
             accel_bias = self._accel_bias_for_log(log_path)
-            with log_path.open("rb") as handle:
-                for row_index in sorted(row_targets):
-                    if row_index >= len(index.row_offsets):
-                        continue
-                    handle.seek(index.row_offsets[row_index])
-                    line = handle.readline().decode("utf-8", errors="replace")
-                    try:
-                        row = next(csv.reader([line]))
-                    except StopIteration:
-                        continue
-                    for meta in row_targets[row_index]:
-                        spec = specs_by_segment[meta.segment_id]
-                        sample = sample_from_bound_row(
-                            row,
-                            index.columns,
-                            spec,
-                            row_index,
-                            previous_time_by_segment.get(meta.segment_id),
-                            self.vehicle,
-                        )
-                        sample = replace_sample_accel_bias(sample, accel_bias)
-                        previous_time_by_segment[meta.segment_id] = sample.master_time_us
-                        samples_by_segment[meta.segment_id].append(sample)
-                        self.loaded_sample_count += 1
+            log_metas = metas_by_log.get(log_path, [])
+            log_specs = [specs_by_segment[meta.segment_id] for meta in log_metas]
+            loaded = self._source_log_cache.read_targeted_segment_samples(
+                log_path,
+                log_specs,
+                segment_targets,
+                self.vehicle,
+            )
+            for meta in log_metas:
+                spec = specs_by_segment[meta.segment_id]
+                samples = [
+                    replace_sample_accel_bias(sample, accel_bias)
+                    for sample in loaded.get(segment_sample_key(spec), [])
+                ]
+                samples_by_segment[meta.segment_id].extend(samples)
+                self.loaded_sample_count += len(samples)
 
         missing = [
             segment_id
@@ -407,37 +395,10 @@ class EvaluationSampleSource:
                 "Segment target rows not found before end of log: "
                 + ", ".join(sorted(missing))
             )
+        self._reported_source_log_file_count = self._source_log_cache.file_read_count
+        self._reported_source_log_index_build_count = self._source_log_cache.index_build_count
+        self._reported_source_log_indexed_rows = self._source_log_cache.indexed_row_count
         return samples_by_segment
-
-    def _source_log_index(self, log_path: Path) -> SourceLogIndex:
-        cached = self._log_indexes.get(log_path)
-        if cached is not None:
-            return cached
-        with log_path.open("rb") as handle:
-            header = handle.readline()
-            if not header:
-                raise TuningError(f"CSV header missing: {log_path}")
-            header_text = header.decode("utf-8-sig", errors="replace")
-            try:
-                fieldnames = next(csv.reader([header_text]))
-            except StopIteration as exc:
-                raise TuningError(f"CSV header missing: {log_path}") from exc
-            offsets: list[int] = []
-            while True:
-                offset = handle.tell()
-                line = handle.readline()
-                if not line:
-                    break
-                offsets.append(offset)
-        result = SourceLogIndex(
-            fieldnames=fieldnames,
-            columns=ReplayColumnBinding.from_fieldnames(fieldnames),
-            row_offsets=offsets,
-        )
-        self._log_indexes[log_path] = result
-        self.source_log_index_build_count += 1
-        self.source_log_indexed_rows += len(offsets)
-        return result
 
     def _accel_bias_for_log(self, log_path: Path) -> AccelBiasEstimate:
         cached = self._accel_bias_by_log.get(log_path)
@@ -473,9 +434,9 @@ class EvaluationSampleSource:
     def stats(self) -> dict[str, int]:
         return {
             "source_log_scan_batches": self.source_log_scan_count,
-            "source_log_files_read": self.source_log_file_count,
-            "source_log_indexes_built": self.source_log_index_build_count,
-            "source_log_indexed_rows": self.source_log_indexed_rows,
+            "source_log_files_read": self._reported_source_log_file_count,
+            "source_log_indexes_built": self._reported_source_log_index_build_count,
+            "source_log_indexed_rows": self._reported_source_log_indexed_rows,
             "streamed_uncached_segments": self.streamed_segment_count,
             "cached_segments": self.cached_segment_count,
             "cache_hits": self.cache_hit_count,
@@ -498,6 +459,16 @@ def load_json(path: Path) -> dict[str, Any]:
 def resolve_path(path_text: str, base_dir: Path) -> Path:
     path = Path(path_text)
     return path if path.is_absolute() else (base_dir / path).resolve()
+
+
+def resolve_existing_config_path(path_text: str, config_dir: Path) -> Path:
+    path = Path(path_text)
+    if path.is_absolute():
+        return path
+    config_relative = (config_dir / path).resolve()
+    if config_relative.exists():
+        return config_relative
+    return (REPO_ROOT / path).resolve()
 
 
 def load_candidate_specs(config: dict[str, Any], candidate_config: dict[str, Any]) -> list[CandidateSpec]:
@@ -1190,6 +1161,8 @@ def evaluate_segment_samples(
             for update in updates:
                 if update is None:
                     continue
+                if update.log_parameter not in PRODUCTION_MEASUREMENT_RESIDUAL_TAIL_LOG_FIELDS:
+                    continue
                 result.add(
                     trial=trial,
                     split=meta.split,
@@ -1765,6 +1738,7 @@ def write_outputs(
     final_result: EvaluationResult,
     stress_result: EvaluationResult,
     bootstrap_rows: Sequence[BootstrapRow],
+    bias_source_manifest_path: Path,
     metric_scope: str,
     metric_weights: dict[str, float],
     row_weighted_selection: bool,
@@ -1795,13 +1769,17 @@ def write_outputs(
         "fixed_noise_schedule_path": str(covariance_path),
         "candidate_specific_covariance_or_noise": False,
         "primary_metric_scope": "active_traction_rows",
-        "primary_metric_policy": "metric_balanced_active_traction_yaw_and_encoder_all_finite_nis_first",
+        "primary_metric_policy": "metric_balanced_active_traction_production_measurement_residual_tail_only",
+        "production_measurement_residual_tail_fields": list(
+            PRODUCTION_MEASUREMENT_RESIDUAL_TAIL_LOG_PARAMETERS
+        ),
         "boundary_policy": "primary_active_rows_before_explicit_corruption_boundaries_are_valid",
         "primary_metric_scope_config": metric_scope,
         "primary_row_weighted_selection": row_weighted_selection,
         "stress_metric_policy": "full_row_weighted_residual_tail_diagnostic_only",
         "replay_mode": "aggregate_only_residual_tail",
         "manifest_path": str(manifest_path),
+        "bias_source_manifest_path": str(bias_source_manifest_path),
         "config_path": str(config_path),
         "covariance_path": str(covariance_path),
         "candidate_count": len(candidates),
@@ -2088,8 +2066,8 @@ def write_report(
         f"- Stress diagnostic segments: `{summary['stress_segments']}`",
         f"- Source logs: `{summary['source_log_count']}`",
         "- Split policy: reserve whole source logs for held-out first, then assign remaining whole segments to train/validation.",
-        "- Selection policy: metric-balanced active traction rows first, including yaw launch, yaw calibration, and encoder residual/NIS streams as primary data.",
-        "- Main score policy: all finite NIS is retained; accepted-only RMS is diagnostic and high encoder/gyro NIS means model failure.",
+        "- Selection policy: metric-balanced active traction rows first, using only production measurement residual-tail streams.",
+        "- Main score policy: production-equivalent channels are yaw rate, forward accel, and right accel; encoder residuals are diagnostic only and excluded.",
         f"- Fixed noise schedule: `{summary.get('fixed_noise_schedule_path', '')}`; candidate-specific covariance/noise changes: `false`.",
         "- Boundary policy: active rows before explicit pickup/runoff/terminal external-force boundaries remain eligible for primary tuning; full-row stress diagnostics exclude boundary-corrupted segments.",
         "- Stress policy: full row-weighted residual tails are diagnostic-only.",
@@ -2112,8 +2090,8 @@ def write_report(
             "",
             "Full table: `validation_heldout_residual_tail.csv`.",
             "",
-            "| Candidate | Split | Stage | left encoder | right encoder | yaw | forward accel | right accel |",
-            "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |",
+            "| Candidate | Split | Stage | yaw | forward accel | right accel |",
+            "| --- | --- | --- | ---: | ---: | ---: |",
         ]
     )
     for line in compact_metric_lines(rows):
@@ -2147,7 +2125,7 @@ def write_report(
             "- Candidate search is broad but finite Latin-hypercube sampling, so it is not a global optimum proof.",
             "- Small coverage buckets with fewer than two non-held-out segments cannot populate both train and validation.",
             "- Bootstrap confidence is over source logs, so it is only meaningful when enough held-out logs cover the active metrics.",
-            "- Yaw-rate residuals are available in the current standalone objective; yaw-acceleration or turn-response residual rows are included only when the residual update contract emits them.",
+            "- Encoder wheel-rate residuals may still appear in diagnostic artifacts, but they are not production-equivalent NIS evidence.",
             "- Aggregate scoring does not emit per-row diagnostics for full-manifest selected trials.",
             "- Row caps are disabled for corrected runs unless explicitly supplied for a smoke-only command.",
         ]
@@ -2165,8 +2143,6 @@ def compact_metric_lines(rows: Sequence[ScoreRow]) -> list[str]:
         lines.append(
             "| "
             f"`{candidate_id}` | `{split}` | `{stage}` | "
-            f"{format_number(values.get('left_encoder_wheel_rate_residual_tail', math.nan))} | "
-            f"{format_number(values.get('right_encoder_wheel_rate_residual_tail', math.nan))} | "
             f"{format_number(values.get('yaw_rate_residual_tail', math.nan))} | "
             f"{format_number(values.get('forward_accel_residual_tail', math.nan))} | "
             f"{format_number(values.get('right_accel_residual_tail', math.nan))} |"
@@ -2183,6 +2159,21 @@ def metric_weights_from_config(scoring_config: dict[str, Any]) -> dict[str, floa
         if str(name) in DEFAULT_ACTIVE_METRIC_WEIGHTS and float(value) > 0.0
     }
     return weights or dict(DEFAULT_ACTIVE_METRIC_WEIGHTS)
+
+
+def validate_primary_log_fields(scoring_config: dict[str, Any]) -> None:
+    raw_fields = dict(scoring_config.get("log_fields", {}))
+    invalid = [
+        canonical_log_field(str(name))
+        for name in raw_fields
+        if canonical_log_field(str(name)) not in PRODUCTION_MEASUREMENT_RESIDUAL_TAIL_LOG_FIELDS
+    ]
+    if invalid:
+        allowed = ", ".join(PRODUCTION_MEASUREMENT_RESIDUAL_TAIL_LOG_PARAMETERS)
+        raise TuningError(
+            "Production-equivalent tuning log_fields may only contain "
+            f"{allowed}; got {', '.join(sorted(invalid))}"
+        )
 
 
 def primary_metric_scope(scoring_config: dict[str, Any]) -> str:
@@ -2277,6 +2268,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     bootstrap_splits = bootstrap_split_names(
         args.bootstrap_split or str(bootstrap_config.get("split", "held_out"))
     )
+    validate_primary_log_fields(scoring_config)
     metric_weights = metric_weights_from_config(scoring_config)
     metric_scope = primary_metric_scope(scoring_config)
     row_weighted_selection = primary_row_weighted(scoring_config)
@@ -2289,6 +2281,11 @@ def main(argv: Iterable[str] | None = None) -> int:
         include_nominal=bool(tuning_config.get("include_nominal_trial", True)),
     )
     all_segments = load_manifest_segments(manifest_path, split_config)
+    bias_source_manifest_path = resolve_existing_config_path(
+        str(config.get("bias_source_manifest", "")) or str(manifest_path),
+        config_path.parent,
+    )
+    bias_segments = load_manifest_segments(bias_source_manifest_path, split_config)
     clean_segments = [segment for segment in all_segments if not segment.corrupted]
     primary_segments = [
         segment
@@ -2313,7 +2310,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     )
 
     vehicle, _covariance = load_covariance(covariance_path)
-    sample_source = EvaluationSampleSource(manifest_path, vehicle, all_segments)
+    sample_source = EvaluationSampleSource(manifest_path, vehicle, bias_segments)
     train_result = evaluate_trials(
         phase="train_screen",
         manifest_path=manifest_path,
@@ -2428,6 +2425,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         final_result=final_result,
         stress_result=stress_result,
         bootstrap_rows=bootstrap_rows,
+        bias_source_manifest_path=bias_source_manifest_path,
         metric_scope=metric_scope,
         metric_weights=metric_weights,
         row_weighted_selection=row_weighted_selection,

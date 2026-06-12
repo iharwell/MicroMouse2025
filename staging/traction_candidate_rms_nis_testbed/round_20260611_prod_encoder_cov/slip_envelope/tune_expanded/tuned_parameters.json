@@ -1,0 +1,21 @@
+{
+  "candidate_specific_covariance_or_noise": false,
+  "candidates": [
+    {
+      "id": "candidate_1_algebraic_envelope",
+      "model": "algebraic_envelope",
+      "parameters": {
+        "combined_slip_envelope_exponent": 5.410495443316217,
+        "lateral_slip_gain_n_per_mps": 95.30906226734128,
+        "longitudinal_slip_gain_n_per_mps": 87.423645020917,
+        "low_speed_blend_mps": 0.2753939095614226,
+        "peak_friction_coefficient_at_80pct_fan": 1.1091281882474364
+      },
+      "trial_id": "candidate_1_algebraic_envelope:nominal"
+    }
+  ],
+  "covariance_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\covariance_conservative.json",
+  "covariance_policy": "fixed_testbed_covariance_not_tuned",
+  "description": "Standalone traction residual-tail tuned candidate parameters. Not production configuration.",
+  "schema_version": 1
+}

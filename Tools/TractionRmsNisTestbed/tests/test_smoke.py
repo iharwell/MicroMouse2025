@@ -20,9 +20,12 @@ from traction_rms_nis_testbed.estimator_core import (
     load_candidates,
     load_covariance,
     representative_row_indices,
+    read_representative_samples_by_log,
+    read_representative_segment_samples,
     run_replay,
     run_ukf_validation,
     sample_from_row,
+    segment_sample_key,
 )
 
 
@@ -79,8 +82,6 @@ class TractionRmsNisSmokeTest(unittest.TestCase):
             self.assertGreater(len(rows), 0)
             self.assertEqual(
                 {
-                    "left_encoder_wheel_rate_nis",
-                    "right_encoder_wheel_rate_nis",
                     "yaw_rate_nis",
                     "forward_accel_nis",
                     "right_accel_nis",
@@ -131,6 +132,10 @@ class TractionRmsNisSmokeTest(unittest.TestCase):
                 rows = list(reader)
 
             self.assertGreater(len(rows), 0)
+            self.assertEqual(
+                {"yaw_rate_nis", "forward_accel_nis", "right_accel_nis"},
+                {row["log_parameter"] for row in rows},
+            )
             self.assertIn("false", {row["accepted"] for row in rows})
             self.assertIn("true", {row["rejected"] for row in rows})
 
@@ -141,6 +146,8 @@ class TractionRmsNisSmokeTest(unittest.TestCase):
                 self.assertIn("max_contact_relative_speed_mps", reader.fieldnames)
                 self.assertIn("measured_yaw_accel_radps2", reader.fieldnames)
                 self.assertIn("yaw_accel_residual_radps2", reader.fieldnames)
+                self.assertIn("left_encoder_wheel_rate_residual_radps", reader.fieldnames)
+                self.assertIn("right_encoder_wheel_rate_residual_radps", reader.fieldnames)
                 self.assertFalse(any(name.startswith("ukf_state") for name in reader.fieldnames))
 
     def test_all_expected_candidate_models_are_available(self) -> None:
@@ -153,6 +160,9 @@ class TractionRmsNisSmokeTest(unittest.TestCase):
                 "candidate_1_algebraic_envelope",
                 "candidate_2_stribeck",
                 "candidate_3_load_sensitive",
+                "skew_shear",
+                "shear_rate",
+                "in_shear",
             },
             ids,
         )
@@ -162,6 +172,9 @@ class TractionRmsNisSmokeTest(unittest.TestCase):
                 "algebraic_envelope",
                 "stribeck_algebraic",
                 "load_sensitive_anisotropic",
+                "skew_shear",
+                "shear_rate",
+                "in_shear",
             },
             models,
         )
@@ -200,6 +213,77 @@ class TractionRmsNisSmokeTest(unittest.TestCase):
             representative_row_indices(10, 18, 3),
             {10, 14, 18},
         )
+
+    def test_grouped_representative_sample_loader_matches_per_segment_reader(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            log_path = root / "open_floor_main.csv"
+            with log_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(
+                    handle,
+                    fieldnames=[
+                        "master_time_us",
+                        "left_drive_command",
+                        "right_drive_command",
+                        "left_encoder_omega_radps",
+                        "right_encoder_omega_radps",
+                        "gyro_radps",
+                        "accel_body_y_mps2",
+                        "accel_body_x_mps2",
+                        "fan_duty_cycle",
+                    ],
+                )
+                writer.writeheader()
+                for index in range(9):
+                    writer.writerow(
+                        {
+                            "master_time_us": str(index * 1000),
+                            "left_drive_command": "0.10",
+                            "right_drive_command": "0.12",
+                            "left_encoder_omega_radps": str(1.0 + index),
+                            "right_encoder_omega_radps": str(1.2 + index),
+                            "gyro_radps": str(0.01 * index),
+                            "accel_body_y_mps2": str(0.2 + index),
+                            "accel_body_x_mps2": str(0.1 + index),
+                            "fan_duty_cycle": "0.8",
+                        }
+                    )
+            vehicle = VehicleConfig()
+            segments = [
+                SegmentSpec(
+                    log_path=log_path,
+                    segment_id="seg_a",
+                    stage="launch",
+                    split="train",
+                    start_row_index=0,
+                    end_row_index=5,
+                ),
+                SegmentSpec(
+                    log_path=log_path,
+                    segment_id="seg_b",
+                    stage="launch",
+                    split="validation",
+                    start_row_index=3,
+                    end_row_index=8,
+                ),
+            ]
+
+            for max_rows in (0, 3):
+                grouped = read_representative_samples_by_log(
+                    log_path,
+                    segments,
+                    vehicle,
+                    max_rows,
+                )
+                for segment in segments:
+                    expected = list(
+                        read_representative_segment_samples(
+                            segment,
+                            vehicle,
+                            max_rows,
+                        )
+                    )
+                    self.assertEqual(expected, grouped[segment_sample_key(segment)])
 
     def test_ukf_validation_writes_report_without_logged_ukf_state(self) -> None:
         candidates = load_candidates(STAGING / "candidates.json")

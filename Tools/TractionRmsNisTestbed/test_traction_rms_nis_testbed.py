@@ -31,8 +31,6 @@ class TractionRmsNisTestbedTest(unittest.TestCase):
                 "under_expected_penalty_weight": 1.0,
                 "inflation_floor_penalty_weight": 1.0,
                 "log_fields": {
-                    "left_encoder_wheel_rate_nis": {"dimension": 1, "weight": 1.0},
-                    "right_encoder_wheel_rate_nis": {"dimension": 1, "weight": 1.0},
                     "yaw_rate_nis": {"dimension": 1, "weight": 1.0},
                     "forward_accel_nis": {"dimension": 1, "weight": 1.0},
                     "right_accel_nis": {"dimension": 1, "weight": 1.0},
@@ -346,7 +344,7 @@ class TractionRmsNisTestbedTest(unittest.TestCase):
             self.assertEqual(row.accepted_count, 1)
             self.assertEqual(row.rejected_count, 0)
 
-    def test_encoder_rejected_flags_are_ignored(self) -> None:
+    def test_encoder_nis_rows_are_excluded_from_production_scoring(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self.write_csv(
@@ -363,18 +361,18 @@ class TractionRmsNisTestbedTest(unittest.TestCase):
             )
             candidates = testbed.load_candidates(self.make_config())
 
-            itemized, _trial_scores, _rankings = testbed.evaluate_records(
+            itemized, trial_scores, rankings = testbed.evaluate_records(
                 self.make_config(),
                 candidates,
                 trials,
                 records,
             )
-            row = next(item for item in itemized if item.candidate_id == "candidate_good" and item.split == "validation")
 
             self.assertEqual(len(records), 1)
-            self.assertTrue(records[0].accepted)
-            self.assertEqual(row.accepted_count, 1)
-            self.assertEqual(row.rejected_count, 0)
+            self.assertFalse(records[0].accepted)
+            self.assertEqual(itemized, [])
+            self.assertTrue(all(score.sample_count == 0 for score in trial_scores))
+            self.assertTrue(all(math.isinf(score.selection_score) for score in rankings))
 
     def test_launch_rows_are_bucketed_by_per_row_command(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

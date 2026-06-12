@@ -1,0 +1,153 @@
+{
+  "aggregate_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611\\static_stability_analysis\\replay_rows\\nis_aggregates.csv",
+  "bias_segment_manifest": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\representative_corpus\\segment_manifest.json",
+  "bias_summary_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611\\static_stability_analysis\\replay_rows\\bias_summary.csv",
+  "candidate_rms_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611\\static_stability_analysis\\replay_rows\\candidate_rms_nis.csv",
+  "candidates": {
+    "baseline": {
+      "accepted_count": 91569,
+      "accepted_only_rms_nis": 0.47990710655093044,
+      "accepted_only_sqrt_mean_nis": 0.49609607271570133,
+      "finite_count": 91569,
+      "nis_count": 91569,
+      "nonfinite_count": 0,
+      "rejected_count": 0,
+      "rejected_rate": 0.0,
+      "rejected_rate_penalty": 0.0,
+      "residual_rms": {
+        "forward_accel_mps2": 0.27012565601162386,
+        "right_accel_mps2": 0.1810991590329733,
+        "yaw_accel_radps2": 25.82640330334127,
+        "yaw_rate_radps": 0.03171626858593322
+      },
+      "rms_nis": 0.47990710655093044,
+      "segment_count": 1,
+      "sqrt_mean_nis": 0.49609607271570133
+    },
+    "in_shear": {
+      "accepted_count": 91569,
+      "accepted_only_rms_nis": 0.2606405809287311,
+      "accepted_only_sqrt_mean_nis": 0.36118466128484567,
+      "finite_count": 91569,
+      "nis_count": 91569,
+      "nonfinite_count": 0,
+      "rejected_count": 0,
+      "rejected_rate": 0.0,
+      "rejected_rate_penalty": 0.0,
+      "residual_rms": {
+        "forward_accel_mps2": 0.20008410167531307,
+        "right_accel_mps2": 0.12813193841400486,
+        "yaw_accel_radps2": 25.837285101863902,
+        "yaw_rate_radps": 0.02971752871058479
+      },
+      "rms_nis": 0.2606405809287311,
+      "segment_count": 1,
+      "sqrt_mean_nis": 0.36118466128484567
+    },
+    "shear_rate": {
+      "accepted_count": 91569,
+      "accepted_only_rms_nis": 0.2555795585298225,
+      "accepted_only_sqrt_mean_nis": 0.3576621030840582,
+      "finite_count": 91569,
+      "nis_count": 91569,
+      "nonfinite_count": 0,
+      "rejected_count": 0,
+      "rejected_rate": 0.0,
+      "rejected_rate_penalty": 0.0,
+      "residual_rms": {
+        "forward_accel_mps2": 0.19950554485093316,
+        "right_accel_mps2": 0.12667284434089843,
+        "yaw_accel_radps2": 25.86731892507959,
+        "yaw_rate_radps": 0.029624178032372776
+      },
+      "rms_nis": 0.2555795585298225,
+      "segment_count": 1,
+      "sqrt_mean_nis": 0.3576621030840582
+    },
+    "skew_shear": {
+      "accepted_count": 91569,
+      "accepted_only_rms_nis": 0.2642167666477504,
+      "accepted_only_sqrt_mean_nis": 0.3637707734314237,
+      "finite_count": 91569,
+      "nis_count": 91569,
+      "nonfinite_count": 0,
+      "rejected_count": 0,
+      "rejected_rate": 0.0,
+      "rejected_rate_penalty": 0.0,
+      "residual_rms": {
+        "forward_accel_mps2": 0.2012399880053303,
+        "right_accel_mps2": 0.12957760104350996,
+        "yaw_accel_radps2": 25.81183217543224,
+        "yaw_rate_radps": 0.029805005207994232
+      },
+      "rms_nis": 0.2642167666477504,
+      "segment_count": 1,
+      "sqrt_mean_nis": 0.3637707734314237
+    },
+    "slip_envelope": {
+      "accepted_count": 91569,
+      "accepted_only_rms_nis": 0.36654794971474586,
+      "accepted_only_sqrt_mean_nis": 0.4305392974760556,
+      "finite_count": 91569,
+      "nis_count": 91569,
+      "nonfinite_count": 0,
+      "rejected_count": 0,
+      "rejected_rate": 0.0,
+      "rejected_rate_penalty": 0.0,
+      "residual_rms": {
+        "forward_accel_mps2": 0.2300098828353569,
+        "right_accel_mps2": 0.15866900830077663,
+        "yaw_accel_radps2": 25.49426865224998,
+        "yaw_rate_radps": 0.031310130357583794
+      },
+      "rms_nis": 0.36654794971474586,
+      "segment_count": 1,
+      "sqrt_mean_nis": 0.4305392974760556
+    },
+    "stribeck_fade": {
+      "accepted_count": 91569,
+      "accepted_only_rms_nis": 0.2651220842409079,
+      "accepted_only_sqrt_mean_nis": 0.36443014192686296,
+      "finite_count": 91569,
+      "nis_count": 91569,
+      "nonfinite_count": 0,
+      "rejected_count": 0,
+      "rejected_rate": 0.0,
+      "rejected_rate_penalty": 0.0,
+      "residual_rms": {
+        "forward_accel_mps2": 0.20160030913264865,
+        "right_accel_mps2": 0.1299634707629765,
+        "yaw_accel_radps2": 25.805462518318244,
+        "yaw_rate_radps": 0.02982592527031049
+      },
+      "rms_nis": 0.2651220842409079,
+      "segment_count": 1,
+      "sqrt_mean_nis": 0.36443014192686296
+    }
+  },
+  "diagnostics_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611\\static_stability_analysis\\replay_rows\\residual_diagnostics.csv",
+  "itemized_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611\\static_stability_analysis\\replay_rows\\itemized_rms_nis.csv",
+  "jobs_requested": 1,
+  "jobs_used": 1,
+  "nis_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611\\static_stability_analysis\\replay_rows\\nis_samples.csv",
+  "processed_samples": 30523,
+  "processed_segments": 1,
+  "replay_mode": "ekf",
+  "report_md": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611\\static_stability_analysis\\replay_rows\\report.md",
+  "row_artifacts_enabled": true,
+  "schema_version": 1,
+  "skipped_corrupted_segments": 0,
+  "source_log_count": 1,
+  "state_names": [
+    "px_m",
+    "py_m",
+    "heading_rad",
+    "vf_mps",
+    "vr_mps",
+    "yaw_rate_radps",
+    "delta_af_mps2",
+    "delta_ar_mps2",
+    "delta_yaw_accel_radps2"
+  ],
+  "uses_logged_ukf_state": false
+}

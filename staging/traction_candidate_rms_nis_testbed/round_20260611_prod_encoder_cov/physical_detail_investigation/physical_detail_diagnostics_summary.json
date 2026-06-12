@@ -1,0 +1,232 @@
+{
+  "inputs": {
+    "drift_metrics": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611_prod_encoder_cov\\shear_rate\\static_position_drift\\static_position_drift_metrics.csv",
+    "launch_itemized": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611_prod_encoder_cov\\shear_rate\\refined_assessment_ekf\\itemized_rms_nis.csv",
+    "static_log": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\TestResults\\mmlog_decode_2026-06-08_23-37-25\\open_floor_main.csv"
+  },
+  "lateral_compliance_scale": {
+    "deflection_m": 0.0006,
+    "equivalent_accel_if_released_over_100ms_mps2": 0.11999999999999997,
+    "equivalent_accel_if_released_over_10ms_mps2": 11.999999999999998,
+    "equivalent_accel_if_released_over_1ms_mps2": 1200.0,
+    "equivalent_accel_if_released_over_30ms_mps2": 1.3333333333333333,
+    "fraction_of_static_shear_rate_drift_full": 0.006985746030240602,
+    "fraction_of_static_shear_rate_drift_prediction_only": 0.02333628486383379
+  },
+  "sensor_stats": {
+    "accel_body_forward_mps2": {
+      "count": 30523,
+      "max_abs": 0.41985419392585754,
+      "mean": 0.004492266078757889,
+      "p50_abs": 0.25474947690963745,
+      "p95_abs": 0.3673844337463379,
+      "p99_abs": 0.38396188616752625,
+      "rms": 0.2561644211711646,
+      "std": 0.2561250284908436
+    },
+    "accel_body_right_mps2": {
+      "count": 30523,
+      "max_abs": 0.28681328892707825,
+      "mean": -0.0036827046685849424,
+      "p50_abs": 0.1726086586713791,
+      "p95_abs": 0.24917897582054138,
+      "p99_abs": 0.2604922652244568,
+      "rms": 0.1737397620851015,
+      "std": 0.17370072715942111
+    },
+    "encoder_distance_first_difference_m": {
+      "left": {
+        "count": 30522,
+        "max_abs": 0.0,
+        "mean": 0.0,
+        "p50_abs": 0.0,
+        "p95_abs": 0.0,
+        "p99_abs": 0.0,
+        "rms": 0.0,
+        "std": 0.0
+      },
+      "right": {
+        "count": 30522,
+        "max_abs": 0.0,
+        "mean": 0.0,
+        "p50_abs": 0.0,
+        "p95_abs": 0.0,
+        "p99_abs": 0.0,
+        "rms": 0.0,
+        "std": 0.0
+      }
+    },
+    "gyro_radps": {
+      "count": 30523,
+      "max_abs": 0.05314527451992035,
+      "mean": -0.000443074265006443,
+      "p50_abs": 0.02871066704392433,
+      "p95_abs": 0.04214970022439957,
+      "p99_abs": 0.04581489413976669,
+      "rms": 0.02898695898549792,
+      "std": 0.028983572526909574
+    },
+    "left_encoder_distance_m": {
+      "count": 30523,
+      "max_abs": 0.0,
+      "mean": 0.0,
+      "p50_abs": 0.0,
+      "p95_abs": 0.0,
+      "p99_abs": 0.0,
+      "rms": 0.0,
+      "std": 0.0
+    },
+    "left_encoder_velocity_mps": {
+      "count": 30523,
+      "max_abs": 0.0,
+      "mean": 0.0,
+      "p50_abs": 0.0,
+      "p95_abs": 0.0,
+      "p99_abs": 0.0,
+      "rms": 0.0,
+      "std": 0.0
+    },
+    "left_encoder_wheel_speed_radps": {
+      "count": 30523,
+      "max_abs": 0.0,
+      "mean": 0.0,
+      "p50_abs": 0.0,
+      "p95_abs": 0.0,
+      "p99_abs": 0.0,
+      "rms": 0.0,
+      "std": 0.0
+    },
+    "right_encoder_distance_m": {
+      "count": 30523,
+      "max_abs": 0.0,
+      "mean": 0.0,
+      "p50_abs": 0.0,
+      "p95_abs": 0.0,
+      "p99_abs": 0.0,
+      "rms": 0.0,
+      "std": 0.0
+    },
+    "right_encoder_velocity_mps": {
+      "count": 30523,
+      "max_abs": 0.0,
+      "mean": 0.0,
+      "p50_abs": 0.0,
+      "p95_abs": 0.0,
+      "p99_abs": 0.0,
+      "rms": 0.0,
+      "std": 0.0
+    },
+    "right_encoder_wheel_speed_radps": {
+      "count": 30523,
+      "max_abs": 0.0,
+      "mean": 0.0,
+      "p50_abs": 0.0,
+      "p95_abs": 0.0,
+      "p99_abs": 0.0,
+      "rms": 0.0,
+      "std": 0.0
+    },
+    "sample_dt_s": {
+      "count": 30522,
+      "max_abs": 0.001,
+      "mean": 0.001,
+      "p50_abs": 0.001,
+      "p95_abs": 0.001,
+      "p99_abs": 0.001,
+      "rms": 0.001,
+      "std": 0.0
+    }
+  },
+  "static_segment": {
+    "duration_s": 30.522,
+    "fan_duty_cycle": 0.8,
+    "row_count": 30523,
+    "segment_end_row_index": 30522,
+    "segment_id": "ofnis_001617",
+    "segment_start_row_index": 0
+  },
+  "static_shear_rate_drift": {
+    "full_static_replay": {
+      "final_radial_m": 0.085889180254,
+      "final_x_m": -0.0504707881876,
+      "final_y_m": -0.0694956892507,
+      "passes_5mm": "False",
+      "yaw_drift_rad": -0.0179771345043
+    },
+    "prediction_only_encoder_only": {
+      "final_radial_m": 0.0257110334186,
+      "final_x_m": -0.0216530871408,
+      "final_y_m": -0.0138636595718,
+      "passes_5mm": "False",
+      "yaw_drift_rad": 0.0198231039959
+    }
+  },
+  "yaw_launch_residual_scale": {
+    "forward_accel_nis": {
+      "guarded_rms_nis_stats": {
+        "count": 104,
+        "max_abs": 310.280009456,
+        "mean": 34.49276811555106,
+        "p50_abs": 10.88402793845,
+        "p95_abs": 203.5258438563999,
+        "p99_abs": 290.10853333094997,
+        "rms": 74.34382123126483,
+        "std": 65.85782188163444
+      },
+      "physical_residual_rms_stats": {
+        "count": 104,
+        "max_abs": 18.7558637401,
+        "mean": 3.8341969188241345,
+        "p50_abs": 3.419119840005,
+        "p95_abs": 12.383889682069999,
+        "p99_abs": 18.626486385072994,
+        "rms": 5.36643085044447,
+        "std": 3.7546656389459856
+      }
+    },
+    "right_accel_nis": {
+      "guarded_rms_nis_stats": {
+        "count": 104,
+        "max_abs": 132.965318951,
+        "mean": 19.278486405457596,
+        "p50_abs": 4.960183200665,
+        "p95_abs": 94.8732495005899,
+        "p99_abs": 131.22652982319997,
+        "rms": 35.80282346160335,
+        "std": 30.169224877966652
+      },
+      "physical_residual_rms_stats": {
+        "count": 104,
+        "max_abs": 10.9195936473,
+        "mean": 2.7943577043349617,
+        "p50_abs": 2.248929930365,
+        "p95_abs": 8.193899567757999,
+        "p99_abs": 10.0912004341155,
+        "rms": 3.588824582075583,
+        "std": 2.2519384763207513
+      }
+    },
+    "yaw_rate_nis": {
+      "guarded_rms_nis_stats": {
+        "count": 104,
+        "max_abs": 392.303535652,
+        "mean": 48.06041455553058,
+        "p50_abs": 12.773452923699999,
+        "p95_abs": 216.33136062350002,
+        "p99_abs": 361.45099015821995,
+        "rms": 93.93629268083501,
+        "std": 80.71074052051587
+      },
+      "physical_residual_rms_stats": {
+        "count": 104,
+        "max_abs": 0.406955307324,
+        "mean": 0.15141160038712595,
+        "p50_abs": 0.151107631022,
+        "p95_abs": 0.3424151870885999,
+        "p99_abs": 0.40162704937668003,
+        "rms": 0.17444382907686115,
+        "std": 0.08663242332525639
+      }
+    }
+  }
+}

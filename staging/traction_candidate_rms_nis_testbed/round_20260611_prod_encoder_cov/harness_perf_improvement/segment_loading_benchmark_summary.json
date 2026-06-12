@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "segment_manifest": "staging\\traction_candidate_rms_nis_testbed\\parallel_replace_20260420_102209_20260610\\ukf_one_log_20260610_070622_active_manifest.json",
+  "segment_count": 4,
+  "max_rows_per_segment": 32,
+  "loaded_samples": 128,
+  "source_logs": 1,
+  "cached_index_build_count": 1,
+  "cached_indexed_row_count": 225404,
+  "cached_file_read_count": 1,
+  "measurements": [
+    {
+      "name": "old_read_segment_samples_per_segment",
+      "repeats": 9,
+      "units": 128,
+      "median_s": 1.8921233000000939,
+      "mean_s": 1.8588191555399034,
+      "min_s": 1.6578664999688044,
+      "max_s": 1.9880902000004426,
+      "median_us_per_sample": 14782.213281250733,
+      "mean_us_per_sample": 14522.024652655495
+    },
+    {
+      "name": "grouped_source_log_cold_cached_offsets",
+      "repeats": 9,
+      "units": 128,
+      "median_s": 0.321419500047341,
+      "mean_s": 0.32223217777856106,
+      "min_s": 0.2749959999928251,
+      "max_s": 0.3631232000188902,
+      "median_us_per_sample": 2511.0898441198515,
+      "mean_us_per_sample": 2517.4388888950084
+    },
+    {
+      "name": "grouped_source_log_warm_cached_offsets",
+      "repeats": 9,
+      "units": 128,
+      "median_s": 0.004183399956673384,
+      "mean_s": 0.004263677789519231,
+      "min_s": 0.0035701999440789223,
+      "max_s": 0.005498399958014488,
+      "median_us_per_sample": 32.68281216151081,
+      "mean_us_per_sample": 33.30998273061899
+    }
+  ]
+}

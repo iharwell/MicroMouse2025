@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "description": "Narrow static replay manifest for TESTBED-ONLY slip_zlock assessment.",
+  "segments": [
+    {
+      "log_id": "mmlog_decode_2026-06-08_23-37-25",
+      "log_path": "TestResults/mmlog_decode_2026-06-08_23-37-25/open_floor_main.csv",
+      "segment_id": "ofnis_001617",
+      "segment_start_row_index": 0,
+      "segment_end_row_index": 30522,
+      "segment_duration_s": 30.522,
+      "stage": "static",
+      "family": "static",
+      "split": "held_out",
+      "end_reason": "reliable_stationary",
+      "start_criterion": "static reliable_stationary_run rows=30523",
+      "parameter_fields": {
+        "parameter": "none",
+        "test_value_kind": "none",
+        "test_value": null,
+        "speed_bin": 0.0
+      },
+      "observed_command": {
+        "active_command_rows": 0,
+        "observed_command_pair_mode": null,
+        "observed_command_magnitude_median": null
+      }
+    }
+  ]
+}

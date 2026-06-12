@@ -25,14 +25,6 @@
       "SEC_40_YAW": 1.0
     },
     "log_fields": {
-      "left_encoder_wheel_rate_nis": {
-        "dimension": 1,
-        "weight": 1.0
-      },
-      "right_encoder_wheel_rate_nis": {
-        "dimension": 1,
-        "weight": 1.0
-      },
       "yaw_rate_nis": {
         "dimension": 1,
         "weight": 1.0

@@ -185,6 +185,18 @@ UNGATED_ENCODER_NIS_GATE = math.inf
 ACCEL_BIAS_MAX_DRIVE_COMMAND = 0.08
 ACCEL_BIAS_MAX_ENCODER_WHEEL_SPEED_RADPS = 1.0
 ACCEL_BIAS_MAX_YAW_RATE_RADPS = 0.12
+PRODUCTION_ENCODER_LINEAR_SPEED_SIGMA_MPS = 0.021187
+PRODUCTION_ENCODER_YAW_RATE_SIGMA_RADPS = 0.111268
+PRODUCTION_MEASUREMENT_NIS_LOG_PARAMETERS = (
+    "yaw_rate_nis",
+    "forward_accel_nis",
+    "right_accel_nis",
+)
+PRODUCTION_MEASUREMENT_RESIDUAL_TAIL_LOG_PARAMETERS = (
+    "yaw_rate_residual_tail",
+    "forward_accel_residual_tail",
+    "right_accel_residual_tail",
+)
 
 DEFAULT_SPLIT_CONFIG = {
     "seed": "traction_rms_nis_testbed_v1",
@@ -245,8 +257,12 @@ SUPPORTED_CANDIDATE_MODELS = frozenset(
     (
         "current_holdover_approximation",
         "algebraic_envelope",
+        "slip_zlock",
         "stribeck_algebraic",
         "load_sensitive_anisotropic",
+        "skew_shear",
+        "shear_rate",
+        "in_shear",
     )
 )
 
@@ -266,6 +282,17 @@ MODEL_PARAMETER_DEFAULTS = {
         "low_speed_blend_mps": 0.07,
     },
     "algebraic_envelope": ALGEBRAIC_MODEL_DEFAULTS,
+    "slip_zlock": {
+        **ALGEBRAIC_MODEL_DEFAULTS,
+        "stationary_zlock_enabled": 1.0,
+        "stationary_zlock_window_s": 0.20,
+        "stationary_zlock_command_epsilon": 0.015,
+        "stationary_zlock_wheel_rate_epsilon_radps": 0.02,
+        "stationary_zlock_yaw_rate_epsilon_radps": 0.06,
+        "stationary_zlock_position_sigma_m": 0.00025,
+        "stationary_zlock_velocity_sigma_mps": 0.0010,
+        "stationary_zlock_yaw_rate_sigma_radps": 0.0030,
+    },
     "stribeck_algebraic": {
         **ALGEBRAIC_MODEL_DEFAULTS,
         "dynamic_to_static_grip_ratio": 0.82,
@@ -280,6 +307,24 @@ MODEL_PARAMETER_DEFAULTS = {
         "lateral_load_sensitivity": 0.26,
         "yaw_coupling_gain": 0.12,
         "yaw_damping_speed_blend_mps": 0.02,
+    },
+    "skew_shear": {
+        **ALGEBRAIC_MODEL_DEFAULTS,
+        "shear_coupling_gain": 0.18,
+        "shear_activation_speed_mps": 0.06,
+        "shear_drive_force_blend_n": 0.04,
+    },
+    "shear_rate": {
+        **ALGEBRAIC_MODEL_DEFAULTS,
+        "shear_rate_peak_force_n": 0.035,
+        "shear_rate_activation_mps2": 35.0,
+        "shear_rate_breakaway_speed_mps": 0.10,
+    },
+    "in_shear": {
+        **ALGEBRAIC_MODEL_DEFAULTS,
+        "inward_lateral_stiffness_gain": 0.25,
+        "inward_lateral_grip_gain": 0.18,
+        "inward_shear_blend_speed_mps": 0.04,
     },
 }
 
@@ -443,6 +488,29 @@ def covariance_sandwich(
     return matmul(matmul(jacobian, covariance), transpose(jacobian))
 
 
+def encoder_pair_covariance_radps(
+    vehicle: VehicleConfig,
+    linear_speed_sigma_mps: float,
+    yaw_rate_sigma_radps: float,
+) -> list[list[float]]:
+    half_track_m = 0.5 * vehicle.track_width_m
+    variance_u_mps2 = linear_speed_sigma_mps * linear_speed_sigma_mps
+    variance_yaw_radps2 = yaw_rate_sigma_radps * yaw_rate_sigma_radps
+    variance_wheel_linear_mps2 = (
+        variance_u_mps2 + half_track_m * half_track_m * variance_yaw_radps2
+    )
+    covariance_wheel_linear_mps2 = (
+        variance_u_mps2 - half_track_m * half_track_m * variance_yaw_radps2
+    )
+    inv_wheel_radius2 = 1.0 / (vehicle.wheel_radius_m * vehicle.wheel_radius_m)
+    diagonal_value = variance_wheel_linear_mps2 * inv_wheel_radius2
+    off_diagonal_value = covariance_wheel_linear_mps2 * inv_wheel_radius2
+    return [
+        [diagonal_value, off_diagonal_value],
+        [off_diagonal_value, diagonal_value],
+    ]
+
+
 def finite_difference_jacobian(
     function: Callable[[list[float]], list[float]],
     state: Sequence[float],
@@ -550,7 +618,8 @@ class ProcessConfig:
     )
     residual_tau_s: tuple[float, float, float] = (0.075, 0.075, 0.075)
     residual_ss_sigma: tuple[float, float, float] = (0.18, 0.22, 4.0)
-    encoder_wheel_rate_sigma_radps: float = 1.0
+    encoder_linear_speed_sigma_mps: float = PRODUCTION_ENCODER_LINEAR_SPEED_SIGMA_MPS
+    encoder_yaw_rate_sigma_radps: float = PRODUCTION_ENCODER_YAW_RATE_SIGMA_RADPS
     base_position_sigma_per_tick_m: float = 2.0e-5
     base_heading_sigma_per_tick_rad: float = 2.0e-5
     base_velocity_sigma_per_tick_mps: float = 5.0e-4
@@ -565,8 +634,13 @@ class ProcessConfig:
             state_jacobian_steps=steps,
             residual_tau_s=parse_triplet(raw.get("residual_tau_s"), (0.075, 0.075, 0.075)),
             residual_ss_sigma=parse_triplet(raw.get("residual_ss_sigma"), (0.18, 0.22, 4.0)),
-            encoder_wheel_rate_sigma_radps=parse_float(
-                raw.get("encoder_wheel_rate_sigma_radps"), 1.0
+            encoder_linear_speed_sigma_mps=parse_float(
+                raw.get("encoder_linear_speed_sigma_mps"),
+                PRODUCTION_ENCODER_LINEAR_SPEED_SIGMA_MPS,
+            ),
+            encoder_yaw_rate_sigma_radps=parse_float(
+                raw.get("encoder_yaw_rate_sigma_radps"),
+                PRODUCTION_ENCODER_YAW_RATE_SIGMA_RADPS,
             ),
             base_position_sigma_per_tick_m=parse_float(
                 raw.get("base_position_sigma_per_tick_m"), 2.0e-5
@@ -651,6 +725,9 @@ class ReplaySample:
     split: str
     run_id: str
     corrupted: bool = False
+    previous_left_wheel_rate_radps: float | None = None
+    previous_right_wheel_rate_radps: float | None = None
+    previous_yaw_rate_radps: float | None = None
 
 
 @dataclass(frozen=True)
@@ -1222,6 +1299,16 @@ class CandidatePlant:
             lateral_mu = peak_mu * (1.0 - lateral_sensitivity * load_ratio)
             longitudinal_mu = max(0.10, longitudinal_mu)
             lateral_mu = max(0.10, lateral_mu)
+        elif model == "in_shear":
+            side = 1.0 if contact.right_m >= 0.0 else -1.0
+            inward_sign = -side
+            inward_velocity = inward_sign * rel_right_mps
+            blend_speed = max(params.get("inward_shear_blend_speed_mps", 0.04), 1.0e-6)
+            inward_blend = 0.5 * (1.0 + math.tanh(inward_velocity / blend_speed))
+            stiffness_gain = params.get("inward_lateral_stiffness_gain", 0.0)
+            grip_gain = params.get("inward_lateral_grip_gain", 0.0)
+            lateral_gain *= max(0.05, 1.0 + stiffness_gain * inward_blend)
+            lateral_mu = max(0.10, lateral_mu * max(0.05, 1.0 + grip_gain * inward_blend))
 
         command = sample.left_command if contact.side == "left" else sample.right_command
         drive_force_bank = command * self.vehicle.max_drive_force_per_bank_n
@@ -1230,6 +1317,26 @@ class CandidatePlant:
 
         requested_forward = drive_share + blend * long_gain * rel_forward_mps
         requested_right = blend * lateral_gain * rel_right_mps
+        if model == "skew_shear":
+            shear_speed = max(params.get("shear_activation_speed_mps", 0.06), 1.0e-6)
+            drive_blend = max(params.get("shear_drive_force_blend_n", 0.04), 1.0e-6)
+            contact_gate = rel_mag / math.sqrt(rel_mag**2 + shear_speed**2)
+            drive_gate = abs(drive_share) / math.sqrt(drive_share**2 + drive_blend**2)
+            drive_direction = smooth_sign(drive_share, drive_blend)
+            coupling = params.get("shear_coupling_gain", 0.0) * contact_gate * drive_gate * drive_direction
+            requested_forward += blend * coupling * lateral_gain * rel_right_mps
+            requested_right += blend * coupling * long_gain * rel_forward_mps
+        elif model == "shear_rate":
+            rate_forward, rate_right = self.replayable_contact_velocity_rates(contact, sample)
+            rate_mag = math.hypot(rate_forward, rate_right)
+            rate_blend = max(params.get("shear_rate_activation_mps2", 35.0), 1.0e-6)
+            rate_gate = rate_mag / math.sqrt(rate_mag**2 + rate_blend**2)
+            breakaway_speed = max(params.get("shear_rate_breakaway_speed_mps", 0.10), 1.0e-6)
+            breakaway_gate = breakaway_speed / math.sqrt(rel_mag**2 + breakaway_speed**2)
+            peak_force = max(0.0, params.get("shear_rate_peak_force_n", 0.0))
+            transient_force = peak_force * rate_gate * breakaway_gate
+            requested_forward += transient_force * smooth_sign(rate_forward, rate_blend)
+            requested_right += transient_force * smooth_sign(rate_right, rate_blend)
         forward_limit = max(longitudinal_mu * normal_load_n, 1.0e-6)
         right_limit = max(lateral_mu * normal_load_n, 1.0e-6)
         utilization = (
@@ -1238,6 +1345,41 @@ class CandidatePlant:
         ) ** (1.0 / exponent)
         scale = smooth_scale_to_unit(utilization)
         return requested_forward * scale, requested_right * scale, utilization, 1.0 - scale
+
+    def replayable_contact_velocity_rates(
+        self,
+        contact: Contact,
+        sample: ReplaySample,
+    ) -> tuple[float, float]:
+        dt_s = max(sample.dt_s, 1.0e-6)
+        if contact.side == "left":
+            previous_wheel_rate = sample.previous_left_wheel_rate_radps
+            current_wheel_rate = sample.left_wheel_rate_radps
+        else:
+            previous_wheel_rate = sample.previous_right_wheel_rate_radps
+            current_wheel_rate = sample.right_wheel_rate_radps
+        if (
+            previous_wheel_rate is not None
+            and finite(previous_wheel_rate)
+            and finite(current_wheel_rate)
+        ):
+            forward_rate = self.vehicle.wheel_radius_m * (current_wheel_rate - previous_wheel_rate) / dt_s
+        else:
+            forward_rate = 0.0
+
+        if (
+            sample.previous_yaw_rate_radps is not None
+            and finite(sample.previous_yaw_rate_radps)
+            and finite(sample.yaw_rate_radps)
+        ):
+            right_rate = (
+                -(sample.yaw_rate_radps - sample.previous_yaw_rate_radps)
+                * contact.forward_m
+                / dt_s
+            )
+        else:
+            right_rate = 0.0
+        return forward_rate, right_rate
 
     def current_holdover_contact_force(
         self,
@@ -1322,6 +1464,10 @@ class EkfReplay:
         self.covariance = covariance
         self.state = [0.0 for _ in range(N)]
         self.P = diagonal([std * std for std in covariance.initial_state_std])
+        self.stationary_zlock_time_s = 0.0
+        self.stationary_zlock_anchor: tuple[float, float] | None = None
+        self.stationary_zlock_applied_count = 0
+        self.stationary_zlock_released_count = 0
 
     def predict(self, sample: ReplaySample) -> PlantResult:
         previous_state = self.state.copy()
@@ -1404,7 +1550,13 @@ class EkfReplay:
                 for col in range(N):
                     q[row][col] += column[row] * variance * column[col]
 
-        if process.encoder_wheel_rate_sigma_radps > 0.0 and dt > 0.0:
+        if (
+            (
+                process.encoder_linear_speed_sigma_mps > 0.0
+                or process.encoder_yaw_rate_sigma_radps > 0.0
+            )
+            and dt > 0.0
+        ):
             q = add_matrix(q, self.encoder_input_noise(state, sample, dt))
         return q
 
@@ -1422,45 +1574,13 @@ class EkfReplay:
             x_plus = self.plant.propagate(state, plus, dt_s)
             x_minus = self.plant.propagate(state, minus, dt_s)
             columns.append([(x_plus[index] - x_minus[index]) / (2.0 * step) for index in range(N)])
-        sigma2 = self.covariance.process.encoder_wheel_rate_sigma_radps**2
-        q = zeros(N, N)
-        for column in columns:
-            for row in range(N):
-                for col in range(N):
-                    q[row][col] += column[row] * sigma2 * column[col]
-        return q
-
-    def update_left_encoder(self, sample: ReplaySample) -> UpdateResult | None:
-        if not finite(sample.left_wheel_rate_radps):
-            return None
-        return self.scalar_update(
-            "left_encoder_wheel_rate_nis",
-            sample.left_wheel_rate_radps,
-            lambda state: predicted_encoder_wheel_rate_radps(
-                state,
-                self.plant.vehicle,
-                "left",
-            ),
-            self.covariance.measurement.encoder_wheel_rate_sigma_radps**2,
-            self.covariance.measurement.encoder_gate_nis,
-            h_steps=self.covariance.process.state_jacobian_steps,
+        jacobian = [[columns[0][row], columns[1][row]] for row in range(N)]
+        wheel_rate_covariance = encoder_pair_covariance_radps(
+            self.plant.vehicle,
+            self.covariance.process.encoder_linear_speed_sigma_mps,
+            self.covariance.process.encoder_yaw_rate_sigma_radps,
         )
-
-    def update_right_encoder(self, sample: ReplaySample) -> UpdateResult | None:
-        if not finite(sample.right_wheel_rate_radps):
-            return None
-        return self.scalar_update(
-            "right_encoder_wheel_rate_nis",
-            sample.right_wheel_rate_radps,
-            lambda state: predicted_encoder_wheel_rate_radps(
-                state,
-                self.plant.vehicle,
-                "right",
-            ),
-            self.covariance.measurement.encoder_wheel_rate_sigma_radps**2,
-            self.covariance.measurement.encoder_gate_nis,
-            h_steps=self.covariance.process.state_jacobian_steps,
-        )
+        return covariance_sandwich(jacobian, wheel_rate_covariance)
 
     def update_yaw_rate(self, sample: ReplaySample) -> UpdateResult | None:
         if not sample.gyro_valid or not finite(sample.yaw_rate_radps):
@@ -1497,6 +1617,108 @@ class EkfReplay:
             self.covariance.measurement.accel_gate_nis,
             h_steps=self.covariance.process.state_jacobian_steps,
         )
+
+    def apply_stationary_zlock(self, sample: ReplaySample) -> bool:
+        if not self.stationary_zlock_sample_eligible(sample):
+            if self.stationary_zlock_time_s > 0.0 or self.stationary_zlock_anchor is not None:
+                self.stationary_zlock_released_count += 1
+            self.stationary_zlock_time_s = 0.0
+            self.stationary_zlock_anchor = None
+            return False
+
+        self.stationary_zlock_time_s += max(0.0, sample.dt_s)
+        window_s = max(0.0, self.plant.params.get("stationary_zlock_window_s", 0.20))
+        if self.stationary_zlock_time_s < window_s:
+            return False
+
+        if self.stationary_zlock_anchor is None:
+            self.stationary_zlock_anchor = (self.state[PX], self.state[PY])
+
+        px_anchor, py_anchor = self.stationary_zlock_anchor
+        position_variance = max(
+            self.plant.params.get("stationary_zlock_position_sigma_m", 0.00025) ** 2,
+            1.0e-12,
+        )
+        velocity_variance = max(
+            self.plant.params.get("stationary_zlock_velocity_sigma_mps", 0.0010) ** 2,
+            1.0e-12,
+        )
+        yaw_rate_variance = max(
+            self.plant.params.get("stationary_zlock_yaw_rate_sigma_radps", 0.0030) ** 2,
+            1.0e-12,
+        )
+        steps = self.covariance.process.state_jacobian_steps
+        self.scalar_update(
+            "stationary_zlock_internal_px",
+            px_anchor,
+            lambda state: state[PX],
+            position_variance,
+            math.inf,
+            h_steps=steps,
+        )
+        self.scalar_update(
+            "stationary_zlock_internal_py",
+            py_anchor,
+            lambda state: state[PY],
+            position_variance,
+            math.inf,
+            h_steps=steps,
+        )
+        self.scalar_update(
+            "stationary_zlock_internal_vf",
+            0.0,
+            lambda state: state[VF],
+            velocity_variance,
+            math.inf,
+            h_steps=steps,
+        )
+        self.scalar_update(
+            "stationary_zlock_internal_vr",
+            0.0,
+            lambda state: state[VR],
+            velocity_variance,
+            math.inf,
+            h_steps=steps,
+        )
+        self.scalar_update(
+            "stationary_zlock_internal_yaw_rate",
+            0.0,
+            lambda state: state[YAW_RATE],
+            yaw_rate_variance,
+            math.inf,
+            h_steps=steps,
+        )
+        self.stationary_zlock_applied_count += 1
+        return True
+
+    def stationary_zlock_sample_eligible(self, sample: ReplaySample) -> bool:
+        params = self.plant.params
+        if params.get("stationary_zlock_enabled", 0.0) <= 0.0:
+            return False
+        command_epsilon = max(0.0, params.get("stationary_zlock_command_epsilon", 0.015))
+        wheel_rate_epsilon = max(
+            0.0,
+            params.get("stationary_zlock_wheel_rate_epsilon_radps", 0.02),
+        )
+        yaw_rate_epsilon = max(
+            0.0,
+            params.get("stationary_zlock_yaw_rate_epsilon_radps", 0.06),
+        )
+        if max(abs(sample.left_command), abs(sample.right_command)) > command_epsilon:
+            return False
+        wheel_rates = (
+            sample.left_wheel_rate_radps,
+            sample.right_wheel_rate_radps,
+            sample.previous_left_wheel_rate_radps,
+            sample.previous_right_wheel_rate_radps,
+        )
+        if any(value is None or not finite(value) or abs(value) > wheel_rate_epsilon for value in wheel_rates):
+            return False
+        if not sample.gyro_valid or not finite(sample.yaw_rate_radps):
+            return False
+        if abs(sample.yaw_rate_radps) > yaw_rate_epsilon:
+            return False
+        return True
 
     def scalar_update(
         self,
@@ -1883,6 +2105,103 @@ def direct_input_segment(
     )
 
 
+@dataclass(frozen=True)
+class SourceLogIndex:
+    fieldnames: list[str]
+    columns: ReplayColumnBinding
+    row_offsets: list[int]
+
+
+class SourceLogSampleCache:
+    """Caches source-log row offsets and reads segment rows without rescanning CSV prefixes."""
+
+    def __init__(self) -> None:
+        self._indexes: dict[Path, SourceLogIndex] = {}
+        self.index_build_count = 0
+        self.indexed_row_count = 0
+        self.file_read_count = 0
+
+    def index_for_log(self, log_path: Path) -> SourceLogIndex:
+        cached = self._indexes.get(log_path)
+        if cached is not None:
+            return cached
+        if not log_path.exists():
+            raise ConfigError(f"Input CSV not found: {log_path}")
+        with log_path.open("rb") as handle:
+            header = handle.readline()
+            if not header:
+                raise ConfigError(f"CSV header missing: {log_path}")
+            header_text = header.decode("utf-8-sig", errors="replace")
+            try:
+                fieldnames = next(csv.reader([header_text]))
+            except StopIteration as exc:
+                raise ConfigError(f"CSV header missing: {log_path}") from exc
+            offsets: list[int] = []
+            while True:
+                offset = handle.tell()
+                line = handle.readline()
+                if not line:
+                    break
+                offsets.append(offset)
+        index = SourceLogIndex(
+            fieldnames=fieldnames,
+            columns=ReplayColumnBinding.from_fieldnames(fieldnames),
+            row_offsets=offsets,
+        )
+        self._indexes[log_path] = index
+        self.index_build_count += 1
+        self.indexed_row_count += len(offsets)
+        return index
+
+    def read_targeted_segment_samples(
+        self,
+        log_path: Path,
+        segments: Sequence[SegmentSpec],
+        target_rows_by_segment: dict[tuple[Path, str, int, int], Sequence[int]],
+        vehicle: VehicleConfig,
+    ) -> dict[tuple[Path, str, int, int], list[ReplaySample]]:
+        result: dict[tuple[Path, str, int, int], list[ReplaySample]] = {
+            segment_sample_key(segment): [] for segment in segments
+        }
+        row_targets: dict[int, list[SegmentSpec]] = {}
+        for segment in segments:
+            key = segment_sample_key(segment)
+            for row_index in target_rows_by_segment.get(key, ()):
+                row_targets.setdefault(row_index, []).append(segment)
+        if not row_targets:
+            return result
+
+        index = self.index_for_log(log_path)
+        previous_time_by_segment: dict[tuple[Path, str, int, int], int] = {}
+        previous_sample_by_segment: dict[tuple[Path, str, int, int], ReplaySample] = {}
+        self.file_read_count += 1
+        with log_path.open("rb") as handle:
+            for row_index in sorted(row_targets):
+                if row_index >= len(index.row_offsets):
+                    continue
+                handle.seek(index.row_offsets[row_index])
+                line = handle.readline().decode("utf-8", errors="replace")
+                try:
+                    row = next(csv.reader([line]))
+                except StopIteration:
+                    continue
+                for segment in row_targets[row_index]:
+                    key = segment_sample_key(segment)
+                    sample = sample_from_bound_row(
+                        row,
+                        index.columns,
+                        segment,
+                        row_index,
+                        previous_time_by_segment.get(key),
+                        vehicle,
+                        previous_sample_by_segment.get(key),
+                    )
+                    previous_time_by_segment[key] = sample.master_time_us
+                    previous_sample_by_segment[key] = sample
+                    result[key].append(sample)
+        return result
+
+
 def read_segment_samples(
     spec: SegmentSpec,
     vehicle: VehicleConfig,
@@ -1892,6 +2211,7 @@ def read_segment_samples(
         raise ConfigError(f"Input CSV not found: {spec.log_path}")
     emitted = 0
     previous_time_us: int | None = None
+    previous_sample: ReplaySample | None = None
     with spec.log_path.open(newline="", encoding="utf-8-sig") as handle:
         reader = csv.DictReader(handle)
         if not reader.fieldnames:
@@ -1901,12 +2221,46 @@ def read_segment_samples(
                 continue
             if spec.end_row_index >= 0 and row_index > spec.end_row_index:
                 break
-            sample = sample_from_row(row, spec, row_index, previous_time_us, vehicle)
+            sample = sample_from_row(row, spec, row_index, previous_time_us, vehicle, previous_sample)
             previous_time_us = sample.master_time_us
             yield sample
+            previous_sample = sample
             emitted += 1
             if max_rows > 0 and emitted >= max_rows:
                 break
+
+
+def segment_row_indices(spec: SegmentSpec, max_rows: int, row_count: int | None = None) -> list[int]:
+    if max_rows > 0:
+        end_row_index = spec.start_row_index + max_rows - 1
+        if spec.end_row_index >= 0:
+            end_row_index = min(end_row_index, spec.end_row_index)
+    elif spec.end_row_index >= 0:
+        end_row_index = spec.end_row_index
+    elif row_count is not None:
+        end_row_index = row_count - 1
+    else:
+        return []
+    if end_row_index < spec.start_row_index:
+        return []
+    return list(range(spec.start_row_index, end_row_index + 1))
+
+
+def read_segment_samples_cached(
+    cache: SourceLogSampleCache,
+    spec: SegmentSpec,
+    vehicle: VehicleConfig,
+    max_rows: int,
+) -> Iterator[ReplaySample]:
+    key = segment_sample_key(spec)
+    index = cache.index_for_log(spec.log_path)
+    loaded = cache.read_targeted_segment_samples(
+        spec.log_path,
+        [spec],
+        {key: segment_row_indices(spec, max_rows, len(index.row_offsets))},
+        vehicle,
+    )
+    yield from loaded[key]
 
 
 def representative_row_indices(start_row_index: int, end_row_index: int, max_rows: int) -> set[int] | None:
@@ -1932,6 +2286,8 @@ def read_representative_segment_samples(
         raise ConfigError(f"Input CSV not found: {spec.log_path}")
     target_rows = representative_row_indices(spec.start_row_index, spec.end_row_index, max_rows)
     emitted = 0
+    previous_time_us: int | None = None
+    previous_sample: ReplaySample | None = None
     with spec.log_path.open(newline="", encoding="utf-8-sig") as handle:
         reader = csv.DictReader(handle)
         if not reader.fieldnames:
@@ -1943,10 +2299,92 @@ def read_representative_segment_samples(
                 break
             if target_rows is not None and row_index not in target_rows:
                 continue
-            yield sample_from_row(row, spec, row_index, None, vehicle)
+            sample = sample_from_row(row, spec, row_index, previous_time_us, vehicle, previous_sample)
+            previous_time_us = sample.master_time_us
+            yield sample
+            previous_sample = sample
             emitted += 1
             if target_rows is None and max_rows > 0 and emitted >= max_rows:
                 break
+
+
+def segment_sample_key(segment: SegmentSpec) -> tuple[Path, str, int, int]:
+    return (
+        segment.log_path,
+        segment.segment_id,
+        segment.start_row_index,
+        segment.end_row_index,
+    )
+
+
+def read_representative_samples_by_log(
+    log_path: Path,
+    segments: Sequence[SegmentSpec],
+    vehicle: VehicleConfig,
+    max_rows: int,
+) -> dict[tuple[Path, str, int, int], list[ReplaySample]]:
+    result: dict[tuple[Path, str, int, int], list[ReplaySample]] = {
+        segment_sample_key(segment): [] for segment in segments
+    }
+    selected_segments = sorted(segments, key=lambda segment: segment.start_row_index)
+    if not selected_segments:
+        return result
+    if not log_path.exists():
+        raise ConfigError(f"Input CSV not found: {log_path}")
+
+    target_rows_by_segment = {
+        segment_sample_key(segment): representative_row_indices(
+            segment.start_row_index,
+            segment.end_row_index,
+            max_rows,
+        )
+        for segment in selected_segments
+    }
+    previous_time_by_segment: dict[tuple[Path, str, int, int], int] = {}
+    previous_sample_by_segment: dict[tuple[Path, str, int, int], ReplaySample] = {}
+    pending = deque(selected_segments)
+    active: list[SegmentSpec] = []
+    with log_path.open(newline="", encoding="utf-8-sig") as handle:
+        reader = csv.reader(handle)
+        fieldnames = next(reader, None)
+        if not fieldnames:
+            raise ConfigError(f"CSV header missing: {log_path}")
+        columns = ReplayColumnBinding.from_fieldnames(fieldnames)
+        for row_index, row in enumerate(reader):
+            while pending and pending[0].start_row_index <= row_index:
+                active.append(pending.popleft())
+
+            if not active:
+                if not pending:
+                    break
+                continue
+
+            still_active: list[SegmentSpec] = []
+            for segment in active:
+                key = segment_sample_key(segment)
+                if segment.end_row_index >= 0 and row_index > segment.end_row_index:
+                    continue
+                target_rows = target_rows_by_segment[key]
+                if target_rows is None or row_index in target_rows:
+                    sample = sample_from_bound_row(
+                        row,
+                        columns,
+                        segment,
+                        row_index,
+                        previous_time_by_segment.get(key),
+                        vehicle,
+                        previous_sample_by_segment.get(key),
+                    )
+                    previous_time_by_segment[key] = sample.master_time_us
+                    previous_sample_by_segment[key] = sample
+                    result[key].append(sample)
+                if segment.end_row_index < 0 or row_index < segment.end_row_index:
+                    still_active.append(segment)
+            active = still_active
+
+            if not pending and not active:
+                break
+    return result
 
 
 def estimate_accel_bias_for_log(
@@ -2025,6 +2463,7 @@ def sample_from_row(
     row_index: int,
     previous_time_us: int | None,
     vehicle: VehicleConfig,
+    previous_sample: ReplaySample | None = None,
 ) -> ReplaySample:
     master_time_us = parse_int(csv_value(row, ("master_time_us", "timestamp_us", "time_us")), 0)
     dt_us = parse_float(csv_value(row, ("dt_us",)), math.nan)
@@ -2063,7 +2502,7 @@ def sample_from_row(
     gyro_valid = finite(gyro)
     stage = spec.stage or csv_value(row, ("stage", "section_name", "phase_name")) or "unlabeled"
     run_id = spec.run_id or csv_value(row, ("run_id", "log_id")) or spec.log_path.parent.name
-    return ReplaySample(
+    sample = ReplaySample(
         source_path=spec.log_path,
         source_row_index=row_index,
         master_time_us=master_time_us,
@@ -2087,6 +2526,7 @@ def sample_from_row(
         run_id=run_id,
         corrupted=spec.corrupted,
     )
+    return sample_with_previous_inputs(sample, previous_sample)
 
 
 def bound_csv_value(row: Sequence[str], indices: Sequence[int]) -> str:
@@ -2107,6 +2547,7 @@ def sample_from_bound_row(
     row_index: int,
     previous_time_us: int | None,
     vehicle: VehicleConfig,
+    previous_sample: ReplaySample | None = None,
 ) -> ReplaySample:
     master_time_us = parse_int(bound_csv_value(row, columns.master_time_us), 0)
     dt_us = parse_float(bound_csv_value(row, columns.dt_us), math.nan)
@@ -2139,7 +2580,7 @@ def sample_from_bound_row(
     stage = spec.stage or bound_csv_value(row, columns.stage) or "unlabeled"
     run_id = spec.run_id or bound_csv_value(row, columns.run_id) or spec.log_path.parent.name
 
-    return ReplaySample(
+    sample = ReplaySample(
         source_path=spec.log_path,
         source_row_index=row_index,
         master_time_us=master_time_us,
@@ -2169,6 +2610,20 @@ def sample_from_bound_row(
         run_id=run_id,
         corrupted=spec.corrupted,
     )
+    return sample_with_previous_inputs(sample, previous_sample)
+
+
+def sample_with_previous_inputs(
+    sample: ReplaySample,
+    previous_sample: ReplaySample | None,
+) -> ReplaySample:
+    if previous_sample is None:
+        return sample
+    data = sample.__dict__.copy()
+    data["previous_left_wheel_rate_radps"] = previous_sample.left_wheel_rate_radps
+    data["previous_right_wheel_rate_radps"] = previous_sample.right_wheel_rate_radps
+    data["previous_yaw_rate_radps"] = previous_sample.yaw_rate_radps
+    return ReplaySample(**data)
 
 
 def measured_yaw_accel_from_previous(
@@ -2397,18 +2852,11 @@ def precomputed_aggregate_keys(
         return {}
     result: dict[tuple[str, str, int], tuple[AggregateKey, ...]] = {}
     for candidate in candidates:
-        for log_parameter, dimension in (
-            ("left_encoder_wheel_rate_nis", 1),
-            ("right_encoder_wheel_rate_nis", 1),
-            ("left_encoder_wheel_rate_residual_tail", 1),
-            ("right_encoder_wheel_rate_residual_tail", 1),
-            ("yaw_rate_nis", 1),
-            ("yaw_rate_residual_tail", 1),
-            ("forward_accel_nis", 1),
-            ("forward_accel_residual_tail", 1),
-            ("right_accel_nis", 1),
-            ("right_accel_residual_tail", 1),
+        for log_parameter in (
+            *PRODUCTION_MEASUREMENT_NIS_LOG_PARAMETERS,
+            *PRODUCTION_MEASUREMENT_RESIDUAL_TAIL_LOG_PARAMETERS,
         ):
+            dimension = 1
             keys = tuple(
                 AggregateKey(
                     candidate_id=candidate.candidate_id,
@@ -2801,24 +3249,12 @@ def validation_measurements(
 ) -> tuple[dict[str, float], tuple[float, ...]]:
     plant_result = plant.plant_result(state, sample)
     predictions = {
-        "left_encoder_wheel_rate_nis": predicted_encoder_wheel_rate_radps(
-            state,
-            plant.vehicle,
-            "left",
-        ),
-        "right_encoder_wheel_rate_nis": predicted_encoder_wheel_rate_radps(
-            state,
-            plant.vehicle,
-            "right",
-        ),
         "yaw_rate_nis": state[YAW_RATE],
         "forward_accel_nis": plant_result.imu_forward_accel_mps2,
         "right_accel_nis": plant_result.imu_right_accel_mps2,
     }
     values = (
         predictions["yaw_rate_nis"],
-        predictions["left_encoder_wheel_rate_nis"],
-        predictions["right_encoder_wheel_rate_nis"],
         predictions["forward_accel_nis"],
         predictions["right_accel_nis"],
         plant_result.forward_accel_mps2,
@@ -3118,21 +3554,11 @@ def validate_ukf_sample(
         )
 
     measurement_noise = {
-        "left_encoder_wheel_rate_nis": covariance.measurement.encoder_wheel_rate_sigma_radps**2,
-        "right_encoder_wheel_rate_nis": covariance.measurement.encoder_wheel_rate_sigma_radps**2,
         "yaw_rate_nis": covariance.measurement.yaw_rate_sigma_radps**2,
         "forward_accel_nis": covariance.measurement.accel_sigma_mps2**2,
         "right_accel_nis": covariance.measurement.accel_sigma_mps2**2,
     }
     measurements = {
-        "left_encoder_wheel_rate_nis": (
-            sample.left_wheel_rate_radps,
-            finite(sample.left_wheel_rate_radps),
-        ),
-        "right_encoder_wheel_rate_nis": (
-            sample.right_wheel_rate_radps,
-            finite(sample.right_wheel_rate_radps),
-        ),
         "yaw_rate_nis": (sample.yaw_rate_radps, sample.gyro_valid),
         "forward_accel_nis": (sample.accel_forward_mps2, sample.accel_valid),
         "right_accel_nis": (sample.accel_right_mps2, sample.accel_valid),
@@ -3340,15 +3766,14 @@ def run_ukf_validation(
         path: grouped
         for path, grouped in group_segments_by_log(bias_segments if bias_segments is not None else segments)
     }
-    bias_by_log: dict[Path, SensorBiasEstimate] = {}
     bias_results: list[LogReplayResult] = []
+    samples_by_segment: dict[tuple[Path, str, int, int], list[ReplaySample]] = {}
     for log_path, log_segments in group_segments_by_log(selected_segments):
         estimate = estimate_sensor_bias_for_log(
             log_path,
             bias_groups.get(log_path, log_segments),
             vehicle,
         )
-        bias_by_log[log_path] = estimate
         bias_results.append(
             LogReplayResult(
                 accumulators={},
@@ -3358,18 +3783,30 @@ def run_ukf_validation(
                 log_id=segment_log_id(log_path, log_segments),
             )
         )
+        log_samples = read_representative_samples_by_log(
+            log_path,
+            log_segments,
+            vehicle,
+            max_rows_per_segment,
+        )
+        accel_bias = estimate.accel
+        for segment in log_segments:
+            samples_by_segment[segment_sample_key(segment)] = [
+                replace_sample_accel_bias(sample, accel_bias)
+                for sample in log_samples.get(segment_sample_key(segment), [])
+            ]
     bias_summary_path = write_bias_summary_csv(output_dir, bias_results)
     events: list[dict[str, Any]] = []
     processed_samples = 0
+    candidate_plants = {
+        candidate.candidate_id: CandidatePlant(vehicle, candidate)
+        for candidate in candidates
+    }
     for segment in selected_segments:
-        accel_bias = bias_by_log.get(segment.log_path, SensorBiasEstimate()).accel
-        samples = [
-            replace_sample_accel_bias(sample, accel_bias)
-            for sample in read_representative_segment_samples(segment, vehicle, max_rows_per_segment)
-        ]
+        samples = samples_by_segment.get(segment_sample_key(segment), [])
         processed_samples += len(samples)
         for candidate in candidates:
-            plant = CandidatePlant(vehicle, candidate)
+            plant = candidate_plants[candidate.candidate_id]
             stats = stats_by_candidate[candidate.candidate_id]
             for sample in samples:
                 validate_ukf_sample(
@@ -3483,6 +3920,7 @@ class SegmentRuntime:
     aggregate_keys: dict[tuple[str, str, int], tuple[AggregateKey, ...]]
     previous_time_us: int | None = None
     previous_yaw_rate_radps: float | None = None
+    previous_sample: ReplaySample | None = None
     emitted_samples: int = 0
 
 
@@ -3556,10 +3994,17 @@ def make_candidate_runtime(
     vehicle: VehicleConfig,
     covariance: CovarianceConfig,
     replay_mode: str,
+    candidate_plants: dict[str, CandidatePlant] | None = None,
 ) -> dict[str, tuple[CandidatePlant, EkfReplay | None, list[float]]]:
     runtime: dict[str, tuple[CandidatePlant, EkfReplay | None, list[float]]] = {}
     for candidate in candidates:
-        plant = CandidatePlant(vehicle, candidate)
+        plant = (
+            candidate_plants.get(candidate.candidate_id)
+            if candidate_plants is not None
+            else None
+        )
+        if plant is None:
+            plant = CandidatePlant(vehicle, candidate)
         runtime[candidate.candidate_id] = (
             plant,
             EkfReplay(plant, covariance) if replay_mode == "ekf" else None,
@@ -3716,6 +4161,10 @@ def process_replay_log(
     sorted_segments = sorted(log_segments, key=lambda item: item.start_row_index)
     pending = deque(sorted_segments)
     active: list[SegmentRuntime] = []
+    candidate_plants = {
+        candidate.candidate_id: CandidatePlant(vehicle, candidate)
+        for candidate in candidates
+    }
 
     with log_path.open(newline="", encoding="utf-8-sig") as handle:
         reader = csv.reader(handle)
@@ -3734,6 +4183,7 @@ def process_replay_log(
                             vehicle,
                             covariance,
                             replay_mode,
+                            candidate_plants,
                         ),
                         aggregate_keys=precomputed_aggregate_keys(segment, candidates),
                     )
@@ -3760,6 +4210,7 @@ def process_replay_log(
                         row_index,
                         runtime.previous_time_us,
                         vehicle,
+                        runtime.previous_sample,
                     )
                     sample = replace_sample_accel_bias(sample, accel_bias)
                     measured_yaw_accel = measured_yaw_accel_from_previous(
@@ -3777,12 +4228,11 @@ def process_replay_log(
                             if replay is not None:
                                 plant_before_updates = replay.predict(sample)
                                 updates = [
-                                    replay.update_left_encoder(sample),
-                                    replay.update_right_encoder(sample),
                                     replay.update_yaw_rate(sample),
                                     replay.update_accel_forward(sample),
                                     replay.update_accel_right(sample),
                                 ]
+                                replay.apply_stationary_zlock(sample)
                                 state = replay.state
                                 plant_after_updates = (
                                     replay.plant.plant_result(state, sample)
@@ -3804,34 +4254,6 @@ def process_replay_log(
                                 plant_after_updates = plant.plant_result(state, sample)
                                 plant_before_updates = plant_after_updates
                                 if nis_writer is None and diagnostic_writer is None:
-                                    add_scalar_residual_aggregate(
-                                        accumulators,
-                                        aggregates,
-                                        runtime.aggregate_keys,
-                                        candidate,
-                                        segment,
-                                        sample,
-                                        "left_encoder_wheel_rate_residual_tail",
-                                        sample.left_wheel_rate_radps,
-                                        predicted_encoder_wheel_rate_radps(state, vehicle, "left"),
-                                        measurement.encoder_wheel_rate_sigma_radps**2,
-                                        measurement.encoder_gate_nis,
-                                        finite(sample.left_wheel_rate_radps),
-                                    )
-                                    add_scalar_residual_aggregate(
-                                        accumulators,
-                                        aggregates,
-                                        runtime.aggregate_keys,
-                                        candidate,
-                                        segment,
-                                        sample,
-                                        "right_encoder_wheel_rate_residual_tail",
-                                        sample.right_wheel_rate_radps,
-                                        predicted_encoder_wheel_rate_radps(state, vehicle, "right"),
-                                        measurement.encoder_wheel_rate_sigma_radps**2,
-                                        measurement.encoder_gate_nis,
-                                        finite(sample.right_wheel_rate_radps),
-                                    )
                                     add_scalar_residual_aggregate(
                                         accumulators,
                                         aggregates,
@@ -3930,6 +4352,7 @@ def process_replay_log(
                     runtime.previous_yaw_rate_radps = (
                         sample.yaw_rate_radps if sample.gyro_valid else runtime.previous_yaw_rate_radps
                     )
+                    runtime.previous_sample = sample
                 reached_row_limit = (
                     max_rows_per_segment > 0
                     and runtime.emitted_samples >= max_rows_per_segment
@@ -4120,24 +4543,8 @@ def residual_tail_updates(
     vehicle: VehicleConfig | None = None,
 ) -> list[UpdateResult | None]:
     measurement = covariance.measurement
-    vehicle = vehicle or VehicleConfig()
+    del vehicle
     return [
-        scalar_residual_update(
-            "left_encoder_wheel_rate_residual_tail",
-            sample.left_wheel_rate_radps,
-            predicted_encoder_wheel_rate_radps(state, vehicle, "left"),
-            measurement.encoder_wheel_rate_sigma_radps**2,
-            measurement.encoder_gate_nis,
-            finite(sample.left_wheel_rate_radps),
-        ),
-        scalar_residual_update(
-            "right_encoder_wheel_rate_residual_tail",
-            sample.right_wheel_rate_radps,
-            predicted_encoder_wheel_rate_radps(state, vehicle, "right"),
-            measurement.encoder_wheel_rate_sigma_radps**2,
-            measurement.encoder_gate_nis,
-            finite(sample.right_wheel_rate_radps),
-        ),
         scalar_residual_update(
             "yaw_rate_residual_tail",
             sample.yaw_rate_radps,
@@ -4171,22 +4578,6 @@ def invalid_residual_tail_updates(
 ) -> list[UpdateResult | None]:
     measurement = covariance.measurement
     return [
-        scalar_residual_update(
-            "left_encoder_wheel_rate_residual_tail",
-            sample.left_wheel_rate_radps,
-            math.nan,
-            measurement.encoder_wheel_rate_sigma_radps**2,
-            measurement.encoder_gate_nis,
-            finite(sample.left_wheel_rate_radps),
-        ),
-        scalar_residual_update(
-            "right_encoder_wheel_rate_residual_tail",
-            sample.right_wheel_rate_radps,
-            math.nan,
-            measurement.encoder_wheel_rate_sigma_radps**2,
-            measurement.encoder_gate_nis,
-            finite(sample.right_wheel_rate_radps),
-        ),
         scalar_residual_update(
             "yaw_rate_residual_tail",
             sample.yaw_rate_radps,

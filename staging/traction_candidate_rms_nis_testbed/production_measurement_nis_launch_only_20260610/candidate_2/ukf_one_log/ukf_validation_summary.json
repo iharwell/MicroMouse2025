@@ -1,0 +1,49 @@
+{
+  "bias_segment_manifest": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\representative_corpus\\segment_manifest.json",
+  "bias_summary_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\production_measurement_nis_launch_only_20260610\\candidate_2\\ukf_one_log\\bias_summary.csv",
+  "candidate_summary_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\production_measurement_nis_launch_only_20260610\\candidate_2\\ukf_one_log\\ukf_validation_candidate_summary.csv",
+  "candidates": {
+    "candidate_2_stribeck": {
+      "continuity_failures": 0,
+      "covariance_failures": 0,
+      "finite_failures": 0,
+      "innovation_failures": 0,
+      "issue_count": 0,
+      "max_abs_prediction": 724.529710937782,
+      "max_abs_state": 34.50693375845042,
+      "max_covariance_trace": 15.457950440472299,
+      "max_innovation_nis": 894.2872090241275,
+      "max_measurement_sigma_span": 38.47206728116757,
+      "max_state_sigma_span": 11.841066666666666,
+      "samples": 125088,
+      "segments": 100,
+      "sigma_points": 2376672,
+      "status": "pass",
+      "zero_crossing_events": 181585,
+      "zero_crossing_failures": 0
+    }
+  },
+  "events": [],
+  "events_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\production_measurement_nis_launch_only_20260610\\candidate_2\\ukf_one_log\\ukf_validation_events.csv",
+  "max_rows_per_segment": 0,
+  "passed": true,
+  "processed_samples": 125088,
+  "processed_segments": 100,
+  "report_md": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\production_measurement_nis_launch_only_20260610\\candidate_2\\ukf_one_log\\ukf_validation_report.md",
+  "schema_version": 1,
+  "segment_manifest": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\parallel_replace_20260420_102209_20260610\\ukf_one_log_20260610_070622_active_manifest.json",
+  "sigma_policy": "2N+1 diagonal sigma points from fixed testbed covariance",
+  "sigma_scale": 1.0,
+  "skipped_corrupted_segments": 0,
+  "source_log_count": 1,
+  "thresholds": {
+    "covariance_trace_limit": 10000000000.0,
+    "measurement_sigma_span_limit": 1000000.0,
+    "prediction_abs_limit": 10000000.0,
+    "state_abs_limit": 1000000.0,
+    "state_sigma_span_limit": 100000.0,
+    "zero_crossing_jump_limit": 100000.0
+  },
+  "uses_logged_ukf_state": false,
+  "validation_kind": "diagonal_sigma_point_candidate_plant"
+}

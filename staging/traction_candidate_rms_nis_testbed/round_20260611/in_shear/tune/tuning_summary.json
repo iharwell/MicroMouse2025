@@ -1,0 +1,155 @@
+{
+  "active_metric_weights": {
+    "launch_active_pulse": 1.0,
+    "mixed_launch": 1.0,
+    "yaw_launch": 1.0
+  },
+  "bias_source_manifest_path": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\representative_corpus\\segment_manifest.json",
+  "bootstrap_rows": [],
+  "boundary_policy": "primary_active_rows_before_explicit_corruption_boundaries_are_valid",
+  "candidate_count": 1,
+  "candidate_specific_covariance_or_noise": false,
+  "config_path": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611\\in_shear.json",
+  "covariance_path": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\covariance_conservative.json",
+  "covariance_policy": "fixed_testbed_covariance_not_tuned",
+  "final_samples_per_candidate": 265667,
+  "final_segments": 638,
+  "final_selected_candidate_count": 1,
+  "fixed_noise_schedule_path": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\covariance_conservative.json",
+  "limits": {
+    "final_max_rows_per_segment": 0,
+    "final_max_segments": 0,
+    "launch_weight": 1.0,
+    "stress_max_rows_per_segment": 0,
+    "train_subset_target": 240,
+    "trial_count_per_candidate": 192,
+    "tuning_max_rows_per_segment": 0,
+    "validation_subset_target": 160,
+    "validation_top_k_per_candidate": 12
+  },
+  "manifest_path": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\launch_only_tuning_oscillation_filtered_assessment_20260610\\launch_only_tuning_manifest.json",
+  "primary_metric_policy": "metric_balanced_active_traction_production_measurement_residual_tail_only",
+  "primary_metric_scope": "active_traction_rows",
+  "primary_metric_scope_config": "active",
+  "primary_row_weighted_selection": false,
+  "production_measurement_residual_tail_fields": [
+    "yaw_rate_residual_tail",
+    "forward_accel_residual_tail",
+    "right_accel_residual_tail"
+  ],
+  "production_or_hardware_hooks": false,
+  "replay_mode": "aggregate_only_residual_tail",
+  "sample_source_cache": {
+    "cache_hits": 358,
+    "cache_misses": 638,
+    "cached_samples": 265667,
+    "cached_segments": 638,
+    "loaded_samples": 595922,
+    "source_log_files_read": 26,
+    "source_log_indexed_rows": 1239478,
+    "source_log_indexes_built": 7,
+    "source_log_scan_batches": 4,
+    "streamed_uncached_segments": 638
+  },
+  "schema_version": 1,
+  "selected_trials": [
+    {
+      "candidate_id": "in_shear",
+      "parameters": {
+        "combined_slip_envelope_exponent": 4.841476881277267,
+        "inward_lateral_grip_gain": -0.18118888531762445,
+        "inward_lateral_stiffness_gain": 0.5930909510591121,
+        "inward_shear_blend_speed_mps": 0.057715157155748514,
+        "lateral_slip_gain_n_per_mps": 81.5007086367338,
+        "longitudinal_slip_gain_n_per_mps": 86.62620090310362,
+        "low_speed_blend_mps": 0.10852840342674387,
+        "peak_friction_coefficient_at_80pct_fan": 1.3580431986618031
+      },
+      "train_score": 156.8354615993606,
+      "trial_id": "in_shear:trial_037",
+      "validation_score": 253.99146605889138
+    }
+  ],
+  "source_log_count": 7,
+  "split_counts": [
+    {
+      "family": "launch",
+      "segments": 18,
+      "split": "held_out",
+      "stage": "launch",
+      "total_rows": 4500
+    },
+    {
+      "family": "launch",
+      "segments": 110,
+      "split": "held_out",
+      "stage": "yaw_launch",
+      "total_rows": 27500
+    },
+    {
+      "family": "launch",
+      "segments": 162,
+      "split": "train",
+      "stage": "SEC_20_LAUNCH",
+      "total_rows": 40231
+    },
+    {
+      "family": "launch",
+      "segments": 42,
+      "split": "train",
+      "stage": "launch",
+      "total_rows": 15590
+    },
+    {
+      "family": "launch",
+      "segments": 90,
+      "split": "train",
+      "stage": "mixed_launch",
+      "total_rows": 58691
+    },
+    {
+      "family": "launch",
+      "segments": 98,
+      "split": "train",
+      "stage": "yaw_launch",
+      "total_rows": 116139
+    },
+    {
+      "family": "launch",
+      "segments": 48,
+      "split": "validation",
+      "stage": "SEC_20_LAUNCH",
+      "total_rows": 11936
+    },
+    {
+      "family": "launch",
+      "segments": 12,
+      "split": "validation",
+      "stage": "launch",
+      "total_rows": 6110
+    },
+    {
+      "family": "launch",
+      "segments": 30,
+      "split": "validation",
+      "stage": "mixed_launch",
+      "total_rows": 18572
+    },
+    {
+      "family": "launch",
+      "segments": 28,
+      "split": "validation",
+      "stage": "yaw_launch",
+      "total_rows": 30986
+    }
+  ],
+  "stress_metric_policy": "full_row_weighted_residual_tail_diagnostic_only",
+  "stress_samples_per_candidate": 330255,
+  "stress_segments": 638,
+  "train_subset_boundary_ended_segments": 0,
+  "train_subset_segments": 240,
+  "trial_count": 193,
+  "uses_logged_ukf_state": false,
+  "validation_subset_boundary_ended_segments": 0,
+  "validation_subset_segments": 118
+}

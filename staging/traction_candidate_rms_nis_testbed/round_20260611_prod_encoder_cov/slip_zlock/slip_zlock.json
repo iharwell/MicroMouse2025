@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "description": "TESTBED-ONLY slip_envelope tuned parameters with internal stationary zero-displacement/zero-velocity z-lock pseudo-update. Not production configuration.",
+  "candidate_specific_covariance_or_noise": false,
+  "covariance_config": "staging/traction_candidate_rms_nis_testbed/covariance_conservative.json",
+  "covariance_policy": "fixed_testbed_covariance_not_tuned",
+  "candidates": [
+    {
+      "id": "slip_zlock",
+      "model": "slip_zlock",
+      "label": "slip_zlock testbed-only stationary zero-displacement constraint",
+      "parameters": {
+        "combined_slip_envelope_exponent": 5.410495443316217,
+        "lateral_slip_gain_n_per_mps": 95.30906226734128,
+        "longitudinal_slip_gain_n_per_mps": 87.423645020917,
+        "low_speed_blend_mps": 0.2753939095614226,
+        "peak_friction_coefficient_at_80pct_fan": 1.1091281882474364,
+        "stationary_zlock_enabled": 1.0,
+        "stationary_zlock_window_s": 0.2,
+        "stationary_zlock_command_epsilon": 0.015,
+        "stationary_zlock_wheel_rate_epsilon_radps": 0.02,
+        "stationary_zlock_yaw_rate_epsilon_radps": 0.06,
+        "stationary_zlock_position_sigma_m": 0.00025,
+        "stationary_zlock_velocity_sigma_mps": 0.001,
+        "stationary_zlock_yaw_rate_sigma_radps": 0.003
+      }
+    }
+  ]
+}

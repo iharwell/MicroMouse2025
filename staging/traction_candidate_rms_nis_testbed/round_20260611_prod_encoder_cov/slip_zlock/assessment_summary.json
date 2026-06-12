@@ -1,0 +1,163 @@
+{
+  "encoder_or_zlock_nis_rows": {
+    "static_full_ekf": {},
+    "yaw_launch_boundary": {}
+  },
+  "gating_inputs": "command magnitudes, current/previous wheel rates, gyro validity/rate only; no test stage or labels",
+  "static_full_ekf_slip_envelope_compare": {
+    "dir": "static_slip_envelope_compare",
+    "duration_s": 30.522,
+    "final_radial_m": 0.21837370277719326,
+    "final_x_m": -0.000420032252248,
+    "final_y_m": -0.21837329882,
+    "final_yaw_rad": -0.0177232047685,
+    "max_radial_m": 0.21837370277719326,
+    "max_row": {
+      "master_time_us": 54597412,
+      "ordinal": 30523,
+      "source_row_index": "30522",
+      "x_m": -0.000420032252248,
+      "y_m": -0.21837329882,
+      "yaw_rad": -0.0177232047685
+    },
+    "meets_1to2mm_target": false,
+    "passes_5mm": false,
+    "rows": 30523
+  },
+  "static_full_ekf_zlock": {
+    "dir": "static_full_ekf",
+    "duration_s": 30.522,
+    "final_radial_m": 0.0017024911407098942,
+    "final_x_m": -4.22997539308e-05,
+    "final_y_m": -0.00170196557398,
+    "final_yaw_rad": -0.000343828305972,
+    "max_radial_m": 0.0017026979067424402,
+    "max_row": {
+      "master_time_us": 24285412,
+      "ordinal": 211,
+      "source_row_index": "210",
+      "x_m": -4.22909831246e-05,
+      "y_m": -0.00170217262179,
+      "yaw_rad": -0.000247155825925
+    },
+    "meets_1to2mm_target": true,
+    "passes_5mm": true,
+    "rows": 30523
+  },
+  "static_nis_log_parameter_counts": {
+    "forward_accel_nis": 30523,
+    "right_accel_nis": 30523,
+    "yaw_rate_nis": 30523
+  },
+  "static_prediction_only": {
+    "dir": "static_prediction_only",
+    "duration_s": 30.522,
+    "final_radial_m": 0.0,
+    "final_x_m": 0.0,
+    "final_y_m": 0.0,
+    "final_yaw_rad": 0.0,
+    "max_radial_m": 0.0,
+    "max_row": {
+      "master_time_us": 24075412,
+      "ordinal": 1,
+      "source_row_index": "0",
+      "x_m": 0.0,
+      "y_m": 0.0,
+      "yaw_rad": 0.0
+    },
+    "meets_1to2mm_target": true,
+    "passes_5mm": true,
+    "rows": 30523
+  },
+  "static_requirement": {
+    "duration_requested_s": 30.522,
+    "limit_m": 0.005,
+    "target_m_range": [
+      0.001,
+      0.002
+    ]
+  },
+  "yaw_launch_active_window_diagnostic_comparison_zlock_vs_slip_envelope": {
+    "max_abs_diff": {
+      "heading_rad": 0.0,
+      "predicted_forward_accel_mps2": 0.0,
+      "predicted_right_accel_mps2": 0.0,
+      "predicted_yaw_accel_radps2": 0.0,
+      "px_m": 0.0,
+      "py_m": 0.0,
+      "vf_mps": 0.0,
+      "vr_mps": 0.0,
+      "yaw_rate_radps": 0.0
+    },
+    "rows_compared": 1000
+  },
+  "yaw_launch_active_window_slip_envelope_compare_nis_samples": {
+    "forward_accel_nis": {
+      "accepted": 998,
+      "count": 1000,
+      "finite": 1000,
+      "rejected": 2,
+      "rejected_rate": 0.002,
+      "residual_rms": 3.432101877427857,
+      "rms_nis": 8.048549286239254,
+      "sqrt_mean_nis": 2.4249352178943666
+    },
+    "right_accel_nis": {
+      "accepted": 995,
+      "count": 1000,
+      "finite": 1000,
+      "rejected": 5,
+      "rejected_rate": 0.005,
+      "residual_rms": 2.0110112550629067,
+      "rms_nis": 3.957208940044929,
+      "sqrt_mean_nis": 1.6172193959275438
+    },
+    "yaw_rate_nis": {
+      "accepted": 1000,
+      "count": 1000,
+      "finite": 1000,
+      "rejected": 0,
+      "rejected_rate": 0.0,
+      "residual_rms": 0.14209267069504014,
+      "rms_nis": 7.489901660646653,
+      "sqrt_mean_nis": 2.5018203262443497
+    }
+  },
+  "yaw_launch_active_window_zlock_nis_samples": {
+    "forward_accel_nis": {
+      "accepted": 998,
+      "count": 1000,
+      "finite": 1000,
+      "rejected": 2,
+      "rejected_rate": 0.002,
+      "residual_rms": 3.432101877427857,
+      "rms_nis": 8.048549286239254,
+      "sqrt_mean_nis": 2.4249352178943666
+    },
+    "right_accel_nis": {
+      "accepted": 995,
+      "count": 1000,
+      "finite": 1000,
+      "rejected": 5,
+      "rejected_rate": 0.005,
+      "residual_rms": 2.0110112550629067,
+      "rms_nis": 3.957208940044929,
+      "sqrt_mean_nis": 1.6172193959275438
+    },
+    "yaw_rate_nis": {
+      "accepted": 1000,
+      "count": 1000,
+      "finite": 1000,
+      "rejected": 0,
+      "rejected_rate": 0.0,
+      "residual_rms": 0.14209267069504014,
+      "rms_nis": 7.489901660646653,
+      "sqrt_mean_nis": 2.5018203262443497
+    }
+  },
+  "yaw_launch_nis_log_parameter_counts": {
+    "forward_accel_nis": 1000,
+    "right_accel_nis": 1000,
+    "yaw_rate_nis": 1000
+  }
+}

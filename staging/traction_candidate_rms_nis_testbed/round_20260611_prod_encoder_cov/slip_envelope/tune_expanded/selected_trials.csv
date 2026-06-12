@@ -1,0 +1,2 @@
+candidate_id,trial_id,train_score,validation_score,is_nominal,is_fixed,parameter_json
+candidate_1_algebraic_envelope,candidate_1_algebraic_envelope:nominal,152.157763999,253.904980182,true,false,"{""combined_slip_envelope_exponent"": 5.410495443316217, ""lateral_slip_gain_n_per_mps"": 95.30906226734128, ""longitudinal_slip_gain_n_per_mps"": 87.423645020917, ""low_speed_blend_mps"": 0.2753939095614226, ""peak_friction_coefficient_at_80pct_fan"": 1.1091281882474364}"

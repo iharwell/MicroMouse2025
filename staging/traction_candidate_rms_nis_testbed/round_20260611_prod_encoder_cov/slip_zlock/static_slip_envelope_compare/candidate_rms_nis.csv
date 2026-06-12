@@ -1,0 +1,3 @@
+candidate_id,split,count,sum_nis,sum_nis_sq,rms_nis,sqrt_mean_nis,accepted_count,rejected_count,rejected_rate,rejected_rate_penalty,finite_count,nonfinite_count,accepted_only_sum_nis,accepted_only_sum_nis_sq,accepted_only_rms_nis,accepted_only_sqrt_mean_nis,physical_residual_rms,segment_count
+candidate_1_algebraic_envelope,all,91569,20844.8795067,18332.5813232,0.447442851874,0.477117623766,91569,0,0,0,91569,0,20844.8795067,18332.5813232,0.447442851874,0.477117623766,0.176945321217,1
+candidate_1_algebraic_envelope,held_out,91569,20844.8795067,18332.5813232,0.447442851874,0.477117623766,91569,0,0,0,91569,0,20844.8795067,18332.5813232,0.447442851874,0.477117623766,0.176945321217,1

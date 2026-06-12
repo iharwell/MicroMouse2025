@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Launch-only traction candidate tuning template generated from the 2026-06-10 replacement manifest. Uses fixed covariance/noise and the unchanged representative-corpus bias manifest.",
+  "description": "Launch-only traction candidate tuning template generated from the 2026-06-10 replacement manifest. Uses fixed covariance/noise, the unchanged representative-corpus bias manifest, and production measurement residual-tail score keys only.",
   "manifest_path": "launch_only_tuning_manifest.json",
   "split": {
     "strategy": "source_log_heldout_then_whole_segment",
@@ -44,14 +44,6 @@
       "split": "held_out"
     },
     "log_fields": {
-      "left_encoder_wheel_rate_residual_tail": {
-        "dimension": 1,
-        "weight": 1.0
-      },
-      "right_encoder_wheel_rate_residual_tail": {
-        "dimension": 1,
-        "weight": 1.0
-      },
       "yaw_rate_residual_tail": {
         "dimension": 1,
         "weight": 1.0

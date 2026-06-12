@@ -1,0 +1,2 @@
+log_id,log_path,bias_segment_count,accel_bias_forward_mps2,accel_bias_right_mps2,accel_bias_sample_count,gyro_bias_radps,gyro_bias_sample_count,gyro_bias_source
+mmlog_decode_2026-06-08_23-37-25,C:\Users\thene\source\repos\MicroMouse2025\TestResults\mmlog_decode_2026-06-08_23-37-25\open_floor_main.csv,0,0,0,0,0,0,unavailable

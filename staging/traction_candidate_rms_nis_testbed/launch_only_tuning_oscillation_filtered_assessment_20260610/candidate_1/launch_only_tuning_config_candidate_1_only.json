@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "description": "Candidate 1 only launch-family tuning config copy. Standalone testbed only; not production configuration.",
-  "manifest_path": "launch_only_tuning_manifest.json",
+  "description": "Candidate 1 only launch-family tuning config copy. Standalone testbed only; uses production measurement residual-tail score keys.",
+  "manifest_path": "..\\launch_only_tuning_manifest.json",
   "split": {
     "strategy": "source_log_heldout_then_whole_segment",
     "seed": "traction_fair_tuning_v1",
@@ -44,14 +44,6 @@
       "split": "held_out"
     },
     "log_fields": {
-      "left_encoder_wheel_rate_residual_tail": {
-        "dimension": 1,
-        "weight": 1.0
-      },
-      "right_encoder_wheel_rate_residual_tail": {
-        "dimension": 1,
-        "weight": 1.0
-      },
       "yaw_rate_residual_tail": {
         "dimension": 1,
         "weight": 1.0

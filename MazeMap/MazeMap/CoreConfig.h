@@ -419,7 +419,7 @@ namespace MazeMap::Config
     inline constexpr MazeMap::DriveBaseTrackingTuning kDriveBaseTrackingTuning(
         MazeMap::DriveAxisTrackingTuning(
             0.0f,
-            5.5f,
+            2.35f,
             0.0f),
         MazeMap::DriveAxisTrackingTuning(
             9718.0f,

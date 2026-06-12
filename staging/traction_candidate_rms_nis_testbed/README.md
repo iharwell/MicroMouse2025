@@ -6,16 +6,18 @@ The replay uses sensor and command inputs only. Logged `ukf_state_*` columns may
 
 All replay, tuning, and validation runs use `covariance_conservative.json` as the fixed process-noise and measurement-noise schedule for the holdover and every candidate. Candidate configs must not tune, scale, inflate, or otherwise alter covariance/noise.
 
+For production-equivalent replay, encoder uncertainty is process input uncertainty only. `covariance_conservative.json` carries the production `Estimator` constants `encoder_linear_speed_sigma_mps = 0.021187` and `encoder_yaw_rate_sigma_radps = 0.111268`; replay converts them with the production `PlantModel::encoderPairCovarianceRadps` formula into the full correlated left/right wheel-rate covariance and applies `Q = J * R_wheel * J^T`. Encoder NIS remains excluded from production-equivalent scoring.
+
 Artifacts produced by the tool:
 
-- `nis_samples.csv`: long-form accepted/rejected estimator rows with true EKF NIS where replay mode is `ekf`, including left/right encoder, yaw/gyro, and accelerometer streams.
+- `nis_samples.csv`: long-form accepted/rejected estimator rows with true EKF NIS where replay mode is `ekf`; production-equivalent scoring uses only yaw-rate, forward-accel, and right-accel rows.
 - `residual_diagnostics.csv`: deterministic residual/contact diagnostics, including measured/predicted/residual encoder, yaw-rate, and yaw-accel fields.
 - `summary.json`: per-candidate all-finite ANIS, accepted-only diagnostics, rejected-rate, and physical residual RMS summary.
 - `last_run/trial_plan.csv`: bounded candidate trial grid for the scoring scaffold.
 - `last_run/itemized_rms_nis.csv`: all-finite ANIS itemized by split, stage, log field, parameter field, and launch per-row command bucket.
 - `last_run/candidate_rankings.csv`: ranking output using the configured selection split.
 
-Yaw launch and yaw maneuver sections are primary active calibration data. Stationary/bias rows are itemized separately, and only terminal pickup/runoff/external-force boundary corruption is excluded from scoring. Finite yaw/gyro and encoder NIS rows are always retained in the main score; high NIS is model failure evidence, not sensor corruption. Finite accelerometer NIS rows are also retained in the main all-finite score, with accepted-only accelerometer RMS reported only as a diagnostic.
+Yaw launch and yaw maneuver sections are primary active calibration data. Stationary/bias rows are itemized separately, and only terminal pickup/runoff/external-force boundary corruption is excluded from scoring. The production-equivalent main score uses only `yaw_rate_nis`, `forward_accel_nis`, and `right_accel_nis`. Encoder NIS rows are invalid as production-equivalent evidence; encoder wheel-rate residuals are diagnostics only. Finite accelerometer NIS rows are retained in the main all-finite score, with accepted-only accelerometer RMS reported only as a diagnostic.
 
 Scoring scaffold commands from the repo root:
 
@@ -49,3 +51,5 @@ python Tools\TractionRmsNisTestbed\traction_rms_nis_testbed.py tune --config sta
 ```
 
 See `fair_tuning_plan.md` for the held-out source-log split policy, primary active traction and yaw calibration objective, bootstrap output, and expected files.
+
+Round `round_20260611` prepares candidate-only launch tuning configs for `skew_shear`, `shear_rate`, and `in_shear` using the same fixed covariance, launch-only tuning manifest, oscillation-filtered assessment manifest, and representative-corpus bias manifest. Carry-forward result names are `slip_envelope` for old `candidate_1_algebraic_envelope` and `stribeck_fade` for old `candidate_2_stribeck`; they are not retuned in that round.

@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "description": "Baseline-only holdover candidate config for corrected production-equivalent EKF assessment. No tuning candidates are enabled.",
+  "candidates": [
+    {
+      "id": "baseline/current_holdover",
+      "label": "Baseline/current holdover approximation",
+      "model": "current_holdover_approximation",
+      "enabled": true,
+      "parameters": {
+        "peak_friction_coefficient_at_80pct_fan": 1.65,
+        "longitudinal_slip_gain_n_per_mps": 16.0,
+        "lateral_slip_gain_n_per_mps": 16.0,
+        "combined_slip_envelope_exponent": 2.0,
+        "low_speed_blend_mps": 0.07
+      }
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "description": "Corrected production-equivalent measurement NIS launch-only setup. Long tuning/assessment battery intentionally not run here.",
+  "launch_only_tuning_manifest": "..\\launch_only_tuning_oscillation_filtered_assessment_20260610\\launch_only_tuning_manifest.json",
+  "launch_only_segment_count": 638,
+  "oscillation_filtered_assessment_manifest": "..\\launch_only_tuning_oscillation_filtered_assessment_20260610\\oscillation_filtered_assessment_manifest.json",
+  "assessment_segment_count": 658,
+  "fixed_covariance_config": "..\\covariance_conservative.json",
+  "bias_source_manifest": "..\\representative_corpus\\segment_manifest.json",
+  "production_measurement_nis_fields": [
+    "yaw_rate_nis",
+    "forward_accel_nis",
+    "right_accel_nis"
+  ],
+  "residual_tail_tuning_fields": [
+    "yaw_rate_residual_tail",
+    "forward_accel_residual_tail",
+    "right_accel_residual_tail"
+  ],
+  "encoder_policy": "Encoder rates are consumed as drivetrain prediction/process inputs and may be diagnostic residuals only; encoder NIS is excluded from production-equivalent scoring."
+}

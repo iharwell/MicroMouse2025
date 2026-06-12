@@ -1,0 +1,52 @@
+{
+  "active_sigma_points": 11,
+  "bias_segment_manifest": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\representative_corpus\\segment_manifest.json",
+  "candidate_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611_prod_encoder_cov\\shear_rate\\shear_rate_refined_tuned_only.json",
+  "candidates": {
+    "shear_rate": {
+      "active_sigma_points": 11,
+      "candidate_id": "shear_rate",
+      "factorization_failure_count": 0,
+      "finite": true,
+      "forward_accel_rms_nis": 21.27186532835687,
+      "max_abs_prediction": 380.58845153587595,
+      "max_abs_sigma_prediction": 400.35839664396667,
+      "max_abs_sigma_state": 176.34722297968426,
+      "max_abs_state": 34.243564955053344,
+      "max_covariance_trace": 141.96288738215327,
+      "max_forward_accel_nis": 658.3271037290878,
+      "max_right_accel_nis": 563.5297001794552,
+      "max_yaw_rate_nis": 4913.690590565533,
+      "measurement_update_count": 375264,
+      "prediction_sigma_points": 1375968,
+      "right_accel_rms_nis": 19.50754535899344,
+      "samples": 125088,
+      "segments": 100,
+      "sigma_nonfinite_count": 0,
+      "status": "pass",
+      "yaw_rate_rms_nis": 81.27862612058688
+    }
+  },
+  "covariance_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\covariance_conservative.json",
+  "inputs_json": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611_prod_encoder_cov\\shear_rate\\ukf_one_log\\run_inputs.json",
+  "measurement_policy": "production yaw-rate and planar-accel measurement streams only",
+  "metrics_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611_prod_encoder_cov\\shear_rate\\ukf_one_log\\simplex_ukf_metrics.csv",
+  "passed": true,
+  "processed_samples": 125088,
+  "processed_segments": 100,
+  "report_md": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611_prod_encoder_cov\\shear_rate\\ukf_one_log\\ukf_one_log_simplex_report.md",
+  "row_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611_prod_encoder_cov\\shear_rate\\ukf_one_log\\simplex_ukf_rows.csv",
+  "schema_version": 1,
+  "segment_manifest": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\parallel_replace_20260420_102209_20260610\\ukf_one_log_20260610_070622_active_manifest.json",
+  "selected_log": "mmlog_decode_2026-06-10_07-06-22",
+  "sigma_policy": "production simplex geometry, N+2 active sigma points",
+  "source_log_count": 1,
+  "thresholds": {
+    "covariance_trace_limit": 10000000000.0,
+    "prediction_abs_limit": 10000000.0,
+    "state_abs_limit": 1000000.0
+  },
+  "uses_encoder_nis": false,
+  "uses_logged_ukf_state": false,
+  "validation_kind": "simplex_one_log_candidate_plant"
+}

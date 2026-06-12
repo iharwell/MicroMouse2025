@@ -1,0 +1,134 @@
+{
+  "candidate_specific_covariance_or_noise": false,
+  "candidates": [
+    {
+      "enabled": true,
+      "id": "baseline",
+      "label": "baseline",
+      "model": "current_holdover_approximation",
+      "parameters": {
+        "combined_slip_envelope_exponent": 2.0,
+        "lateral_slip_gain_n_per_mps": 16.0,
+        "longitudinal_slip_gain_n_per_mps": 16.0,
+        "low_speed_blend_mps": 0.07,
+        "peak_friction_coefficient_at_80pct_fan": 1.65
+      }
+    },
+    {
+      "enabled": true,
+      "id": "slip_envelope",
+      "label": "slip_envelope",
+      "model": "algebraic_envelope",
+      "parameters": {
+        "combined_slip_envelope_exponent": 5.645826960231981,
+        "lateral_slip_gain_n_per_mps": 35.16069547272106,
+        "longitudinal_slip_gain_n_per_mps": 33.15800734323761,
+        "low_speed_blend_mps": 0.10996085046880083,
+        "peak_friction_coefficient_at_80pct_fan": 1.2936470429574267
+      }
+    },
+    {
+      "enabled": true,
+      "id": "stribeck_fade",
+      "label": "stribeck_fade",
+      "model": "stribeck_algebraic",
+      "parameters": {
+        "dynamic_to_static_grip_ratio": 0.6174796417814197,
+        "low_speed_blend_mps": 0.04939885104105502,
+        "peak_friction_coefficient_at_80pct_fan": 2.099007388472021,
+        "stribeck_velocity_mps": 0.05769070134608078,
+        "viscous_slip_damping_n_per_mps": 19.968971904309836
+      },
+      "trial_id": "candidate_2_stribeck:trial_188"
+    },
+    {
+      "enabled": true,
+      "id": "in_shear",
+      "label": "in_shear",
+      "model": "in_shear",
+      "parameters": {
+        "combined_slip_envelope_exponent": 4.841476881277267,
+        "inward_lateral_grip_gain": -0.18118888531762445,
+        "inward_lateral_stiffness_gain": 0.5930909510591121,
+        "inward_shear_blend_speed_mps": 0.057715157155748514,
+        "lateral_slip_gain_n_per_mps": 81.5007086367338,
+        "longitudinal_slip_gain_n_per_mps": 86.62620090310362,
+        "low_speed_blend_mps": 0.10852840342674387,
+        "peak_friction_coefficient_at_80pct_fan": 1.3580431986618031
+      }
+    },
+    {
+      "enabled": true,
+      "id": "shear_rate",
+      "label": "shear_rate",
+      "model": "shear_rate",
+      "parameters": {
+        "combined_slip_envelope_exponent": 2.799791426373489,
+        "lateral_slip_gain_n_per_mps": 59.98880432712187,
+        "longitudinal_slip_gain_n_per_mps": 52.97592732737616,
+        "low_speed_blend_mps": 0.06270098670554379,
+        "peak_friction_coefficient_at_80pct_fan": 1.4466505804648273,
+        "shear_rate_activation_mps2": 67.31730936246947,
+        "shear_rate_breakaway_speed_mps": 0.22007916033344904,
+        "shear_rate_peak_force_n": 0.022373710970350933
+      }
+    },
+    {
+      "enabled": true,
+      "id": "skew_shear",
+      "label": "skew_shear",
+      "model": "skew_shear",
+      "parameters": {
+        "combined_slip_envelope_exponent": 3.654993034228337,
+        "lateral_slip_gain_n_per_mps": 31.878740086671762,
+        "longitudinal_slip_gain_n_per_mps": 30.52300901065213,
+        "low_speed_blend_mps": 0.03919833770571529,
+        "peak_friction_coefficient_at_80pct_fan": 1.646637369062744,
+        "shear_activation_speed_mps": 0.08940113584144384,
+        "shear_coupling_gain": -0.40587242805014045,
+        "shear_drive_force_blend_n": 0.0864716755001415
+      }
+    }
+  ],
+  "covariance_policy": "fixed_testbed_covariance_not_tuned",
+  "description": "Yaw-launch signed residual bias analysis candidate config assembled from existing round_20260611 tuned/carry-forward artifacts. Standalone testbed only; no tuning.",
+  "schema_version": 1,
+  "source_map": [
+    {
+      "analysis_id": "baseline",
+      "source_candidate_id": "baseline/current_holdover",
+      "source_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611\\baseline\\baseline_candidate_config.json",
+      "source_model": "current_holdover_approximation"
+    },
+    {
+      "analysis_id": "slip_envelope",
+      "source_candidate_id": "candidate_1_algebraic_envelope",
+      "source_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\production_measurement_nis_launch_only_20260610\\candidate_1\\candidate_1_tuned_only.json",
+      "source_model": "algebraic_envelope"
+    },
+    {
+      "analysis_id": "stribeck_fade",
+      "source_candidate_id": "candidate_2_stribeck",
+      "source_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\production_measurement_nis_launch_only_20260610\\candidate_2\\candidate_2_tuned_only_config.json",
+      "source_model": "stribeck_algebraic"
+    },
+    {
+      "analysis_id": "in_shear",
+      "source_candidate_id": "in_shear",
+      "source_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611\\in_shear\\in_shear_tuned_only_config.json",
+      "source_model": "in_shear"
+    },
+    {
+      "analysis_id": "shear_rate",
+      "source_candidate_id": "shear_rate",
+      "source_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611\\shear_rate\\shear_rate_tuned_only.json",
+      "source_model": "shear_rate"
+    },
+    {
+      "analysis_id": "skew_shear",
+      "source_candidate_id": "skew_shear",
+      "source_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611\\skew_shear\\skew_shear_tuned_only_config.json",
+      "source_model": "skew_shear"
+    }
+  ]
+}

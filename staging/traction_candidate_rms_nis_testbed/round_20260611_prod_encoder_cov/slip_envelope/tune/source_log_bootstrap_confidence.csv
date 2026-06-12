@@ -1,0 +1,1 @@
+candidate_id,trial_id,baseline_candidate_id,baseline_trial_id,split,source_log_count,bootstrap_iterations,observed_delta_vs_baseline,ci_low,ci_high,probability_candidate_better

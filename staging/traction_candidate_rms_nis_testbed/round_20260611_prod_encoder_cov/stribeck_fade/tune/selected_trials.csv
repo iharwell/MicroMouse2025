@@ -1,0 +1,2 @@
+candidate_id,trial_id,train_score,validation_score,is_nominal,is_fixed,parameter_json
+candidate_2_stribeck,candidate_2_stribeck:trial_042,170.811482784,253.472812372,false,false,"{""dynamic_to_static_grip_ratio"": 0.5693935769304257, ""low_speed_blend_mps"": 0.04894609070864059, ""peak_friction_coefficient_at_80pct_fan"": 2.2465453903263963, ""stribeck_velocity_mps"": 0.02574338212170059, ""viscous_slip_damping_n_per_mps"": 16.25051035965962}"

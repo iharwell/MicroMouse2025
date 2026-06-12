@@ -11,13 +11,14 @@ Standalone Python harness for traction-model ANIS and residual work without prod
 - Writes aggregate replay scoring artifacts by default so full-manifest runs do not produce row-scale CSVs.
 - Reports itemized all-finite ANIS by candidate, trial, split, stage, parameter field, log field, and launch per-row command bucket.
 - Keeps rejected finite accelerometer rows in the main ANIS averages and reports accepted-only accel RMS as an explicit diagnostic.
-- Forces yaw/gyro and left/right encoder NIS rows accepted for testbed tuning/evaluation when finite; yaw and encoder gate settings are effectively disabled.
-- Treats high yaw/gyro or encoder NIS as model failure evidence, not sensor corruption.
+- Uses only production measurement NIS rows for production-equivalent scoring: `yaw_rate_nis`, `forward_accel_nis`, and `right_accel_nis`.
+- Treats encoder NIS as invalid production-equivalent evidence; encoder wheel-rate residuals may be inspected only as diagnostics.
 - Estimates accelerometer bias independently from stationary/static/bias assessment rows and applies that correction before replay/tuning evaluation.
 - Keeps yaw launch and yaw maneuver sections as primary active calibration data alongside launches, straight runs, and smooth turns.
 - Reports physical residual RMS for yaw rate, yaw acceleration, forward acceleration, and right acceleration.
 - Rejects NIS CSVs containing logged UKF state columns.
 - For active-only replay or UKF validation, accepts `--bias-segment-manifest` so static/stationary bias assessment can come from the full representative corpus while metrics are computed only over active rows.
+- Registers the 2026-06-11 short-name candidate models `skew_shear`, `shear_rate`, and `in_shear`.
 
 ## Commands
 
@@ -36,13 +37,17 @@ python -m unittest discover Tools\TractionRmsNisTestbed
 
 Default inputs live in `staging/traction_candidate_rms_nis_testbed/`. `score` writes `last_run/`. For the real segment manifest, run `replay` first, then pass the generated `nis_samples.csv` through `--nis-artifact`.
 
-`replay` writes `nis_aggregates.csv`, `itemized_rms_nis.csv`, `candidate_rms_nis.csv`, and `summary.json` by default. EKF replay computes scalar NIS from `H P H^T + R`; aggregate RMS NIS and sqrt(mean NIS) use all finite rows. Accelerometer rejected rows are counted and still remain in the main all-finite average; accepted-only accelerometer RMS is diagnostic. Yaw/gyro and left/right encoder rows are ungated and always accepted when finite. Launch stages are bucketed by per-row command bins. Use `--write-row-artifacts` for small debug runs that also need `nis_samples.csv` and `residual_diagnostics.csv`.
+`replay` writes `nis_aggregates.csv`, `itemized_rms_nis.csv`, `candidate_rms_nis.csv`, and `summary.json` by default. EKF replay computes scalar NIS from `H P H^T + R` for production measurement rows only: yaw rate, forward accel, and right accel. Accelerometer rejected rows are counted and still remain in the main all-finite average; accepted-only accelerometer RMS is diagnostic. Launch stages are bucketed by per-row command bins. Use `--write-row-artifacts` for small debug runs that also need `nis_samples.csv` and `residual_diagnostics.csv`; diagnostics can include encoder wheel-rate residuals, but those are not scored NIS.
 
 The replay state is the theory-spec 9-state body model: `px_m`, `py_m`, `heading_rad`, `vf_mps`, `vr_mps`, `yaw_rate_radps`, `delta_af_mps2`, `delta_ar_mps2`, and `delta_yaw_accel_radps2`. Source CSVs may contain logged `ukf_state_*` columns, but the replay does not read them and its artifacts do not include them.
 
+The production-equivalent EKF process path treats encoder wheel rates as uncertain inputs, not scored measurements. The fixed covariance config uses production `Estimator` constants `encoder_linear_speed_sigma_mps = 0.021187` and `encoder_yaw_rate_sigma_radps = 0.111268`; replay converts them with the production `PlantModel::encoderPairCovarianceRadps` formula into the full correlated left/right wheel-rate covariance and applies `Q = J * R_wheel * J^T`.
+
 `validate-ukf` runs a bounded UKF-relevance check over `staging/traction_candidate_rms_nis_testbed/ukf_validation_5log_manifest.json`. It propagates 2N+1 diagonal sigma points from the fixed covariance through each standalone candidate plant on representative rows, checks finite and continuity behavior, validates covariance/innovation sanity where measurements are available, and probes Vf/yaw-rate zero crossings. It writes `ukf_validation_summary.json`, `ukf_validation_candidate_summary.csv`, `ukf_validation_events.csv`, and `ukf_validation_report.md`.
 
-`tune` runs bounded Latin-hypercube candidate-parameter search. The fair config reserves whole source logs for held-out first, assigns the remaining data by whole segment, selects on metric-balanced active traction, yaw calibration, and encoder residual rows, keeps covariance/noise fixed from the single covariance config for every candidate and holdover, and writes full-row residual-tail diagnostics separately. Yaw calibration rows are primary active data, not stress/outlier buckets. Explicit `accel_valid` or `imu_accel_valid` columns control accelerometer validity; `accel_bias_valid` is retained as metadata only and is not a rejection gate.
+`tune` runs bounded Latin-hypercube candidate-parameter search. The fair config reserves whole source logs for held-out first, assigns the remaining data by whole segment, selects on metric-balanced active traction using only production measurement residual-tail streams, keeps covariance/noise fixed from the single covariance config for every candidate and holdover, and writes full-row residual-tail diagnostics separately. Yaw calibration rows are primary active data, not stress/outlier buckets. Explicit `accel_valid` or `imu_accel_valid` columns control accelerometer validity; `accel_bias_valid` is retained as metadata only and is not a rejection gate.
+
+Round `staging\traction_candidate_rms_nis_testbed\round_20260611` contains candidate-only launch tuning configs for `skew_shear`, `shear_rate`, and `in_shear`. The carry-forward result names are `slip_envelope` for old `candidate_1_algebraic_envelope` and `stribeck_fade` for old `candidate_2_stribeck`; those are result-copy names, not retuning configs in that round.
 
 `replay` and `validate-ukf` write `bias_summary.csv` when run. The bias summary reports the per-log static/stationary accelerometer correction applied to active samples plus the gyro-bias value observed from `raw_gyro - used_gyro` or the logged gyro-bias column.
 
@@ -69,4 +74,4 @@ Optional columns:
 Wide-form CSVs may use `*_nis` columns instead of `log_field,nis`. `last_update_nis` is ignored to avoid double-counting update summaries.
 
 Columns beginning with `ukf_state` or `logged_ukf_state` are rejected. This path must consume measurement residual/NIS artifacts, not logged estimator state.
-Accepted/rejected flags on yaw/gyro and encoder NIS rows are ignored by scoring; finite rows are retained. Accelerometer accepted-only metrics are diagnostic and the main score uses all finite accelerometer NIS.
+Accepted/rejected flags on yaw/gyro NIS rows are ignored by scoring; finite yaw-rate rows are retained. Encoder NIS rows are excluded from production-equivalent scoring. Accelerometer accepted-only metrics are diagnostic and the main score uses all finite accelerometer NIS.

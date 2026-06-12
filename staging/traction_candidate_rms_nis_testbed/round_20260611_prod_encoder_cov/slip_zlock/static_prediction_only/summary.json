@@ -1,0 +1,53 @@
+{
+  "aggregate_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611_prod_encoder_cov\\slip_zlock\\static_prediction_only\\nis_aggregates.csv",
+  "bias_segment_manifest": "",
+  "bias_summary_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611_prod_encoder_cov\\slip_zlock\\static_prediction_only\\bias_summary.csv",
+  "candidate_rms_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611_prod_encoder_cov\\slip_zlock\\static_prediction_only\\candidate_rms_nis.csv",
+  "candidates": {
+    "slip_zlock": {
+      "accepted_count": 91569,
+      "accepted_only_rms_nis": 0.48899733546704166,
+      "accepted_only_sqrt_mean_nis": 0.5008065539472824,
+      "finite_count": 91569,
+      "nis_count": 91569,
+      "nonfinite_count": 0,
+      "rejected_count": 0,
+      "rejected_rate": 0.0,
+      "rejected_rate_penalty": 0.0,
+      "residual_rms": {
+        "forward_accel_mps2": 0.25612502849083746,
+        "right_accel_mps2": 0.17370072715942178,
+        "yaw_accel_radps2": 25.656549463188973,
+        "yaw_rate_radps": 0.02898695898549775
+      },
+      "rms_nis": 0.48899733546704166,
+      "segment_count": 1,
+      "sqrt_mean_nis": 0.5008065539472824
+    }
+  },
+  "diagnostics_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611_prod_encoder_cov\\slip_zlock\\static_prediction_only\\residual_diagnostics.csv",
+  "itemized_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611_prod_encoder_cov\\slip_zlock\\static_prediction_only\\itemized_rms_nis.csv",
+  "jobs_requested": 1,
+  "jobs_used": 1,
+  "nis_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611_prod_encoder_cov\\slip_zlock\\static_prediction_only\\nis_samples.csv",
+  "processed_samples": 30523,
+  "processed_segments": 1,
+  "replay_mode": "residual",
+  "report_md": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611_prod_encoder_cov\\slip_zlock\\static_prediction_only\\report.md",
+  "row_artifacts_enabled": true,
+  "schema_version": 1,
+  "skipped_corrupted_segments": 0,
+  "source_log_count": 1,
+  "state_names": [
+    "px_m",
+    "py_m",
+    "heading_rad",
+    "vf_mps",
+    "vr_mps",
+    "yaw_rate_radps",
+    "delta_af_mps2",
+    "delta_ar_mps2",
+    "delta_yaw_accel_radps2"
+  ],
+  "uses_logged_ukf_state": false
+}

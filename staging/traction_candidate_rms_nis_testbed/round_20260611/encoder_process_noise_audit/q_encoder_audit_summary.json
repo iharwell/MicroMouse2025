@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "segment_id": "ofnis_001617",
+  "segment_stage": "static",
+  "source_log_path": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\TestResults\\mmlog_decode_2026-06-08_23-37-25\\open_floor_main.csv",
+  "segment_start_row_index": 0,
+  "segment_end_row_index": 30522,
+  "sample_count": 30523,
+  "candidate_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611\\static_stability_analysis\\combined_static_candidate_config.json",
+  "covariance_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\covariance_conservative.json",
+  "testbed_independent_encoder_wheel_rate_sigma_radps": 1.0,
+  "production_encoder_linear_speed_sigma_mps": 0.021187,
+  "production_encoder_yaw_rate_sigma_radps": 0.111268,
+  "production_left_right_wheel_rate_covariance_radps2": [
+    [
+      2.9624143598129784,
+      2.6835581039177696
+    ],
+    [
+      2.6835581039177696,
+      2.9624143598129784
+    ]
+  ],
+  "production_finite_difference_step_radps": 0.08605832847280062,
+  "summary_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611\\encoder_process_noise_audit\\q_encoder_summary.csv",
+  "sample_points_csv": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611\\encoder_process_noise_audit\\q_encoder_sample_points.csv",
+  "method": "Per sample/candidate, compute Q_encoder from the pre-predict state, then propagate unperturbed mean. Testbed independent uses sigma=1.0 rad/s and 1e-3 rad/s wheel perturbations. Production correlated uses the production left/right covariance and C++ delta=max(1e-3,0.05*sqrt(wheel variance))."
+}

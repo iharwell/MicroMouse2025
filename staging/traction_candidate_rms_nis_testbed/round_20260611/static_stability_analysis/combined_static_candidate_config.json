@@ -1,0 +1,104 @@
+{
+  "candidate_specific_covariance_or_noise": false,
+  "candidates": [
+    {
+      "enabled": true,
+      "id": "stribeck_fade",
+      "label": "StribeckFade carried-forward tuned",
+      "model": "stribeck_algebraic",
+      "parameters": {
+        "dynamic_to_static_grip_ratio": 0.6174796417814197,
+        "low_speed_blend_mps": 0.04939885104105502,
+        "peak_friction_coefficient_at_80pct_fan": 2.099007388472021,
+        "stribeck_velocity_mps": 0.05769070134608078,
+        "viscous_slip_damping_n_per_mps": 19.968971904309836
+      },
+      "source_candidate_id": "candidate_2_stribeck",
+      "source_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611\\stribeck_fade\\tuned_parameters.json"
+    },
+    {
+      "enabled": true,
+      "id": "slip_envelope",
+      "label": "SlipEnvelope carried-forward tuned",
+      "model": "algebraic_envelope",
+      "parameters": {
+        "combined_slip_envelope_exponent": 5.645826960231981,
+        "lateral_slip_gain_n_per_mps": 35.16069547272106,
+        "longitudinal_slip_gain_n_per_mps": 33.15800734323761,
+        "low_speed_blend_mps": 0.10996085046880083,
+        "peak_friction_coefficient_at_80pct_fan": 1.2936470429574267
+      },
+      "source_candidate_id": "candidate_1_algebraic_envelope",
+      "source_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611\\slip_envelope\\tuned_parameters.json"
+    },
+    {
+      "enabled": true,
+      "id": "in_shear",
+      "label": "InShear tuned trial 037",
+      "model": "in_shear",
+      "parameters": {
+        "combined_slip_envelope_exponent": 4.841476881277267,
+        "inward_lateral_grip_gain": -0.18118888531762445,
+        "inward_lateral_stiffness_gain": 0.5930909510591121,
+        "inward_shear_blend_speed_mps": 0.057715157155748514,
+        "lateral_slip_gain_n_per_mps": 81.5007086367338,
+        "longitudinal_slip_gain_n_per_mps": 86.62620090310362,
+        "low_speed_blend_mps": 0.10852840342674387,
+        "peak_friction_coefficient_at_80pct_fan": 1.3580431986618031
+      },
+      "source_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611\\in_shear\\in_shear_tuned_only_config.json"
+    },
+    {
+      "enabled": true,
+      "id": "shear_rate",
+      "label": "ShearRate launch-only tuned",
+      "model": "shear_rate",
+      "parameters": {
+        "combined_slip_envelope_exponent": 2.799791426373489,
+        "lateral_slip_gain_n_per_mps": 59.98880432712187,
+        "longitudinal_slip_gain_n_per_mps": 52.97592732737616,
+        "low_speed_blend_mps": 0.06270098670554379,
+        "peak_friction_coefficient_at_80pct_fan": 1.4466505804648273,
+        "shear_rate_activation_mps2": 67.31730936246947,
+        "shear_rate_breakaway_speed_mps": 0.22007916033344904,
+        "shear_rate_peak_force_n": 0.022373710970350933
+      },
+      "source_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611\\shear_rate\\shear_rate_tuned_only.json"
+    },
+    {
+      "enabled": true,
+      "id": "skew_shear",
+      "label": "SkewShear launch-only tuned",
+      "model": "skew_shear",
+      "parameters": {
+        "combined_slip_envelope_exponent": 3.654993034228337,
+        "lateral_slip_gain_n_per_mps": 31.878740086671762,
+        "longitudinal_slip_gain_n_per_mps": 30.52300901065213,
+        "low_speed_blend_mps": 0.03919833770571529,
+        "peak_friction_coefficient_at_80pct_fan": 1.646637369062744,
+        "shear_activation_speed_mps": 0.08940113584144384,
+        "shear_coupling_gain": -0.40587242805014045,
+        "shear_drive_force_blend_n": 0.0864716755001415
+      },
+      "source_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611\\skew_shear\\skew_shear_tuned_only_config.json"
+    },
+    {
+      "enabled": true,
+      "id": "baseline",
+      "label": "Baseline/current holdover approximation",
+      "model": "current_holdover_approximation",
+      "parameters": {
+        "combined_slip_envelope_exponent": 2.0,
+        "lateral_slip_gain_n_per_mps": 16.0,
+        "longitudinal_slip_gain_n_per_mps": 16.0,
+        "low_speed_blend_mps": 0.07,
+        "peak_friction_coefficient_at_80pct_fan": 1.65
+      },
+      "source_candidate_id": "baseline/current_holdover",
+      "source_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\round_20260611\\baseline\\baseline_candidate_config.json"
+    }
+  ],
+  "covariance_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\covariance_conservative.json",
+  "description": "Static-only combined candidate config assembled from round_20260611 tuned/carried-forward configs.",
+  "schema_version": 1
+}

@@ -1,0 +1,3 @@
+candidate_id,split,count,sum_nis,sum_nis_sq,rms_nis,sqrt_mean_nis,accepted_count,rejected_count,rejected_rate,rejected_rate_penalty,finite_count,nonfinite_count,accepted_only_sum_nis,accepted_only_sum_nis_sq,accepted_only_rms_nis,accepted_only_sqrt_mean_nis,physical_residual_rms,segment_count
+slip_zlock,all,91569,22966.1649067,21895.8322288,0.488997335467,0.500806553947,91569,0,0,0,91569,0,22966.1649067,21895.8322288,0.488997335467,0.500806553947,0.179454930857,1
+slip_zlock,held_out,91569,22966.1649067,21895.8322288,0.488997335467,0.500806553947,91569,0,0,0,91569,0,22966.1649067,21895.8322288,0.488997335467,0.500806553947,0.179454930857,1

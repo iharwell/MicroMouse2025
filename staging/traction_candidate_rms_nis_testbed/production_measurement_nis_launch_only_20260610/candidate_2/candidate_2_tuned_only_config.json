@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "description": "Candidate 2 tuned-only replay config extracted from candidate_2/tuning/tuned_parameters.json. Baseline is intentionally excluded from live assessment.",
+  "source_tuned_parameters": "staging\\traction_candidate_rms_nis_testbed\\production_measurement_nis_launch_only_20260610\\candidate_2\\tuning\\tuned_parameters.json",
+  "covariance_policy": "fixed_testbed_covariance_not_tuned",
+  "candidate_specific_covariance_or_noise": false,
+  "candidates": [
+    {
+      "id": "candidate_2_stribeck",
+      "label": "Candidate 2 Stribeck tuned trial 188",
+      "model": "stribeck_algebraic",
+      "trial_id": "candidate_2_stribeck:trial_188",
+      "parameters": {
+        "dynamic_to_static_grip_ratio": 0.6174796417814197,
+        "low_speed_blend_mps": 0.04939885104105502,
+        "peak_friction_coefficient_at_80pct_fan": 2.099007388472021,
+        "stribeck_velocity_mps": 0.05769070134608078,
+        "viscous_slip_damping_n_per_mps": 19.968971904309836
+      }
+    }
+  ]
+}

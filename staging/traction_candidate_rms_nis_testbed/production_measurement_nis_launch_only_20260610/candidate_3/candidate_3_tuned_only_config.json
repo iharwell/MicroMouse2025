@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "description": "Candidate 3 launch-only tuned EKF replay config. Standalone testbed only; not production configuration.",
+  "source_tuned_parameters": "staging/traction_candidate_rms_nis_testbed/production_measurement_nis_launch_only_20260610/candidate_3/tuning/tuned_parameters.json",
+  "covariance_config": "staging/traction_candidate_rms_nis_testbed/covariance_conservative.json",
+  "covariance_policy": "fixed_testbed_covariance_not_tuned",
+  "candidate_specific_covariance_or_noise": false,
+  "candidates": [
+    {
+      "id": "candidate_3_load_sensitive",
+      "label": "Candidate 3 load-sensitive launch-only tuned",
+      "model": "load_sensitive_anisotropic",
+      "enabled": true,
+      "parameters": {
+        "lateral_load_sensitivity": 0.327290064992592,
+        "lateral_slip_gain_n_per_mps": 24.695725146213764,
+        "longitudinal_load_sensitivity": 0.2980636468680996,
+        "longitudinal_slip_gain_n_per_mps": 25.560975712043764,
+        "low_speed_blend_mps": 0.026906575566924003,
+        "peak_friction_coefficient_at_80pct_fan": 2.8951939005588283,
+        "yaw_coupling_gain": 0.07967341087798074
+      },
+      "trial_id": "candidate_3_load_sensitive:trial_133"
+    }
+  ]
+}

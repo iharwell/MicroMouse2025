@@ -1,0 +1,24 @@
+{
+  "candidate_specific_covariance_or_noise": false,
+  "candidates": [
+    {
+      "id": "in_shear",
+      "model": "in_shear",
+      "parameters": {
+        "combined_slip_envelope_exponent": 4.841476881277267,
+        "inward_lateral_grip_gain": -0.18118888531762445,
+        "inward_lateral_stiffness_gain": 0.5930909510591121,
+        "inward_shear_blend_speed_mps": 0.057715157155748514,
+        "lateral_slip_gain_n_per_mps": 81.5007086367338,
+        "longitudinal_slip_gain_n_per_mps": 86.62620090310362,
+        "low_speed_blend_mps": 0.10852840342674387,
+        "peak_friction_coefficient_at_80pct_fan": 1.3580431986618031
+      },
+      "trial_id": "in_shear:trial_037"
+    }
+  ],
+  "covariance_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\covariance_conservative.json",
+  "covariance_policy": "fixed_testbed_covariance_not_tuned",
+  "description": "Standalone traction residual-tail tuned candidate parameters. Not production configuration.",
+  "schema_version": 1
+}

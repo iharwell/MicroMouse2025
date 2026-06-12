@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "description": "Round 2026-06-11 short-name traction model setup. Long tuning and assessment battery intentionally not run here.",
+  "launch_only_tuning_manifest": "..\\launch_only_tuning_oscillation_filtered_assessment_20260610\\launch_only_tuning_manifest.json",
+  "oscillation_filtered_assessment_manifest": "..\\launch_only_tuning_oscillation_filtered_assessment_20260610\\oscillation_filtered_assessment_manifest.json",
+  "fixed_covariance_config": "..\\covariance_conservative.json",
+  "bias_source_manifest": "..\\representative_corpus\\segment_manifest.json",
+  "new_candidate_tuning_configs": {
+    "skew_shear": "skew_shear.json",
+    "shear_rate": "shear_rate.json",
+    "in_shear": "in_shear.json"
+  },
+  "tuned_output_dirs": {
+    "skew_shear": "skew_shear",
+    "shear_rate": "shear_rate",
+    "in_shear": "in_shear"
+  },
+  "carry_forward_results": {
+    "slip_envelope": "Copy corrected production-measurement results from old candidate_1_algebraic_envelope.",
+    "stribeck_fade": "Copy corrected production-measurement results from old candidate_2_stribeck."
+  },
+  "production_measurement_nis_fields": [
+    "yaw_rate_nis",
+    "forward_accel_nis",
+    "right_accel_nis"
+  ],
+  "residual_tail_tuning_fields": [
+    "yaw_rate_residual_tail",
+    "forward_accel_residual_tail",
+    "right_accel_residual_tail"
+  ],
+  "encoder_policy": "Encoder rates are drivetrain prediction inputs and diagnostic residuals only; encoder NIS is excluded from production-equivalent scoring."
+}

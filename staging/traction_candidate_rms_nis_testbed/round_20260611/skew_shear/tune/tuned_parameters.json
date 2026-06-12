@@ -1,0 +1,24 @@
+{
+  "candidate_specific_covariance_or_noise": false,
+  "candidates": [
+    {
+      "id": "skew_shear",
+      "model": "skew_shear",
+      "parameters": {
+        "combined_slip_envelope_exponent": 3.654993034228337,
+        "lateral_slip_gain_n_per_mps": 31.878740086671762,
+        "longitudinal_slip_gain_n_per_mps": 30.52300901065213,
+        "low_speed_blend_mps": 0.03919833770571529,
+        "peak_friction_coefficient_at_80pct_fan": 1.646637369062744,
+        "shear_activation_speed_mps": 0.08940113584144384,
+        "shear_coupling_gain": -0.40587242805014045,
+        "shear_drive_force_blend_n": 0.0864716755001415
+      },
+      "trial_id": "skew_shear:trial_149"
+    }
+  ],
+  "covariance_config": "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\staging\\traction_candidate_rms_nis_testbed\\covariance_conservative.json",
+  "covariance_policy": "fixed_testbed_covariance_not_tuned",
+  "description": "Standalone traction residual-tail tuned candidate parameters. Not production configuration.",
+  "schema_version": 1
+}
